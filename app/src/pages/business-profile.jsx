@@ -115,7 +115,7 @@ const BusinessProfilePage = ({ setSiteSection }) => {
           country: response.data["urn:scim:wso2:schema"].country || "",
           birthdate: response.data["urn:scim:wso2:schema"].dateOfBirth || "",
           picture: response.data.picture || "",
-          role: response.data.roles[0] || "N/A"
+          role: response.data.roles[0].display || "N/A"
         });
       }
       return;
@@ -135,7 +135,7 @@ const BusinessProfilePage = ({ setSiteSection }) => {
       {isIdentityVerificationEnabled && <IdentityVerificationStatus />}
       <section className="about_section layout_padding">
         <div className="container-fluid">
-          {userInfo && userInfo.role === ROLES.BUSINESS_ADMINISTRATOR ? (
+          {userInfo && [ ROLES.MEMBER, ROLES.MANAGER, ROLES.AUDITOR ].includes(userInfo.role) ? (
             <BusinessMemberContent setSiteSection={ setSiteSection } role={userInfo.role}/>
           ) : (
             <>

@@ -42,8 +42,7 @@ export const ACCOUNT_TYPES = {
 export const ROLES = {
     MEMBER: "Member",
     MANAGER: "Manager",
-    AUDITOR: "Auditor",
-    BUSINESS_ADMINISTRATOR: "Business Administrator"
+    AUDITOR: "Auditor"
 }
 
 export const URL_QUERY_PARAMS = {
