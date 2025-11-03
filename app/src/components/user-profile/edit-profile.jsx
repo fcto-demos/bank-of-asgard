@@ -78,12 +78,15 @@ const EditProfile = ({ userInfo, onUpdateSuccess, onCancel }) => {
         valuePayload.phoneNumbers = [{ type: "mobile", value: formData.mobile }];
       }
 
+      const scimWso2Schema = {};
       if (formData.dob.trim() !== "") {
-        valuePayload["urn:scim:wso2:schema"] = { dateOfBirth: formData.dob };
+        scimWso2Schema.dateOfBirth = formData.dob;
       }
-
       if (formData.country.trim() !== "") {
-        valuePayload["urn:scim:wso2:schema"] = { country: formData.country };
+        scimWso2Schema.country = formData.country;
+      }
+      if (Object.keys(scimWso2Schema).length > 0) {
+        valuePayload["urn:scim:wso2:schema"] = scimWso2Schema;
       }
 
       if (Object.keys(valuePayload).length > 0) {

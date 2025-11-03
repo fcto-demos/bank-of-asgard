@@ -121,10 +121,10 @@ const App = () => {
                 <div className="collapse navbar-collapse ml-auto" id="navbarSupportedContent">
                   <ul className="navbar-nav">
                     <li className="nav-item">
-                      <NavLink to={ ROUTES.PERSONAL_BANKING } className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+                      <a className="nav-link" href="">
                         Everyday Banking
                         <span>Accounts & Credit Cards</span>
-                      </NavLink>
+                        </a>
                     </li>
                     <li className="nav-item">
                       <a className="nav-link" href="">
