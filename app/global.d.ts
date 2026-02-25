@@ -24,6 +24,30 @@ interface Window {
     DISABLED_FEATURES: string[];
     TRANSFER_THRESHOLD: number;
     IDENTITY_VERIFICATION_PROVIDER_ID: string;
-    IDENTITY_VERIFICATION_CLAIMS: string[]
+    IDENTITY_VERIFICATION_CLAIMS: string[];
+    TRANSACTIONS_AGENT_URL: string;
+    DEMO_USERS?: {
+      personal?: {
+        firstName?: string;
+        lastName?: string;
+        username?: string;
+        email?: string;
+        password?: string;
+        dateOfBirth?: string;
+        country?: string;
+        mobile?: string;
+      };
+      business?: {
+        firstName?: string;
+        lastName?: string;
+        username?: string;
+        email?: string;
+        password?: string;
+        dateOfBirth?: string;
+        country?: string;
+        mobile?: string;
+        businessName?: string;
+      };
+    };
   }
 }

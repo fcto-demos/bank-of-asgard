@@ -1,0 +1,13 @@
+# LLM provider configuration for Bank of Asgard AI agents.
+#
+# provider: openai | gemini | anthropic
+# model:    override the default model for the chosen provider
+#           (comment out to use the built-in default)
+#
+# Defaults per provider:
+#   openai:    gpt-4o-mini
+#   gemini:    gemini-2.5-flash-lite
+#   anthropic: claude-sonnet-4-5-20250929
+
+provider: openai
+# model: gpt-4o-mini

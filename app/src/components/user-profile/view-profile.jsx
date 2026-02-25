@@ -17,11 +17,15 @@
  */
 
 import PropTypes from "prop-types";
+import { useNavigate } from "react-router";
 import AccountSecurityCard from "./account-security-card";
 import UserProfileCard from "./view/user-profile-card";
 import BankAccountCard from "./view/bank-account-card";
+import { ROUTES } from "../../constants/app-constants";
 
 const ViewProfile = ({ userInfo, setShowEditForm }) => {
+  const navigate = useNavigate();
+
   return (
     <>
       <div className="heading_container">
@@ -47,6 +51,23 @@ const ViewProfile = ({ userInfo, setShowEditForm }) => {
             username={userInfo.username}
             accountType={userInfo.accountType}
           />
+
+          <div className="detail-box user-profile" style={{ marginTop: "15px" }}>
+            <div className="contact_section">
+              <div className="contact_form-container profile-edit">
+                <h5>Transaction Assistant</h5>
+                <p style={{ fontSize: "14px", color: "#666", marginBottom: "10px" }}>
+                  Review your transaction history and get AI-powered spending insights.
+                </p>
+                <button
+                  className="edit-button"
+                  onClick={() => navigate(ROUTES.TRANSACTIONS)}
+                >
+                  Open Transaction Assistant
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </>

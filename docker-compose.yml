@@ -1,0 +1,30 @@
+networks:
+  bank-network:
+    driver: bridge
+
+services:
+  transactions-api:
+    build:
+      context: ./transactions-api
+      dockerfile: Dockerfile
+    container_name: bank-transactions-api
+    ports:
+      - "8010:8010"
+    env_file: ./transactions-api/.env
+    networks:
+      - bank-network
+
+  transactions-agent:
+    build:
+      context: ./transactions-agent
+      dockerfile: Dockerfile
+    container_name: bank-transactions-agent
+    ports:
+      - "8011:8011"
+    env_file: ./transactions-agent/.env
+    volumes:
+      - ~/podman_share/llm_config.yaml:/app/llm_config.yaml:ro,z
+    networks:
+      - bank-network
+    depends_on:
+      - transactions-api

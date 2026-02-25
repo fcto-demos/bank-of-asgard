@@ -30,7 +30,9 @@ export const environmentConfig = {
   DISABLED_FEATURES: window.config && window.config.DISABLED_FEATURES,
   TRANSFER_THRESHOLD: window.config && window.config.TRANSFER_THRESHOLD || 10000,
   IDENTITY_VERIFICATION_PROVIDER_ID: window.config && window.config.IDENTITY_VERIFICATION_PROVIDER_ID,
-  IDENTITY_VERIFICATION_CLAIMS: window.config && window.config.IDENTITY_VERIFICATION_CLAIMS
+  IDENTITY_VERIFICATION_CLAIMS: window.config && window.config.IDENTITY_VERIFICATION_CLAIMS,
+  TRANSACTIONS_AGENT_URL: window.config && window.config.TRANSACTIONS_AGENT_URL,
+  DEMO_USERS: window.config && window.config.DEMO_USERS
 };
 
 /**

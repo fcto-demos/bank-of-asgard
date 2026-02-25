@@ -22,7 +22,7 @@ import axios from "axios";
 import pino from "pino";
 
 import { getAccessToken, requireBearer } from "./middleware/auth.js";
-import { addUserToAdminRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
+import { addUserToAdminRole, addUserToRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getRoleIdByName, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
 import { agent, ASGARDEO_BASE_URL, ASGARDEO_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, USER_STORE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
 
 const corsOptions = {
@@ -75,12 +75,16 @@ async function createUser(userData) {
     dateOfBirth,
     mobile,
   } = userData;
-  console.log(`Creating ${accountType} user`)
+  logger.info({ username, accountType, email }, "createUser: starting");
 
   const token = await getAccessToken();
+  logger.debug("createUser: access token acquired");
+
+  const scimUrl = `${ASGARDEO_BASE_URL_SCIM2}/Users`;
+  logger.debug({ url: scimUrl, username, accountType }, "createUser: calling SCIM2 Users API");
 
   const response = await axios.post(
-    `${ASGARDEO_BASE_URL_SCIM2}/Users`,
+    scimUrl,
     {
       schemas: [],
       userName: `${USER_STORE_NAME}/${username}`,
@@ -107,7 +111,7 @@ async function createUser(userData) {
       ],
       "urn:scim:schemas:extension:custom:User": {
         accountType: accountType,
-        ...(businessName ? { businessName } : {}), 
+        ...(businessName ? { businessName } : {}),
       },
     },
     {
@@ -115,9 +119,10 @@ async function createUser(userData) {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      httpsAgent: agent, // Attach the custom agents
+      httpsAgent: agent,
     }
   );
+  logger.info({ userId: response.data?.id, username, status: response.status }, "createUser: user created successfully");
   return response;
 };
 
@@ -125,19 +130,37 @@ app.post("/signup", async (req, res) => {
   try {
     const response = await createUser(req.body);
     res.json({ message: "User registered successfully", data: response.data });
+
+    // Asynchronously assign the Read_Transactions role so the user can use the agent without manual setup
+    const userId = response.data?.id;
+    if (userId) {
+      try {
+        const roleId = await getRoleIdByName("Read_Transactions");
+        await addUserToRole(roleId, userId);
+        logger.info({ userId }, "POST /signup: user assigned to Read_Transactions role");
+      } catch (roleError) {
+        logger.warn({ userId, message: roleError.message }, "POST /signup: failed to assign Read_Transactions role");
+      }
+    }
   } catch (error) {
-    console.log("SCIM2 API Error:", error.detail || error.message);
-    res.status(400).json({ error: error.detail || "Signup failed" });
+    const asgardeoError = error.response?.data;
+    logger.error({
+      status: error.response?.status,
+      asgardeoError,
+      message: error.message,
+    }, "POST /signup failed");
+    res.status(error.response?.status || 400).json({ error: asgardeoError || error.message || "Signup failed" });
   }
 });
 
 app.post("/business-signup", async (req, res) => {
   try {
-    const { businessName } = req.body;
-    const { username } = req.body;
+    const { businessName, username } = req.body;
+    logger.info({ businessName, username }, "POST /business-signup: started");
 
     const available = await isBusinessNameAvailable(businessName);
     if (!available) {
+      logger.warn({ businessName }, "POST /business-signup: business name already taken");
       return res.status(400).json({ error: "Business name is already taken" });
     }
 
@@ -149,16 +172,26 @@ app.post("/business-signup", async (req, res) => {
     });
 
     const creatorId = userResponse.data.id;
+    logger.debug({ creatorId, businessName }, "POST /business-signup: creating organization");
     const orgResponse = await createOrganization(businessName, creatorId, username);
     const organizationId = orgResponse.data.id;
-    
+    logger.debug({ organizationId }, "POST /business-signup: organization created");
+
     const orgUserId = await getUserIdInOrganization(organizationId, username);
+    logger.debug({ orgUserId }, "POST /business-signup: resolved org user ID");
     const adminRoleId = await getAdminRoleIdInOrganization(organizationId);
+    logger.debug({ adminRoleId }, "POST /business-signup: resolved admin role ID");
     addUserToAdminRole(organizationId, adminRoleId, orgUserId);
+    logger.info({ organizationId, orgUserId }, "POST /business-signup: user assigned to admin role");
   } catch (error) {
-    console.log(error)
-    console.error("Business signup error:", error.message);
-    res.status(400).json({ error: "Business signup failed" });
+    const asgardeoError = error.response?.data;
+    logger.error({
+      status: error.response?.status,
+      asgardeoError,
+      message: error.message,
+      stack: error.stack,
+    }, "POST /business-signup failed");
+    res.status(error.response?.status || 400).json({ error: asgardeoError || error.message || "Business signup failed" });
   }
 });
 

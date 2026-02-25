@@ -140,6 +140,55 @@ export async function addUserToAdminRole(organizationId, roleId, userId) {
   return response.data;
 }
 
+export async function getRoleIdByName(roleName) {
+
+  const token = await getAccessToken();
+  const response = await axios.get(
+    `${ASGARDEO_BASE_URL}/scim2/v2/Roles`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      params: {
+        filter: `displayName eq ${roleName}`,
+      },
+      httpsAgent: agent,
+    }
+  );
+  const resources = response.data.Resources || [];
+  if (resources.length === 0) {
+    throw new Error(`Role '${roleName}' not found`);
+  }
+  return resources[0].id;
+}
+
+export async function addUserToRole(roleId, userId) {
+
+  const token = await getAccessToken();
+  const response = await axios.patch(
+    `${ASGARDEO_BASE_URL}/scim2/v2/Roles/${roleId}`,
+    {
+      Operations: [
+        {
+          op: "add",
+          path: "users",
+          value: [{ value: userId }],
+        },
+      ],
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      httpsAgent: agent,
+    }
+  );
+  return response.data;
+}
+
 export async function getOrganizationId(organizationName) {
   
   const token = await getAccessToken();

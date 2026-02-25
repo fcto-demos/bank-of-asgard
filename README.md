@@ -13,7 +13,7 @@
   * Add authorize redirect URL: `http://localhost:5173` and allowed origin: `http://localhost:5173`
   * Add the `mobile`, `country`, `email` and `accountType` to Profile scope navigating to `User Attributes & Stores` -> `Attributes` -> `OpenId Connect` -> `Scopes` -> `Profile` -> `New Attribute`.
   * Enable the following scopes and attributes within the client application created.  
-    * `Profile - Country, First Name, Last Name, Username, Birth Date, AccountType, Business Name, Email; Email - email;  Phone - telephone; Address - country.`
+    * `Profile - Coun try, First Name, Last Name, Username, Birth Date, AccountType, Business Name, Email; Email - email;  Phone - telephone; Address - country.`
 6. Enable the following authenticators within the client application:
   * `Identifier First` - First Step
   * `Username and Password`, `Passkey` - Second Step

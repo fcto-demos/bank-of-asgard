@@ -21,7 +21,7 @@ import https from "https";
 
 dotenv.config();
 
-export const PORT = process.env.PORT || 5000;
+export const PORT = process.env.PORT || 6000;
 export const HOST = process.env.HOST || "localhost";
 export const ASGARDEO_BASE_URL = process.env.ASGARDEO_BASE_URL;
 export const CLIENT_ID = process.env.SERVER_APP_CLIENT_ID;

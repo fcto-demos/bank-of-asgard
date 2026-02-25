@@ -31,27 +31,33 @@ const SignUpForm = ({ accountType, extraFields = [], endpoint = "signup" }) => {
   const { enqueueSnackbar } = useSnackbar();
 
   const [signupData, setSignupData] = useState(() => {
+    const presetKey = endpoint === "business-signup" ? "business" : "personal";
+    const preset = environmentConfig.DEMO_USERS?.[presetKey] || {};
+
     const initial = {
-      firstName: "",
-      lastName: "",
-      dateOfBirth: "",
-      country: "",
-      username: "",
-      password: "",
-      email: "",
-      mobile: "",
+      firstName: preset.firstName || "",
+      lastName: preset.lastName || "",
+      dateOfBirth: preset.dateOfBirth || "",
+      country: preset.country || "",
+      username: preset.username || "",
+      password: preset.password || "",
+      email: preset.email || "",
+      mobile: preset.mobile || "",
       accountType: accountType,
     };
 
     extraFields.forEach(field => {
-      initial[field.name] = "";
+      initial[field.name] = preset[field.name] || "";
     });
 
     return initial;
   });
 
   const [passwordValidationRules, setPasswordValidationRules] = useState({});
-  const [isNewPasswordValid, setIsNewPasswordValid] = useState(false);
+  const [isNewPasswordValid, setIsNewPasswordValid] = useState(() => {
+    const presetKey = endpoint === "business-signup" ? "business" : "personal";
+    return !!(environmentConfig.DEMO_USERS?.[presetKey]?.password);
+  });
 
   useEffect(() => {
     getPasswordPolicy()

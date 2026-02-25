@@ -39,6 +39,7 @@ import IdentityVerificationPage from "./pages/identity-verification";
 import { IdentityVerificationProvider } from "./context/identity-verification-provider";
 import { Dropdown, DropdownButton } from "react-bootstrap";
 import BusinessProfilePage from "./pages/business-profile";
+import TransactionsPage from "./pages/transactions";
 import { CircularProgress } from "@mui/material";
 
 const App = () => {
@@ -188,6 +189,9 @@ const App = () => {
         }
         { isSignedIn &&
           <Route path={ ROUTES.BUSINESS_PROFILE } element={ <BusinessProfilePage setSiteSection={ setSiteSection } /> } />
+        }
+        { isSignedIn &&
+          <Route path={ ROUTES.TRANSACTIONS } element={ <TransactionsPage /> } />
         }
         {/* <Route path="/" element={ <Navigate to={ ROUTES.PERSONAL_BANKING } setSiteSection={ setSiteSection } /> } /> */}
         <Route path="/" element={
