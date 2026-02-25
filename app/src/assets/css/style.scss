@@ -32,8 +32,9 @@ $successColor: #1e7e34;
   padding: $pad1 $pad2;
   background-color: $col1;
   color: $col2;
-  transition: all 0.3s;
+  transition: background-color 0.22s ease, color 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
   border: 1px solid transparent;
+  letter-spacing: 0.04em;
 
   &:hover {
     background-color: transparent;
@@ -48,10 +49,16 @@ $successColor: #1e7e34;
   font-weight: bold;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   @include main-font;
   color: #0c0c0c;
   background-color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button {
@@ -165,6 +172,12 @@ button {
   padding: 4px 20px !important;
   display: inline-block;
   border-radius: 0;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background-color: color.scale($primary2, $lightness: -12%) !important;
+    color: $white !important;
+  }
 }
 
 #dropdown-custom-components {
@@ -237,15 +250,16 @@ button {
 
   h2 {
     position: relative;
-    font-weight: bold;
+    font-weight: 700;
     text-transform: uppercase;
-    padding-bottom: 10px;
+    padding-bottom: 12px;
+    letter-spacing: 0.05em;
 
     &::before {
       content: "";
-      width: 40px;
-      height: 7px;
-      background-color: $primary2;
+      width: 52px;
+      height: 3px;
+      background: linear-gradient(to right, $primary2, color.scale($primary2, $lightness: 22%));
       border-radius: 10px;
       position: absolute;
       bottom: 0;
@@ -326,8 +340,11 @@ button {
 
 .header_section {
   padding: 0;
-  box-shadow: #dadada 0 1px 5px;
+  box-shadow: 0 1px 0 rgba(0,0,0,.06), 0 2px 16px rgba(0,0,0,.06);
   color: $white;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
 
   .container-fluid {
     padding-right: 25px;
@@ -381,11 +398,25 @@ button {
     .nav-item {
       .nav-link {
         padding: 0;
-        padding: 30px 20px 25px 20px;
+        padding: 30px 20px 22px 20px;
         color: $black;
         text-align: left;
         text-transform: uppercase;
-        transition: all .2s;
+        transition: color .2s ease;
+        position: relative;
+
+        &::after {
+          content: "";
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          height: 3px;
+          background-color: $primary2;
+          transform: scaleX(0);
+          transform-origin: left center;
+          transition: transform .22s ease;
+        }
 
         & > span {
           display: block;
@@ -395,8 +426,12 @@ button {
 
       &:hover .nav-link,
       & .nav-link.active {
-        color: $white;
-        background-color: $primary1;
+        color: $primary2;
+        background-color: transparent;
+
+        &::after {
+          transform: scaleX(1);
+        }
       }
     }
   }
@@ -635,24 +670,31 @@ a:focus {
 
     ul.accounts-list {
       list-style: none;
-      margin: 30px 0 0;
+      margin: 24px 0 0;
       padding: 0;
 
       & > li {
-        margin-bottom: 20px;
+        margin-bottom: 0;
+        padding: 14px 0;
+        border-bottom: 1px solid rgba($black, .06);
+
+        &:last-child {
+          border-bottom: none;
+        }
 
         & > .row > .col-md-4:last-child {
           text-align: right;
+          font-weight: 600;
         }
 
         span {
           font-weight: normal;
           font-style: normal;
-          font-size: 14px;
-          color: color.scale($black, $lightness: 60%);
+          font-size: 13px;
+          color: color.scale($black, $lightness: 55%);
 
           i.fa {
-            margin-right: 10px;
+            margin-right: 8px;
           }
         }
       }
@@ -671,9 +713,10 @@ a:focus {
   .detail-box {
     background-color: $white;
     padding: 50px;
-    box-shadow: 0 0 5px 0 rgba($color: #000000, $alpha: .15);
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 24px rgba(0,0,0,.07);
     position: relative;
     margin-top: 25px;
+    transition: box-shadow 0.25s ease;
 
     p {
       margin-top: 5px;
@@ -685,15 +728,17 @@ a:focus {
     }
 
     h5 {
-      font-weight: bold;
+      font-weight: 700;
       text-transform: uppercase;
       margin-bottom: 20px;
+      letter-spacing: 0.04em;
     }
 
     h6 {
-      font-weight: bold;
+      font-weight: 600;
       text-transform: uppercase;
       margin-bottom: 12px;
+      letter-spacing: 0.03em;
     }
   }
 
@@ -736,8 +781,14 @@ a:focus {
     background-color: $white;
     padding: 25px 15px;
     text-align: center;
-    box-shadow: 0 0 15px 0 rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 8px rgba(0,0,0,.12), 0 8px 24px rgba(0,0,0,.08);
     margin-top: 45px;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+
+    &:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 20px rgba(0,0,0,.16), 0 16px 40px rgba(0,0,0,.1);
+    }
 
     .img-box {
       svg {
@@ -894,7 +945,9 @@ a:focus {
       }
 
       &:focus {
-        border-color: color.scale($black, $lightness: 5%);
+        border-color: $primary2;
+        box-shadow: 0 0 0 3px rgba($primary2, 0.12);
+        outline: none;
       }
     }
 
@@ -1167,29 +1220,44 @@ a:focus {
   padding: 0;
   display: flex;
   margin-top: 30px;
-  gap: 20px;
+  gap: 16px;
 
   li {
     display: flex;
     flex-direction: column;
     text-align: center;
     flex: 1;
-    gap: 10px;
+    gap: 8px;
     border: 1px solid color.scale($black, $lightness: 90%);
-    padding: 15px;
+    border-bottom: 2px solid transparent;
+    padding: 16px 12px;
     cursor: pointer;
+    transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
 
     i.fa {
-      font-size: 35px;
-      color: color.scale($black, $lightness: 50%);
+      font-size: 28px;
+      color: color.scale($black, $lightness: 55%);
+      transition: color 0.2s ease;
     }
 
-    &:hover {
-      background-color: color.scale($black, $lightness: 98%);
+    span {
+      font-size: 12px;
+      font-weight: 500;
+      color: color.scale($black, $lightness: 35%);
+    }
+
+    &:hover:not(.disabled) {
+      background-color: #fafaf8;
+      border-bottom-color: $primary2;
+      box-shadow: 0 2px 10px rgba(0,0,0,.07);
+
+      i.fa {
+        color: $primary2;
+      }
     }
 
     &.disabled {
-      opacity: 0.6;
+      opacity: 0.45;
       cursor: not-allowed;
     }
   }
@@ -1197,21 +1265,26 @@ a:focus {
 
 .danger-zone {
   margin-top: 50px;
-  border: 1px solid $dangerolor;
-  padding: 30px;
+  border: 1px solid rgba($dangerolor, 0.35);
+  border-left: 3px solid $dangerolor;
+  padding: 28px 30px;
+  background-color: rgba($dangerolor, 0.02);
 
   h5 {
     color: $dangerolor;
+    letter-spacing: 0.03em;
   }
 }
 
 .box-zone {
   margin-top: 50px;
-  border: 1px solid $black;
-  padding: 30px;
+  border: 1px solid rgba($black, 0.18);
+  border-left: 3px solid $primary2;
+  padding: 28px 30px;
 
   h5 {
     color: $black;
+    letter-spacing: 0.03em;
   }
 }
 
@@ -1611,8 +1684,8 @@ ul.password-policy-indicator {
 
 .identity-verification-message {
   padding: 1rem 0;
-  border-bottom: 1px solid $primary1;
-  background-color: bisque;
+  border-bottom: 1px solid rgba($primary2, 0.25);
+  background-color: rgba($primary2, 0.06);
 
   .content-wrapper {
     display: flex;

@@ -39,7 +39,7 @@ const TransactionsPage = () => {
           </Button>
           <Typography
             variant="h5"
-            sx={{ color: GOLD, fontWeight: 700, letterSpacing: 0.5 }}
+            sx={{ color: GOLD, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", fontSize: "1.1rem" }}
           >
             Transaction Assistant
           </Typography>
@@ -61,8 +61,15 @@ const TransactionsPage = () => {
           {/* Right column — Info panel */}
           <Box sx={{ flex: 1, minWidth: 260 }}>
             <Paper
-              elevation={2}
-              sx={{ p: 3, borderRadius: 1, mb: 2 }}
+              elevation={0}
+              sx={{
+                p: 3,
+                borderRadius: 0,
+                mb: 2,
+                border: "1px solid rgba(0,0,0,.07)",
+                borderLeft: `3px solid ${GOLD}`,
+                boxShadow: "0 1px 3px rgba(0,0,0,.05), 0 4px 20px rgba(0,0,0,.06)",
+              }}
             >
               <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
                 How it works
@@ -96,7 +103,16 @@ const TransactionsPage = () => {
               </Box>
             </Paper>
 
-            <Paper elevation={2} sx={{ p: 3, borderRadius: 1 }}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 3,
+                borderRadius: 0,
+                border: "1px solid rgba(0,0,0,.07)",
+                borderLeft: `3px solid ${GOLD}`,
+                boxShadow: "0 1px 3px rgba(0,0,0,.05), 0 4px 20px rgba(0,0,0,.06)",
+              }}
+            >
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
                 <LockIcon sx={{ color: GOLD, fontSize: 20 }} />
                 <Typography variant="h6" sx={{ fontWeight: 600 }}>
