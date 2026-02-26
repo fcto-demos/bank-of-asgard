@@ -25,10 +25,7 @@ const PasskeySetup = () => {
     const [passkeys, setPasskeys] = useState([]);
     const [error, setError] = useState(null);
 
-    const request = requestConfig =>
-        http.request(requestConfig)
-            .then(response => response)
-            .catch(error => error);
+    const request = requestConfig => http.request(requestConfig);
 
     useEffect(() => {
         fetchPasskeys();
@@ -160,20 +157,7 @@ const PasskeySetup = () => {
                     console.log(error);
                 }
 
-                // Construct expected credential object for `finish-registration`
-                const finalCredential = {
-                    clientExtensionResults: {
-                        credProps: { rk: true },
-                      },
-                    id: assertionresponse.id,
-                    response: {
-                        attestationObject: assertionresponse.response.attestationObject
-                        ,
-                        clientDataJSON: assertionresponse.response.clientDataJSON,
-                    },
-                    type: assertionresponse.type,
-                }
-                payload.credential = finalCredential;
+                payload.credential = assertionresponse;
                 let finalPay = JSON.stringify(payload);
                 console.log(finalPay);
                 return request({

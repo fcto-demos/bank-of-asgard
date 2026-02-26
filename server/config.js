@@ -32,6 +32,7 @@ export const ASGARDEO_BASE_URL_SCIM2 = ASGARDEO_BASE_URL + "/scim2";
 export const VITE_REACT_APP_CLIENT_BASE_URL =
   process.env.VITE_REACT_APP_CLIENT_BASE_URL;
 export const USER_STORE_NAME = process.env.USER_STORE_NAME || "PRIMARY";
+export const TRANSACTIONS_API_URL = process.env.TRANSACTIONS_API_URL || "http://localhost:8010";
 
 // Added to compress self signed cert validation
 export const agent = new https.Agent({

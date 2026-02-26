@@ -23,7 +23,7 @@ import pino from "pino";
 
 import { getAccessToken, requireBearer } from "./middleware/auth.js";
 import { addUserToAdminRole, addUserToRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getRoleIdByName, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
-import { agent, ASGARDEO_BASE_URL, ASGARDEO_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, USER_STORE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
+import { agent, ASGARDEO_BASE_URL, ASGARDEO_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, USER_STORE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
 
 const corsOptions = {
   origin: [VITE_REACT_APP_CLIENT_BASE_URL],
@@ -131,7 +131,7 @@ app.post("/signup", async (req, res) => {
     const response = await createUser(req.body);
     res.json({ message: "User registered successfully", data: response.data });
 
-    // Asynchronously assign the Read_Transactions role so the user can use the agent without manual setup
+    // Asynchronously assign the Read_Transactions role and seed transaction data
     const userId = response.data?.id;
     if (userId) {
       try {
@@ -140,6 +140,18 @@ app.post("/signup", async (req, res) => {
         logger.info({ userId }, "POST /signup: user assigned to Read_Transactions role");
       } catch (roleError) {
         logger.warn({ userId, message: roleError.message }, "POST /signup: failed to assign Read_Transactions role");
+      }
+
+      try {
+        const token = await getAccessToken();
+        await axios.post(
+          `${TRANSACTIONS_API_URL}/admin/provision`,
+          { user_sub: userId },
+          { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } }
+        );
+        logger.info({ userId }, "POST /signup: transactions provisioned");
+      } catch (provisionError) {
+        logger.warn({ userId, message: provisionError.message }, "POST /signup: failed to provision transactions");
       }
     }
   } catch (error) {

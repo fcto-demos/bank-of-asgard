@@ -143,6 +143,8 @@ export async function addUserToAdminRole(organizationId, roleId, userId) {
 export async function getRoleIdByName(roleName) {
 
   const token = await getAccessToken();
+  const { sub, act } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+  console.log(`[getRoleIdByName] Token sub: ${sub}, act: ${JSON.stringify(act)}`);
   const response = await axios.get(
     `${ASGARDEO_BASE_URL}/scim2/v2/Roles`,
     {
@@ -167,6 +169,8 @@ export async function getRoleIdByName(roleName) {
 export async function addUserToRole(roleId, userId) {
 
   const token = await getAccessToken();
+  const { sub, act } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+  console.log(`[addUserToRole] Token sub: ${sub}, act: ${JSON.stringify(act)}`);
   const response = await axios.patch(
     `${ASGARDEO_BASE_URL}/scim2/v2/Roles/${roleId}`,
     {

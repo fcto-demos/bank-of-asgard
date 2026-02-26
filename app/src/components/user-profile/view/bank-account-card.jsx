@@ -17,13 +17,11 @@
  */
 
 import PropTypes from "prop-types";
-import CloseAccountCard from "../close-account-card";
 import { formatCurrency } from "../../../util/string-util";
 import { useNavigate } from "react-router";
-import { ACCOUNT_TYPES, ROUTES } from "../../../constants/app-constants";
+import { ROUTES } from "../../../constants/app-constants";
 import { useContext } from "react";
 import { BankAccountContext } from "../../../context/bank-account-provider";
-import CloseBusinessAccountCard from "../../../components/business-user-profile/close-business-account-card";
 
 const BankAccountCard = ({ userInfo }) => {
   const initialCreditCardState = {
@@ -98,11 +96,16 @@ const BankAccountCard = ({ userInfo }) => {
             </li>
           </ul>
 
-          {userInfo.accountType === ACCOUNT_TYPES.BUSINESS ? (
-            <CloseBusinessAccountCard businessName={userInfo.businessName} />
-          ) : (
-            <CloseAccountCard />
-          )}
+          <hr />
+          <h5>Transaction Assistant</h5>
+          <p style={{ fontSize: "14px", color: "#666", marginBottom: "10px" }}>
+            Review your transaction history and get AI-powered spending insights.
+          </p>
+          <div className="form-buttons">
+            <button className="edit-button" onClick={() => navigate(ROUTES.TRANSACTIONS)}>
+              Open Transaction Assistant
+            </button>
+          </div>
         </div>
       </div>
     </div>
