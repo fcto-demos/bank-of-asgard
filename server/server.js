@@ -383,6 +383,29 @@ app.patch("/business-update", async (req, res) => {
   }
 });
 
+app.get("/transactions-summary", requireBearer, async (req, res) => {
+  try {
+    const userInfo = await axios.get(`${ASGARDEO_BASE_URL}/oauth2/userinfo`, {
+      headers: { Authorization: `Bearer ${req.token}` },
+      httpsAgent: agent,
+    });
+    const sub = userInfo.data.sub;
+    if (!sub) {
+      return res.json({ total: 0, recent: [], monthly_counts: {} });
+    }
+    const adminToken = await getAccessToken();
+    const response = await axios.get(`${TRANSACTIONS_API_URL}/admin/transactions`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+      params: { user_sub: sub, limit: 5 },
+      httpsAgent: agent,
+    });
+    res.json(response.data);
+  } catch (error) {
+    logger.warn({ error: error.message }, "GET /transactions-summary: failed");
+    res.json({ total: 0, recent: [], monthly_counts: {} });
+  }
+});
+
 app.listen(PORT, () =>
   console.log(`🌐 Server running at: http://${HOST}:${PORT}`)
 );

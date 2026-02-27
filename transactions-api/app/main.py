@@ -1,5 +1,6 @@
 import logging
 import os
+from collections import Counter
 from datetime import datetime
 from typing import Optional
 
@@ -115,4 +116,27 @@ async def provision_transactions(
         "status": "ok",
         "provisioned": len(txns),
         "user_sub": req.user_sub,
+    }
+
+
+@app.get("/admin/transactions")
+async def admin_get_transactions(
+    user_sub: str,
+    limit: int = 5,
+    token_data: TokenData = Security(validate_token, scopes=["admin_provision"]),
+):
+    """Return a summary of transactions for a given user_sub.
+
+    Protected by admin_provision scope (same as provisioning).
+    Used by the dashboard to verify that demo data is present.
+    """
+    txns = transaction_store.get(user_sub, [])
+    month_counts = dict(
+        sorted(Counter(t["date"][:7] for t in txns).items(), reverse=True)
+    )
+    return {
+        "user_sub": user_sub,
+        "total": len(txns),
+        "recent": [Transaction(**t) for t in txns[:limit]],
+        "monthly_counts": month_counts,
     }

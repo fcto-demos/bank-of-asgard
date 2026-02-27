@@ -20,8 +20,10 @@ import PropTypes from "prop-types";
 import { formatCurrency } from "../../../util/string-util";
 import { useNavigate } from "react-router";
 import { ROUTES } from "../../../constants/app-constants";
-import { useContext } from "react";
+import { useContext, useEffect, useState } from "react";
 import { BankAccountContext } from "../../../context/bank-account-provider";
+import { useAsgardeo } from "@asgardeo/react";
+import { environmentConfig } from "../../../util/environment-util";
 
 const BankAccountCard = ({ userInfo }) => {
   const initialCreditCardState = {
@@ -31,6 +33,20 @@ const BankAccountCard = ({ userInfo }) => {
 
   const navigate = useNavigate();
   const { bankAccountData } = useContext(BankAccountContext);
+  const { getAccessToken } = useAsgardeo();
+  const [txnSummary, setTxnSummary] = useState(null);
+
+  useEffect(() => {
+    getAccessToken()
+      .then((token) =>
+        fetch(`${environmentConfig.API_SERVICE_URL}/transactions-summary`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      )
+      .then((res) => res.json())
+      .then((data) => setTxnSummary(data))
+      .catch(() => setTxnSummary({ total: 0, recent: [], monthly_counts: {} }));
+  }, []);
 
   return (
     <div
@@ -95,6 +111,35 @@ const BankAccountCard = ({ userInfo }) => {
               <span>Credit Limit Increase</span>
             </li>
           </ul>
+
+          <hr />
+          <h5>Recent Transactions</h5>
+          {txnSummary === null ? (
+            <p style={{ fontSize: "13px", color: "#999", margin: "6px 0 10px" }}>Loading...</p>
+          ) : txnSummary.total === 0 ? (
+            <p style={{ fontSize: "13px", color: "#c88", margin: "6px 0 10px" }}>No transactions provisioned yet.</p>
+          ) : (
+            <>
+              <p style={{ fontSize: "13px", color: "#666", marginBottom: "8px" }}>
+                {txnSummary.total} transactions on file
+              </p>
+              <ul className="accounts-list" style={{ marginBottom: "10px" }}>
+                {txnSummary.recent.map((t) => (
+                  <li key={t.id}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <span style={{ fontSize: "12px", color: "#888" }}>{t.date}</span>
+                        <span style={{ fontSize: "13px", marginLeft: "8px" }}>{t.merchant}</span>
+                      </div>
+                      <span style={{ fontSize: "13px", fontWeight: 500, color: t.amount < 0 ? "#c00" : "#2a7" }}>
+                        {formatCurrency(t.amount)}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
 
           <hr />
           <h5>Transaction Assistant</h5>

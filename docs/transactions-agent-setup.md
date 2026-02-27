@@ -1,6 +1,6 @@
 # Transactions AI Agent — Setup Guide
 
-This document describes the architecture, setup, and configuration for the Transactions AI Agent added to the Bank of Asgard project. It follows the same secure agent pattern as the [Gardeo Hotels](https://github.com/wso2/gardeo-hotels) reference implementation.
+This document describes the architecture, setup, and configuration for the Transactions AI Agent added to the Bank of Asgard project. It follows the same secure agent pattern as the [Gardeo Hotels](https://github.com/wso2/iam-ai-samples/tree/main/hotel-booking-agent-autogen-agent-iam) reference implementation.
 
 ---
 
@@ -84,15 +84,22 @@ In the IS Console → **Agents** → **+ New Agent**:
 - Click **Register** — the console will display the agent's **Agent ID** and **Agent Secret** once. Copy both immediately.
   - These become `AGENT_ID` and `AGENT_SECRET` in the environment variables.
 
-### 3. Authorise the Server Application for Provisioning
+### 3. Authorise the Server Application for Provisioning and Role Assignment
 
-The `admin_provision` scope is only needed for the one-time demo data seeding step. Use the **existing server application** (the Traditional Web Application / `SERVER_APP_CLIENT_ID`) rather than the agent identity for this.
+The server application (`SERVER_APP_CLIENT_ID`) needs two sets of permissions:
 
-In the IS Console → **Applications** → select the server app → **API Authorisation** tab:
+**Transactions API scopes** — In the IS Console → **Applications** → select the server app → **API Authorisation** tab:
 
 - Add the `Transactions API` resource and authorise the `admin_provision` scope
 
-This allows the server app's client credentials to be used in the provisioning curl — no agent credentials needed.
+This allows the server to automatically seed demo transactions for every new user at signup.
+
+**Internal IS scopes** for automated role assignment — in the same **API Authorisation** tab, also authorise:
+
+- `internal_role_mgt_view` — allows the server to look up the `Read_Transactions` role ID by name
+- `internal_role_mgt_users_update` — allows the server to add users to that role
+
+These scopes must also be added to the `scope` parameter in the server's client credentials token request (`server/middleware/auth.js`).
 
 ### 4. Configure On-Behalf-Of (OBO) Exchange
 
@@ -202,7 +209,20 @@ npm run dev
 
 The `transactions-api` uses an in-memory store. Data must be provisioned for each user before they can use the agent.
 
-### Using the Admin Endpoint
+### Automatic Provisioning at Signup
+
+As of the latest server changes, **provisioning happens automatically** when a new user registers. The `/signup` endpoint in `server/server.js` performs two steps asynchronously after the user is created:
+
+1. **Role assignment** — looks up the `Read_Transactions` role by name and assigns it to the new user. This grants access to the `/transactions` page and enables the OBO scope consent flow.
+2. **Transaction seeding** — calls `POST http://localhost:8010/admin/provision` with the new user's SCIM `id` as `user_sub`, generating 40 demo transactions over the last 90 days.
+
+Both steps are fire-and-forget: failures are logged as warnings (`POST /signup: failed to assign Read_Transactions role` / `POST /signup: failed to provision transactions`) but do not affect the signup response. The `TRANSACTIONS_API_URL` server environment variable controls the provisioning endpoint (`http://localhost:8010` by default).
+
+The same logic runs for the `/business-signup` endpoint (via the same `createUser` path).
+
+> **Note:** Since the `transactions-api` uses an in-memory store, provisioned data is lost on service restart. Use the manual endpoint below to re-seed data for existing users after a restart.
+
+### Manual Provisioning (re-seeding or existing users)
 
 First, obtain a client credentials token using the **server application** credentials (not the agent — agents do not support the `client_credentials` grant).
 
@@ -297,6 +317,14 @@ bank-of-asgard/
 │   ├── Dockerfile
 │   └── .env.example
 │
+├── server/                          # Node.js / Express backend (modified)
+│   ├── server.js                    # MODIFIED — auto role assignment + provisioning on signup
+│   ├── config.js                    # MODIFIED — added TRANSACTIONS_API_URL env variable
+│   ├── middleware/
+│   │   └── auth.js                  # MODIFIED — added internal_role_mgt_view + internal_role_mgt_users_update + admin_provision scopes
+│   └── controllers/
+│       └── business.js              # MODIFIED — added getRoleIdByName, addUserToRole
+│
 └── app/                             # React frontend (modified)
     └── src/
         ├── pages/
@@ -305,7 +333,9 @@ bank-of-asgard/
         │   ├── transactions/
         │   │   └── ChatComponent.jsx # NEW — WebSocket chat + OBO consent popup
         │   └── user-profile/
-        │       └── view-profile.jsx  # MODIFIED — added Transaction Assistant card
+        │       ├── view-profile.jsx  # MODIFIED — Close Account moved to bottom-right
+        │       └── view/
+        │           └── bank-account-card.jsx # MODIFIED — Transaction Assistant button added
         ├── constants/
         │   └── app-constants.jsx    # MODIFIED — added TRANSACTIONS route
         └── util/
@@ -316,17 +346,20 @@ bank-of-asgard/
 
 ## End-to-End Test Checklist
 
-1. Log into Bank of Asgard as a demo user
-2. Navigate to the user profile — verify the **"Transaction Assistant"** card appears
-3. Click **"Open Transaction Assistant"** — verify `/transactions` loads
-4. The chat shows "Welcome to Bank of Asgard! I'm your Transaction Assistant..."
-5. Type: *"Show me my recent transactions"*
-6. Verify an **"Authorise Access"** panel appears in the chat with the `read_transactions` scope chip
-7. Click **"Authorise Access"** — an Asgardeo popup opens
-8. Complete login in the popup — popup closes automatically
-9. Chat shows: *"Authorisation complete! Fetching your transactions now..."*
-10. Agent responds with a formatted list of transactions (not raw JSON)
-11. Ask: *"How much did I spend on dining?"* — agent summarises without triggering auth again (token cached)
+1. Register a new user via the signup form
+2. Check server logs — confirm both messages appear:
+   - `POST /signup: user assigned to Read_Transactions role`
+   - `POST /signup: transactions provisioned`
+3. Log in as that user and navigate to the user profile — verify the **"Open Transaction Assistant"** button appears inside the Bank Account card
+4. Click **"Open Transaction Assistant"** — verify `/transactions` loads
+5. The chat shows "Welcome to Bank of Asgard! I'm your Transaction Assistant..."
+6. Type: *"Show me my recent transactions"*
+7. Verify an **"Authorise Access"** panel appears in the chat with the `read_transactions` scope chip
+8. Click **"Authorise Access"** — an Asgardeo popup opens
+9. Complete login in the popup — popup closes automatically
+10. Chat shows: *"Authorisation complete! Fetching your transactions now..."*
+11. Agent responds with a formatted list of transactions (not raw JSON)
+12. Ask: *"How much did I spend on dining?"* — agent summarises without triggering auth again (token cached)
 
 ---
 
