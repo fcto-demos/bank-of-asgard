@@ -77,9 +77,6 @@ const UserProfileCard = ({ userInfo, setShowEditForm }) => {
               <strong>User Name:</strong> {resolveUserName()}
             </li>
             <li>
-              <strong>Account Type:</strong> {userInfo.accountType}
-            </li>
-            <li>
               <strong>Full Name:</strong> {userInfo.givenName}{" "}
               {userInfo.familyName}
             </li>
@@ -94,6 +91,12 @@ const UserProfileCard = ({ userInfo, setShowEditForm }) => {
             </li>
             <li>
               <strong>Mobile:</strong> {userInfo.mobile}
+            </li>
+            <li>
+              <strong>Account Type:</strong> {userInfo.accountType}
+            </li>
+            <li>
+              <strong>User ID:</strong> {userInfo.userId}
             </li>
           </ul>
 

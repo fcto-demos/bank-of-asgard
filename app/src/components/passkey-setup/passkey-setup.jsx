@@ -103,8 +103,9 @@ const PasskeySetup = () => {
         return pubKeyCred
     }
 
-    // Start passkey registration with Asgardeo
-    const startPasskeyRegistration = () => {
+    // Original passkey registration flow — preserved for future restoration.
+    // To re-enable, make startPasskeyRegistration call _registerPasskey().
+    const _registerPasskey = () => {
 
         const formData = formatFormURLEncoded({ appId: environmentConfig.APP_BASE_URL }); // Format correctly
 
@@ -195,6 +196,10 @@ const PasskeySetup = () => {
             .catch((err) => {
                 setError("Error during passkey registration: " + (err.message || "Unknown error"));
             });
+    };
+
+    const startPasskeyRegistration = () => {
+        window.open(`${environmentConfig.ASGARDEO_BASE_URL}/t/${environmentConfig.ORGANIZATION_NAME}/myaccount/`, "_blank");
     };
 
     return (

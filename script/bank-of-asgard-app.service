@@ -1,0 +1,22 @@
+[Unit]
+Description=Bank of Asgard Frontend App
+Documentation=https://github.com/asgardeo/bank-of-asgard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/bank-of-asgard/app
+
+# Use a login shell so nvm/node paths from ~/.profile are available
+ExecStart=/bin/bash -lc 'npm run preview'
+
+Restart=on-failure
+RestartSec=5
+
+# Keep stdout/stderr in the journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bank-of-asgard-app
+
+[Install]
+WantedBy=default.target

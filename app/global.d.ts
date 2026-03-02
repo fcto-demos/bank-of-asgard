@@ -19,6 +19,7 @@ interface Window {
     API_SERVICE_URL: string;
     APP_BASE_URL: string;
     ASGARDEO_BASE_URL: string;
+    ORGANIZATION_NAME?: string;
     APP_CLIENT_ID: string;
     APP_NAME: string;
     DISABLED_FEATURES: string[];

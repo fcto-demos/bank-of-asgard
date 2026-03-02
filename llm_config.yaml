@@ -9,5 +9,5 @@
 #   gemini:    gemini-2.5-flash-lite
 #   anthropic: claude-sonnet-4-5-20250929
 
-provider: openai
+provider: anthropic
 # model: gpt-4o-mini

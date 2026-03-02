@@ -7,5 +7,10 @@ export default defineConfig({
   plugins: [
       svgr(),
       react()
-  ]
+  ],
+  preview: {
+    port: 5173,
+    strictPort: true,
+    host: '0.0.0.0',  // listen on all interfaces — DO LB accesses via VM's IP
+  }
 });
