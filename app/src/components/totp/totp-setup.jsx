@@ -44,7 +44,7 @@ const TotpSetup = () => {
         try {
             const response = await request({
                 method: "GET",
-                url: `${environmentConfig.ASGARDEO_BASE_URL}/scim2/Me`,
+                url: `${environmentConfig.IDP_BASE_URL}/scim2/Me`,
                 headers: { "Content-Type": "application/json" },
             });
             console.log(response.data);
@@ -72,7 +72,7 @@ const TotpSetup = () => {
         try {
             const response = await request({
                 method: "POST",
-                url: `${environmentConfig.ASGARDEO_BASE_URL}/api/users/v1/me/totp`,
+                url: `${environmentConfig.IDP_BASE_URL}/api/users/v1/me/totp`,
                 headers: { "accept": "application/json" },
                 data: { "action": "INIT" }
             });
@@ -94,7 +94,7 @@ const TotpSetup = () => {
         try {
             const response = await request({
                 method: "POST",
-                url: `${environmentConfig.ASGARDEO_BASE_URL}/api/users/v1/me/totp`,
+                url: `${environmentConfig.IDP_BASE_URL}/api/users/v1/me/totp`,
                 headers: { "Content-Type": "application/json" },
                 data: { action: "VIEW" },
             });
@@ -120,7 +120,7 @@ const TotpSetup = () => {
 
             const response = await request({
                 method: "POST",
-                url: `${environmentConfig.ASGARDEO_BASE_URL}/api/users/v1/me/totp`,
+                url: `${environmentConfig.IDP_BASE_URL}/api/users/v1/me/totp`,
                 headers: { "Content-Type": "application/json" },
                 data: { action: "VALIDATE", verificationCode: otpCode },
             });

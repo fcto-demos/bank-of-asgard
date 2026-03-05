@@ -21,14 +21,14 @@ import https from "https";
 
 dotenv.config();
 
-export const PORT = process.env.PORT || 6000;
+export const PORT = process.env.PORT || 3002;
 export const HOST = process.env.HOST || "localhost";
-export const ASGARDEO_BASE_URL = process.env.ASGARDEO_BASE_URL;
+export const IDP_BASE_URL = process.env.IDP_BASE_URL;
 export const CLIENT_ID = process.env.SERVER_APP_CLIENT_ID;
 export const CLIENT_SECRET = process.env.SERVER_APP_CLIENT_SECRET;
-export const TOKEN_ENDPOINT = process.env.ASGARDEO_TOKEN_ENDPOINT;
+export const TOKEN_ENDPOINT = process.env.IDP_TOKEN_ENDPOINT;
 export const GEO_API_KEY = process.env.GEO_API_KEY;
-export const ASGARDEO_BASE_URL_SCIM2 = ASGARDEO_BASE_URL + "/scim2";
+export const IDP_BASE_URL_SCIM2 = IDP_BASE_URL + "/scim2";
 export const VITE_REACT_APP_CLIENT_BASE_URL =
   process.env.VITE_REACT_APP_CLIENT_BASE_URL;
 export const USER_STORE_NAME = process.env.USER_STORE_NAME || "PRIMARY";

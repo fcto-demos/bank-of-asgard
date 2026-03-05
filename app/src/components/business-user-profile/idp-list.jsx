@@ -64,7 +64,7 @@ const IDPList = () => {
     try {
       setLoading(true);
       const response = await request({
-        url: `${environmentConfig.ASGARDEO_BASE_URL}/o/api/server/v1/identity-providers`,
+        url: `${environmentConfig.IDP_BASE_URL}/o/api/server/v1/identity-providers`,
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -86,7 +86,7 @@ const IDPList = () => {
 
     const response = await request({
       method: "GET",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/o/api/server/v1/applications?filter=name%20eq%20${encodeURIComponent(environmentConfig.APP_NAME)}`,
+      url: `${environmentConfig.IDP_BASE_URL}/o/api/server/v1/applications?filter=name%20eq%20${encodeURIComponent(environmentConfig.APP_NAME)}`,
       headers: {
         Accept: "application/json",
       },
@@ -104,7 +104,7 @@ const IDPList = () => {
     const applicationId = await getAppId();
     const response = await request({
       method: "GET",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/o/api/server/v1/applications/${applicationId}`,
+      url: `${environmentConfig.IDP_BASE_URL}/o/api/server/v1/applications/${applicationId}`,
       headers: { Accept: "application/json" },
     });
     return response.data;
@@ -132,7 +132,7 @@ const IDPList = () => {
 
     await request({
       method: "PATCH",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/o/api/server/v1/applications/${applicationId}`,
+      url: `${environmentConfig.IDP_BASE_URL}/o/api/server/v1/applications/${applicationId}`,
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
@@ -141,7 +141,7 @@ const IDPList = () => {
     });
       await request(
         {
-          url: `${environmentConfig.ASGARDEO_BASE_URL}/o/api/server/v1/identity-providers/${id}?force=false`,
+          url: `${environmentConfig.IDP_BASE_URL}/o/api/server/v1/identity-providers/${id}?force=false`,
           method: "DELETE",
           headers: {
             Accept: "*/*",
@@ -168,7 +168,7 @@ const IDPList = () => {
       const applicationId = await getAppId();
       const response = await request({
         method: "GET",
-        url: `${environmentConfig.ASGARDEO_BASE_URL}/o/api/server/v1/applications/${applicationId}/authenticators`,
+        url: `${environmentConfig.IDP_BASE_URL}/o/api/server/v1/applications/${applicationId}/authenticators`,
         headers: {
           Accept: "application/json",
         },
@@ -234,7 +234,7 @@ const IDPList = () => {
 
     const response = await request({
       method: "PATCH",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/o/api/server/v1/applications/${applicationId}`,
+      url: `${environmentConfig.IDP_BASE_URL}/o/api/server/v1/applications/${applicationId}`,
       data: payload,
       headers: {
         Accept: "application/json",

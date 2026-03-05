@@ -11,3 +11,12 @@
 
 provider: anthropic
 # model: gpt-4o-mini
+
+# WSO2 API Gateway — optional, disabled by default.
+# When enabled, LLM calls are routed via the gateway using OAuth2 client credentials
+# instead of a direct provider API key.
+# Set GATEWAY_BASE_URL, GATEWAY_TOKEN_ENDPOINT, GATEWAY_CLIENT_ID, and
+# GATEWAY_CLIENT_SECRET in .env. The provider above still determines the default model name.
+#
+gateway:
+  enabled: true

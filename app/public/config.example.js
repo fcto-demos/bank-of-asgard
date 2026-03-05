@@ -1,8 +1,10 @@
+// Adapt port to the one you have set in the .env for the server
+// Default is 3002
 window.config = {
-  API_BASE_URL: "http://localhost:6000",
-  API_SERVICE_URL: "http://localhost:6000",
+  API_BASE_URL: "http://localhost:3002",
+  API_SERVICE_URL: "http://localhost:3002",
   APP_BASE_URL: "http://localhost:5173",
-  ASGARDEO_BASE_URL: "",
+  IDP_BASE_URL: "",
   ORGANIZATION_NAME: "",
   APP_CLIENT_ID: "",
   APP_NAME: "",

@@ -265,8 +265,8 @@ const ChatComponent = ({ sessionId }) => {
                   Authorisation Required
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                  To access your transactions, the assistant needs your permission.
-                  Click below to authorise securely via Asgardeo.
+                  To read your transactions, the assistant needs your permission.
+                  Click below to authorise access via WSO2 Identity Platform.
                 </Typography>
                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}>
                   {pendingAuth.scopes.map((scope) => (

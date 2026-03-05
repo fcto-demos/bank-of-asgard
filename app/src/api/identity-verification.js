@@ -20,7 +20,7 @@ import { http } from '@asgardeo/react';
 
 export const getVerificationStatus = async () => {
   const requestConfig = {
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/api/users/v1/me/idv/claims`,
+      url: `${environmentConfig.IDP_BASE_URL}/api/users/v1/me/idv/claims`,
       method: "GET",
       params: {
           "idVProviderId": environmentConfig.IDENTITY_VERIFICATION_PROVIDER_ID
@@ -50,7 +50,7 @@ export const reinitiateVerification = async () => {
 
 const updateVerificationStatus = async (status) => {
   const requestConfig = {
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/api/users/v1/me/idv/verify`,
+      url: `${environmentConfig.IDP_BASE_URL}/api/users/v1/me/idv/verify`,
       method: "POST",
       data: {
           "idVProviderId": environmentConfig.IDENTITY_VERIFICATION_PROVIDER_ID,

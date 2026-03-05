@@ -68,7 +68,7 @@ const UserProfilePage = ({ setSiteSection }) => {
         "Content-Type": "application/scim+json",
       },
       method: "GET",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/scim2/Me`,
+      url: `${environmentConfig.IDP_BASE_URL}/scim2/Me`,
     }).then((response) => {
       if (response.data) {
         if (

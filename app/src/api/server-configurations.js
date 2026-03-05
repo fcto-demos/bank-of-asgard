@@ -22,7 +22,7 @@ import { http } from '@asgardeo/react';
 export const getPasswordPolicy = () => {
   const requestConfig = {
     method: "GET",
-    url: `${environmentConfig.ASGARDEO_BASE_URL}/api/server/v1/validation-rules`,
+    url: `${environmentConfig.IDP_BASE_URL}/api/server/v1/validation-rules`,
   };
 
   return http.request(requestConfig)

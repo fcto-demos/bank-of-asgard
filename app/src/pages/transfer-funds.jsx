@@ -106,7 +106,7 @@ const TransferFundsPage = () => {
           const stateString = JSON.stringify(stateObj);
           params.append("state", stateString);
 
-          const authURL = `${environmentConfig.ASGARDEO_BASE_URL}/oauth2/authorize?${params}`;
+          const authURL = `${environmentConfig.IDP_BASE_URL}/oauth2/authorize?${params}`;
 
           for (let i = sessionStorage.length - 1; i >= 0; i--) {
             const key = sessionStorage.key(i);

@@ -4,7 +4,7 @@ window.config = {
   API_BASE_URL: "https://api.apis.coach",         // ← update to your backend URL
   API_SERVICE_URL: "https://api.apis.coach",      // ← update to your backend URL
   APP_BASE_URL: "https://app.apis.coach:444",
-  ASGARDEO_BASE_URL: "https://identity.dev.apis.coach:9445",
+  IDP_BASE_URL: "https://identity.dev.apis.coach:9445",
   ORGANIZATION_NAME: "carbon.super",
   APP_CLIENT_ID: "6VfEfHraf0U7ZEPj3Ku7kCKlfBoa",
   APP_NAME: "",

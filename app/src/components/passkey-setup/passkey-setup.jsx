@@ -35,7 +35,7 @@ const PasskeySetup = () => {
     const fetchPasskeys = () => {
         request({
             method: "GET",
-            url: `${environmentConfig.ASGARDEO_BASE_URL}/api/users/v2/me/webauthn`,
+            url: `${environmentConfig.IDP_BASE_URL}/api/users/v2/me/webauthn`,
             headers: { "Content-Type": "application/json" },
         })
             .then((response) => {
@@ -111,7 +111,7 @@ const PasskeySetup = () => {
 
         request({
             method: "POST",
-            url: `${environmentConfig.ASGARDEO_BASE_URL}/api/users/v2/me/webauthn/start-usernameless-registration`,
+            url: `${environmentConfig.IDP_BASE_URL}/api/users/v2/me/webauthn/start-usernameless-registration`,
             headers: {
                 "accept": "application/json",
                 'Content-type': 'application/x-www-form-urlencoded;charset=utf-8'
@@ -163,7 +163,7 @@ const PasskeySetup = () => {
                 console.log(finalPay);
                 return request({
                     method: "POST",
-                    url: `${environmentConfig.ASGARDEO_BASE_URL}/api/users/v2/me/webauthn/finish-registration`,
+                    url: `${environmentConfig.IDP_BASE_URL}/api/users/v2/me/webauthn/finish-registration`,
                     headers: { "Content-Type": "application/json" },
                     data: finalPay,
                 }).then(() => credential.id);
@@ -179,7 +179,7 @@ const PasskeySetup = () => {
                 // Update passkey display name with PATCH request
                 return request({
                     method: "PATCH",
-                    url: `${environmentConfig.ASGARDEO_BASE_URL}/api/users/v2/me/webauthn/${credentialId}`,
+                    url: `${environmentConfig.IDP_BASE_URL}/api/users/v2/me/webauthn/${credentialId}`,
                     headers: { "Content-Type": "application/json" },
                     data: [
                         {
@@ -199,7 +199,7 @@ const PasskeySetup = () => {
     };
 
     const startPasskeyRegistration = () => {
-        window.open(`${environmentConfig.ASGARDEO_BASE_URL}/t/${environmentConfig.ORGANIZATION_NAME}/myaccount/`, "_blank");
+        window.open(`${environmentConfig.IDP_BASE_URL}/t/${environmentConfig.ORGANIZATION_NAME}/myaccount/`, "_blank");
     };
 
     return (

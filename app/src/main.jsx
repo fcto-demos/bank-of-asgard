@@ -24,7 +24,7 @@ import { environmentConfig } from "./util/environment-util";
 createRoot(document.getElementById('root')).render(
     <AsgardeoProvider
       clientId={`${environmentConfig.APP_CLIENT_ID}`}
-      baseUrl={`${environmentConfig.ASGARDEO_BASE_URL}`}
+      baseUrl={`${environmentConfig.IDP_BASE_URL}`}
       organizationHandle={environmentConfig.ORGANIZATION_NAME || undefined}
       preferences={{
         theme: {

@@ -124,7 +124,7 @@ Copy from `.env.example` and fill in:
 JWKS_URL=https://api.asgardeo.io/t/<ORG_NAME>/oauth2/jwks
 JWT_ISSUER=https://api.asgardeo.io/t/<ORG_NAME>/oauth2/token
 JWKS_CACHE_TTL=3600
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+CORS_ORIGINS=http://localhost:5173,http://localhost:3002
 ```
 
 ### `transactions-agent/.env`
@@ -133,9 +133,9 @@ Copy from `.env.example` and fill in:
 
 ```env
 # Frontend app registered in Asgardeo (used for the PKCE authorisation code flow)
-ASGARDEO_CLIENT_ID=<ASGARDEO_CLIENT_ID>
-ASGARDEO_BASE_URL=https://api.asgardeo.io/t/<ORG_NAME>
-ASGARDEO_REDIRECT_URI=http://localhost:8011/callback
+IDP_CLIENT_ID=<IDP_CLIENT_ID>
+IDP_BASE_URL=https://api.asgardeo.io/t/<ORG_NAME>
+IDP_REDIRECT_URI=http://localhost:8011/callback
 
 # Agent's own Asgardeo application (client credentials grant)
 AGENT_ID=<AGENT_CLIENT_ID>
@@ -145,9 +145,16 @@ AGENT_SECRET=<AGENT_CLIENT_SECRET>
 TRANSACTIONS_API_BASE_URL=http://localhost:8010
 
 # LLM — provide the key matching the provider in llm_config.yaml
+# Not required when gateway.enabled: true in llm_config.yaml
 OPENAI_API_KEY=<OPENAI_API_KEY>
 # GEMINI_API_KEY=<GEMINI_API_KEY>
 # ANTHROPIC_API_KEY=<ANTHROPIC_API_KEY>
+
+# WSO2 API Gateway (only when gateway.enabled: true in llm_config.yaml)
+# GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
+# GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
+# GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
+# GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
 ```
 
 ### `app/public/config.js`
@@ -162,11 +169,21 @@ TRANSACTIONS_AGENT_URL: "ws://localhost:8011"
 
 ## Running the Services
 
-### Docker (recommended)
+### Docker / Podman (recommended)
+
+The `docker-compose.yml` at the repo root orchestrates both services on a shared `bank-network`.
+
+**Important:** `llm_config.yaml` is mounted into the agent container from `~/podman_share/llm_config.yaml` on the host (`:ro,z` — read-only, SELinux relabelled for Podman compatibility). This keeps the config outside the image so you can change the LLM provider or gateway settings without rebuilding.
 
 ```bash
-# From the bank-of-asgard root
-docker compose up --build
+# 1. Place llm_config.yaml where the compose file expects it
+mkdir -p ~/podman_share
+cp llm_config.yaml ~/podman_share/llm_config.yaml
+
+# 2. Build and start both services (from the repo root)
+docker compose up --build -d
+# or with Podman:
+podman-compose up --build -d
 
 # View logs
 docker compose logs -f transactions-api
@@ -175,6 +192,8 @@ docker compose logs -f transactions-agent
 # Stop
 docker compose down
 ```
+
+> **Note:** When running via Docker/Podman, set `TRANSACTIONS_API_BASE_URL=http://transactions-api:8010` in `transactions-agent/.env` so the agent reaches the API container by its service name on the shared network. Use `http://localhost:8010` for native development instead.
 
 ### Natively (development)
 
@@ -281,6 +300,45 @@ Default models per provider:
 | openai | gpt-4o-mini |
 | gemini | gemini-2.5-flash-lite |
 | anthropic | claude-sonnet-4-5-20250929 |
+
+### WSO2 API Gateway (optional)
+
+LLM calls can be routed through a WSO2 API Gateway instead of using a direct provider API key. The agent authenticates to the gateway using the OAuth2 client credentials grant and automatically refreshes the access token before it expires.
+
+**1. Enable in `llm_config.yaml`:**
+
+```yaml
+provider: anthropic   # controls the default model name
+
+gateway:
+  enabled: true
+```
+
+**2. Set gateway credentials in `transactions-agent/.env`:**
+
+```env
+GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
+GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
+GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
+GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
+```
+
+| Variable | Description |
+|---|---|
+| `GATEWAY_BASE_URL` | Base URL exposed by the gateway for LLM calls (e.g. `https://gateway.example.com/llm/1.0.0`) |
+| `GATEWAY_TOKEN_ENDPOINT` | OAuth2 token endpoint (e.g. `https://gateway.example.com/oauth2/token`) |
+| `GATEWAY_CLIENT_ID` | Client ID for the gateway OAuth2 application |
+| `GATEWAY_CLIENT_SECRET` | Client secret for the gateway OAuth2 application |
+
+When `gateway.enabled: true`, no provider API key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) is required. The `provider` field in `llm_config.yaml` still controls the default model name used in the request.
+
+**Token refresh behaviour:**
+- The token is cached in memory inside `GatewayTokenManager`
+- It is refreshed automatically 30 seconds before the `expires_in` time from the token response
+- An `asyncio.Lock` prevents concurrent refresh storms under high load
+- If the token endpoint is unreachable, the error propagates as an agent-level exception
+
+To fall back to direct provider mode, set `gateway.enabled: false` (or remove the block) and set the appropriate provider API key in `.env`.
 
 ---
 

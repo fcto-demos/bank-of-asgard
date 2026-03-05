@@ -13,7 +13,7 @@ Browser
   └─ wss://boa-agent.apis.coach:445  ─►  DO LB  ──►  VM:8011  (uvicorn — transactions agent)
 
 VM also runs (directly, no LB):
-  └─ localhost:6000   Node/Express backend server
+  └─ localhost:3002   Node/Express backend server
   └─ localhost:8010   Transactions API
 ```
 
@@ -123,9 +123,9 @@ cp ~/bank-of-asgard/transactions-agent/.env.example \
 Edit `.env` and set the following values:
 
 ```dotenv
-ASGARDEO_CLIENT_ID=<your-client-id>
-ASGARDEO_BASE_URL=https://identity.dev.apis.coach:9445
-ASGARDEO_REDIRECT_URI=https://boa-agent.apis.coach:445/callback   # ← must match Asgardeo app settings
+IDP_CLIENT_ID=<your-client-id>
+IDP_BASE_URL=https://identity.dev.apis.coach:9445
+IDP_REDIRECT_URI=https://boa-agent.apis.coach:445/callback   # ← must match Asgardeo app settings
 
 AGENT_ID=<agent-client-id>
 AGENT_SECRET=<agent-client-secret>

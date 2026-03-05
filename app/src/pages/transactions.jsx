@@ -128,11 +128,11 @@ const TransactionsPage = () => {
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 When you first ask about your transactions, you&apos;ll be prompted
-                to approve access via Asgardeo. The AI agent only receives your
+                to approve access via WSO2 Identity Platform. The AI agent only receives your
                 transaction data — nothing else.
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Powered by Asgardeo &bull; OAuth 2.0 On-Behalf-Of flow
+                Powered by WSO2 Identity Platform &bull; OAuth 2.0 On-Behalf-Of flow
               </Typography>
             </Paper>
           </Box>

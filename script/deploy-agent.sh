@@ -34,13 +34,13 @@ if [ ! -f "$AGENT_DIR/.env" ]; then
   echo "  ERROR: $AGENT_DIR/.env not found."
   echo "  Copy and fill in the template:"
   echo "    cp $AGENT_DIR/.env.example $AGENT_DIR/.env"
-  echo "  Make sure ASGARDEO_REDIRECT_URI=https://boa-agent.apis.coach:445/callback"
+  echo "  Make sure IDP_REDIRECT_URI=https://boa-agent.apis.coach:445/callback"
   exit 1
 fi
 if grep -q "localhost" "$AGENT_DIR/.env" 2>/dev/null; then
   echo ""
   echo "  WARNING: .env still contains 'localhost' references."
-  echo "  Ensure ASGARDEO_REDIRECT_URI=https://boa-agent.apis.coach:445/callback"
+  echo "  Ensure IDP_REDIRECT_URI=https://boa-agent.apis.coach:445/callback"
   echo ""
 fi
 echo "      .env found."

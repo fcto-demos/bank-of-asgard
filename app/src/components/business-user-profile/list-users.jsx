@@ -159,7 +159,7 @@ const ListUsers = () => {
         "Content-Type": "application/scim+json",
       },
       method: "GET",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/o/scim2/Users`,
+      url: `${environmentConfig.IDP_BASE_URL}/o/scim2/Users`,
     };
 
     httpSwitch
@@ -179,7 +179,7 @@ const ListUsers = () => {
       setDeletingUserId(userId);
       const requestConfig = {
         method: "DELETE",
-        url: `${environmentConfig.ASGARDEO_BASE_URL}/o/scim2/Users/${userId}`,
+        url: `${environmentConfig.IDP_BASE_URL}/o/scim2/Users/${userId}`,
         headers: {
           Accept: "*/*",
           "Content-Type": "application/scim+json",
@@ -218,7 +218,7 @@ const ListUsers = () => {
 
     const requestConfig = {
       method: "PATCH",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/o/scim2/Users/${updatedUser.id}`,
+      url: `${environmentConfig.IDP_BASE_URL}/o/scim2/Users/${updatedUser.id}`,
       headers: {
         Accept: "application/scim+json",
         "Content-Type": "application/scim+json",
@@ -271,7 +271,7 @@ const ListUsers = () => {
     if (currentRoleId) {
       await httpSwitch.request({
         method: "PATCH",
-        url: `${environmentConfig.ASGARDEO_BASE_URL}/o/scim2/v2/Roles/${currentRoleId}`,
+        url: `${environmentConfig.IDP_BASE_URL}/o/scim2/v2/Roles/${currentRoleId}`,
         headers: {
           Accept: "application/scim+json",
           "Content-Type": "application/scim+json",
@@ -290,7 +290,7 @@ const ListUsers = () => {
 
     await httpSwitch.request({
       method: "PATCH",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/o/scim2/v2/Roles/${newRoleId}`,
+      url: `${environmentConfig.IDP_BASE_URL}/o/scim2/v2/Roles/${newRoleId}`,
       headers: {
         Accept: "application/scim+json",
         "Content-Type": "application/scim+json",
@@ -317,7 +317,7 @@ const ListUsers = () => {
   const getRoleIdByName = async (roleName) => {
     const requestConfig = {
       method: "GET",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/o/scim2/v2/Roles?filter=displayName eq ${encodeURIComponent(roleName)}`,
+      url: `${environmentConfig.IDP_BASE_URL}/o/scim2/v2/Roles?filter=displayName eq ${encodeURIComponent(roleName)}`,
       headers: {
         Accept: "application/scim+json",
       },

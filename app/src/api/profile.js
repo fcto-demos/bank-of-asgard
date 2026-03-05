@@ -61,7 +61,7 @@ export const resetPassword = (username, currentPassword, newPassword) => {
       "Access-Control-Allow-Origin": environmentConfig.APP_BASE_URL,
     },
     method: "PATCH",
-    baseURL: environmentConfig.ASGARDEO_BASE_URL,
+    baseURL: environmentConfig.IDP_BASE_URL,
     url: "scim2/Me",
     withCredentials: true,
   };

@@ -64,7 +64,7 @@ const AddUser = ({ onCancel }) => {
   const getRoleIdByName = async (roleName) => {
     const requestConfig = {
       method: "GET",
-      url: `${environmentConfig.ASGARDEO_BASE_URL}/o/scim2/v2/Roles?filter=displayName eq ${encodeURIComponent(roleName)}`,
+      url: `${environmentConfig.IDP_BASE_URL}/o/scim2/v2/Roles?filter=displayName eq ${encodeURIComponent(roleName)}`,
       headers: {
         Accept: "application/scim+json",
       },
@@ -132,14 +132,14 @@ const AddUser = ({ onCancel }) => {
         },
         method: "POST",
         data: valuePayload,
-        url: `${environmentConfig.ASGARDEO_BASE_URL}/o/scim2/Users`
+        url: `${environmentConfig.IDP_BASE_URL}/o/scim2/Users`
       });
 
       if (response.status === 201) {
         const newRoleId = await getRoleIdByName("Member");
         await httpSwitch.request({
             method: "PATCH",
-            url: `${environmentConfig.ASGARDEO_BASE_URL}/o/scim2/v2/Roles/${newRoleId}`,
+            url: `${environmentConfig.IDP_BASE_URL}/o/scim2/v2/Roles/${newRoleId}`,
             headers: {
               Accept: "application/scim+json",
               "Content-Type": "application/scim+json",

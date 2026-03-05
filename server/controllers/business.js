@@ -18,13 +18,13 @@
 
 import axios from "axios";
 import { getAccessToken, getOrganizationToken } from "../middleware/auth.js";
-import { agent, ASGARDEO_BASE_URL } from "../config.js";
+import { agent, IDP_BASE_URL } from "../config.js";
 
 export async function isBusinessNameAvailable(businessName) {
 
   const token = await getAccessToken();
   const response = await axios.post(
-    `${ASGARDEO_BASE_URL}/api/server/v1/organizations/check-name`,
+    `${IDP_BASE_URL}/api/server/v1/organizations/check-name`,
     { name: businessName },
     {
       headers: {
@@ -42,7 +42,7 @@ export async function createOrganization(businessName, creatorId, creatorUsernam
 
   const token = await getAccessToken();
   const response = await axios.post(
-    `${ASGARDEO_BASE_URL}/api/server/v1/organizations`,
+    `${IDP_BASE_URL}/api/server/v1/organizations`,
     {
       name: businessName,
       attributes: [
@@ -66,7 +66,7 @@ export async function getUserIdInOrganization(organizationId, username) {
 
   const token = await getOrganizationToken(organizationId);
   const response = await axios.get(
-    `${ASGARDEO_BASE_URL}/o/scim2/Users`,
+    `${IDP_BASE_URL}/o/scim2/Users`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -91,7 +91,7 @@ export async function getAdminRoleIdInOrganization(organizationId) {
 
   const token = await getOrganizationToken(organizationId);
   const response = await axios.get(
-    `${ASGARDEO_BASE_URL}/o/scim2/v2/Roles`,
+    `${IDP_BASE_URL}/o/scim2/v2/Roles`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -115,7 +115,7 @@ export async function addUserToAdminRole(organizationId, roleId, userId) {
   
   const token = await getOrganizationToken(organizationId);
   const response = await axios.patch(
-    `${ASGARDEO_BASE_URL}/o/scim2/v2/Roles/${roleId}`,
+    `${IDP_BASE_URL}/o/scim2/v2/Roles/${roleId}`,
     {
       Operations: [
         {
@@ -146,7 +146,7 @@ export async function getRoleIdByName(roleName) {
   const { sub, act } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
   console.log(`[getRoleIdByName] Token sub: ${sub}, act: ${JSON.stringify(act)}`);
   const response = await axios.get(
-    `${ASGARDEO_BASE_URL}/scim2/v2/Roles`,
+    `${IDP_BASE_URL}/scim2/v2/Roles`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -172,7 +172,7 @@ export async function addUserToRole(roleId, userId) {
   const { sub, act } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
   console.log(`[addUserToRole] Token sub: ${sub}, act: ${JSON.stringify(act)}`);
   const response = await axios.patch(
-    `${ASGARDEO_BASE_URL}/scim2/v2/Roles/${roleId}`,
+    `${IDP_BASE_URL}/scim2/v2/Roles/${roleId}`,
     {
       Operations: [
         {
@@ -197,7 +197,7 @@ export async function getOrganizationId(organizationName) {
   
   const token = await getAccessToken();
   const response = await axios.get(
-    `${ASGARDEO_BASE_URL}/api/server/v1/organizations`,
+    `${IDP_BASE_URL}/api/server/v1/organizations`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -221,7 +221,7 @@ export async function deleteOrganization(organizationId) {
   
   const token = await getAccessToken();
   const response = await axios.delete(
-    `${ASGARDEO_BASE_URL}/api/server/v1/organizations/${organizationId}`,
+    `${IDP_BASE_URL}/api/server/v1/organizations/${organizationId}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,

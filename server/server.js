@@ -23,7 +23,7 @@ import pino from "pino";
 
 import { getAccessToken, requireBearer } from "./middleware/auth.js";
 import { addUserToAdminRole, addUserToRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getRoleIdByName, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
-import { agent, ASGARDEO_BASE_URL, ASGARDEO_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, USER_STORE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
+import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, USER_STORE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
 
 const corsOptions = {
   origin: [VITE_REACT_APP_CLIENT_BASE_URL],
@@ -80,7 +80,7 @@ async function createUser(userData) {
   const token = await getAccessToken();
   logger.debug("createUser: access token acquired");
 
-  const scimUrl = `${ASGARDEO_BASE_URL_SCIM2}/Users`;
+  const scimUrl = `${IDP_BASE_URL_SCIM2}/Users`;
   logger.debug({ url: scimUrl, username, accountType }, "createUser: calling SCIM2 Users API");
 
   const response = await axios.post(
@@ -241,7 +241,7 @@ async function deleteUser(req) {
   const token = await getAccessToken();
   const userAccessToken = req.token;
 
-  const me = await axios.get(`${ASGARDEO_BASE_URL_SCIM2}/Me`, {
+  const me = await axios.get(`${IDP_BASE_URL_SCIM2}/Me`, {
     headers: {
       Authorization: `Bearer ${userAccessToken}`,
       Accept: "application/scim+json"
@@ -255,7 +255,7 @@ async function deleteUser(req) {
   }
 
   const response = await axios.delete(
-    `${ASGARDEO_BASE_URL_SCIM2}/Users/${scimId}`,
+    `${IDP_BASE_URL_SCIM2}/Users/${scimId}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -310,7 +310,7 @@ app.get("/business", async (req, res) => {
     const organizationId = req.query.organizationId;
     const token = await getAccessToken();
     const response = await axios.get(
-    `${ASGARDEO_BASE_URL}/api/server/v1/organizations/${organizationId}`,
+    `${IDP_BASE_URL}/api/server/v1/organizations/${organizationId}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -349,7 +349,7 @@ app.patch("/business-update", async (req, res) => {
     const token = await getAccessToken();
 
     const response = await axios.patch(
-      `${ASGARDEO_BASE_URL}/api/server/v1/organizations/${organizationId}`,
+      `${IDP_BASE_URL}/api/server/v1/organizations/${organizationId}`,
       [
         {
           operation,
@@ -385,7 +385,7 @@ app.patch("/business-update", async (req, res) => {
 
 app.get("/transactions-summary", requireBearer, async (req, res) => {
   try {
-    const userInfo = await axios.get(`${ASGARDEO_BASE_URL}/oauth2/userinfo`, {
+    const userInfo = await axios.get(`${IDP_BASE_URL}/oauth2/userinfo`, {
       headers: { Authorization: `Bearer ${req.token}` },
       httpsAgent: agent,
     });

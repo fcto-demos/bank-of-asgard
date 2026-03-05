@@ -183,7 +183,7 @@ const IDPForm = ({ organizationId, onIdpAdded, fetchAppConfig, getAppId, onCance
     try {
       await request({
         method: "POST",
-        url: `${environmentConfig.ASGARDEO_BASE_URL}/o/api/server/v1/identity-providers`,
+        url: `${environmentConfig.IDP_BASE_URL}/o/api/server/v1/identity-providers`,
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
@@ -199,7 +199,7 @@ const IDPForm = ({ organizationId, onIdpAdded, fetchAppConfig, getAppId, onCance
       const applicationId = await getAppId();
         await request({
         method: "PATCH",
-        url: `${environmentConfig.ASGARDEO_BASE_URL}/o/api/server/v1/applications/${applicationId}`,
+        url: `${environmentConfig.IDP_BASE_URL}/o/api/server/v1/applications/${applicationId}`,
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",

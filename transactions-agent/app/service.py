@@ -1,13 +1,17 @@
+import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Literal, Dict
 
+import httpx
 import yaml
 from fastapi.responses import HTMLResponse
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.messages import TextMessage
 from autogen_core import CancellationToken
+from autogen_ext.models.anthropic import AnthropicChatCompletionClient
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_core.models import ModelFamily, ModelInfo
 from dotenv import load_dotenv
@@ -40,10 +44,52 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 
 load_dotenv()
 
-# Asgardeo configuration
-client_id = os.environ.get('ASGARDEO_CLIENT_ID')
-base_url = os.environ.get('ASGARDEO_BASE_URL')
-redirect_uri = os.environ.get('ASGARDEO_REDIRECT_URI', 'http://localhost:8011/callback')
+
+class GatewayTokenManager:
+    """Fetches and caches an OAuth2 client-credentials token for the WSO2 API Gateway."""
+
+    def __init__(self, token_endpoint: str, client_id: str, client_secret: str):
+        self._token_endpoint = token_endpoint
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._token: str | None = None
+        self._expires_at: float = 0.0
+        self._lock = asyncio.Lock()
+
+    async def get_token(self) -> str:
+        async with self._lock:
+            if self._token and time.monotonic() < self._expires_at:
+                return self._token
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    self._token_endpoint,
+                    data={"grant_type": "client_credentials"},
+                    auth=(self._client_id, self._client_secret),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            self._token = data["access_token"]
+            self._expires_at = time.monotonic() + data.get("expires_in", 3600) - 30
+            logger.info("Gateway access token refreshed (expires in %ss)", data.get("expires_in", 3600))
+            return self._token
+
+
+class GatewayBearerAuth(httpx.Auth):
+    """httpx auth handler that injects a fresh gateway token on every LLM request."""
+
+    def __init__(self, token_manager: GatewayTokenManager):
+        self._manager = token_manager
+
+    async def async_auth_flow(self, request):
+        token = await self._manager.get_token()
+        request.headers["Authorization"] = f"Bearer {token}"
+        yield request
+
+
+# IDP configuration
+client_id = os.environ.get('IDP_CLIENT_ID')
+base_url = os.environ.get('IDP_BASE_URL')
+redirect_uri = os.environ.get('IDP_REDIRECT_URI', 'http://localhost:8011/callback')
 
 # Agent credentials
 agent_id = os.environ.get('AGENT_ID')
@@ -98,7 +144,48 @@ class TextResponse(BaseModel):
 
 
 # Build model client based on configured provider
-if llm_provider == 'gemini':
+_gateway_cfg = _llm_cfg.get("gateway", {})
+_use_gateway = _gateway_cfg.get("enabled", False)
+
+_default_models = {
+    "gemini": "gemini-2.5-flash-lite",
+    "anthropic": "claude-sonnet-4-5-20250929",
+    "openai": "gpt-4o-mini",
+}
+
+if _use_gateway:
+    logger.info("LLM routing via WSO2 API Gateway (provider=%s)", llm_provider)
+    _gw_token_manager = GatewayTokenManager(
+        token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
+        client_id=os.environ["GATEWAY_CLIENT_ID"],
+        client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
+    )
+    _gw_http_client = httpx.AsyncClient(auth=GatewayBearerAuth(_gw_token_manager))
+
+    if llm_provider == 'anthropic':
+        # Gateway exposes Anthropic's native API — use the proper Anthropic client
+        model_client = AnthropicChatCompletionClient(
+            model=llm_model or _default_models["anthropic"],
+            base_url=os.environ["GATEWAY_BASE_URL"],
+            api_key="unused",  # overridden by http_client Bearer auth
+            http_client=_gw_http_client,
+        )
+    else:
+        # OpenAI / Gemini: gateway exposes an OpenAI-compatible endpoint
+        model_client = OpenAIChatCompletionClient(
+            model=llm_model or _default_models.get(llm_provider, "gpt-4o-mini"),
+            base_url=os.environ["GATEWAY_BASE_URL"],
+            api_key="unused",  # overridden by http_client Bearer auth
+            http_client=_gw_http_client,
+            model_info=ModelInfo(
+                vision=True,
+                function_calling=True,
+                json_output=True,
+                structured_output=True,
+                family=ModelFamily.UNKNOWN,
+            ),
+        )
+elif llm_provider == 'gemini':
     model_client = OpenAIChatCompletionClient(
         model=llm_model or "gemini-2.5-flash-lite",
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -112,17 +199,9 @@ if llm_provider == 'gemini':
         ),
     )
 elif llm_provider == 'anthropic':
-    model_client = OpenAIChatCompletionClient(
+    model_client = AnthropicChatCompletionClient(
         model=llm_model or "claude-sonnet-4-5-20250929",
-        base_url="https://api.anthropic.com/v1/",
         api_key=anthropic_api_key,
-        model_info=ModelInfo(
-            vision=True,
-            function_calling=True,
-            json_output=True,
-            structured_output=True,
-            family=ModelFamily.UNKNOWN,
-        ),
     )
 else:  # default: openai
     model_client = OpenAIChatCompletionClient(

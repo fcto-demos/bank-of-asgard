@@ -111,7 +111,7 @@ const EditProfile = ({ userInfo, onUpdateSuccess, onCancel }) => {
         },
         method: "PATCH",
         data: payload,
-        url: `${environmentConfig.ASGARDEO_BASE_URL}/scim2/Me`
+        url: `${environmentConfig.IDP_BASE_URL}/scim2/Me`
       });
 
       if (response.status == 200) {

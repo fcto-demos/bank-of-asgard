@@ -23,7 +23,7 @@ app = FastAPI(
     description="Secure transactions API protected by Asgardeo JWT validation.",
 )
 
-cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3002").split(",")
 
 app.add_middleware(
     CORSMiddleware,
