@@ -143,8 +143,9 @@ export async function addUserToAdminRole(organizationId, roleId, userId) {
 export async function getRoleIdByName(roleName) {
 
   const token = await getAccessToken();
-  const { sub, act } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
-  console.log(`[getRoleIdByName] Token sub: ${sub}, act: ${JSON.stringify(act)}`);
+  const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+  const { sub, act, scope, scp } = payload;
+  console.log(`[getRoleIdByName] Token sub: ${sub}, act: ${JSON.stringify(act)}, scope: ${scope || JSON.stringify(scp)}`);
   const response = await axios.get(
     `${IDP_BASE_URL}/scim2/v2/Roles`,
     {
@@ -169,8 +170,9 @@ export async function getRoleIdByName(roleName) {
 export async function addUserToRole(roleId, userId) {
 
   const token = await getAccessToken();
-  const { sub, act } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
-  console.log(`[addUserToRole] Token sub: ${sub}, act: ${JSON.stringify(act)}`);
+  const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+  const { sub, act, scope, scp } = payload;
+  console.log(`[addUserToRole] Token sub: ${sub}, act: ${JSON.stringify(act)}, scope: ${scope || JSON.stringify(scp)}`);
   const response = await axios.patch(
     `${IDP_BASE_URL}/scim2/v2/Roles/${roleId}`,
     {

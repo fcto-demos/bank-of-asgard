@@ -108,7 +108,7 @@ When changing a port, also update:
 > The organization switch grant type is available only after shared access is enabled.
 
 4. Add the Authorized redirect URLs and allowed origins:
-   redirect url: `https://localhost:5003`, allowed origin: `https://localhost:5003 http://localhost:5173`
+   redirect url: `https://localhost:3002`, allowed origin: `https://localhost:3002 http://localhost:5173`
 
 5. Enable API Authorization access for the following API resources:
 

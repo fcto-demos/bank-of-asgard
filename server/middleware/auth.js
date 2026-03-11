@@ -53,7 +53,7 @@ export const getAccessToken = async () => {
     return tokenData.access_token;
   }
 
-  console.log("Fetching new access token... ");
+  console.log(`Fetching new access token using CLIENT_ID: ${CLIENT_ID}`);
 
   try {
     const response = await axios.post(
@@ -85,6 +85,7 @@ export const getAccessToken = async () => {
         tokenData.expires_at * 1000
       ).toISOString()}`
     );
+    console.log(`[getAccessToken] Granted scopes: ${tokenData.scope}`);
     return tokenData.access_token;
   } catch (error) {
     console.log("Error fetching token:", error);

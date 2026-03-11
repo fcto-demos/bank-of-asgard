@@ -139,7 +139,12 @@ app.post("/signup", async (req, res) => {
         await addUserToRole(roleId, userId);
         logger.info({ userId }, "POST /signup: user assigned to Read_Transactions role");
       } catch (roleError) {
-        logger.warn({ userId, message: roleError.message }, "POST /signup: failed to assign Read_Transactions role");
+        logger.error({
+          userId,
+          message: roleError.message,
+          status: roleError.response?.status,
+          detail: roleError.response?.data,
+        }, "POST /signup: failed to assign Read_Transactions role");
       }
 
       try {
