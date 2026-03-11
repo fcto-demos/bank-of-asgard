@@ -250,6 +250,11 @@ TRANSACTIONS_API_BASE_URL=http://transactions-api:8010   # use container name wh
 OPENAI_API_KEY=<OPENAI_API_KEY>
 # GEMINI_API_KEY=<GEMINI_API_KEY>
 # ANTHROPIC_API_KEY=<ANTHROPIC_API_KEY>
+
+# WSO2 Agent Manager — optional, only needed when running with instrumentation (see below)
+# AMP_OTEL_ENDPOINT=http://host.containers.internal:22893/otel   # use this when running in a container
+# AMP_OTEL_ENDPOINT=http://localhost:22893/otel                   # use this when running natively
+# AMP_AGENT_API_KEY=<AMP_AGENT_API_KEY>
 ```
 
 2. Add the agent WebSocket URL to `app/public/config.js`:
@@ -270,11 +275,11 @@ cp llm_config.yaml ~/podman_share/llm_config.yaml
 2. Start both services from the repo root
 
 ```bash
+# Without Agent Manager instrumentation (default)
 podman compose up --build -d
-```
-Or with Podman
-```bash
-podman-compose up --build -d
+
+# With WSO2 Agent Manager instrumentation
+podman compose -f docker-compose.yml -f docker-compose.amp.yml up --build -d
 ```
 
 3. View logs
@@ -305,5 +310,10 @@ uvicorn app.main:app --reload --port 8010
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+
+# Without Agent Manager instrumentation (default)
 uvicorn app.service:app --reload --port 8011
+
+# With WSO2 Agent Manager instrumentation
+amp-instrument uvicorn app.service:app --reload --port 8011
 ```
