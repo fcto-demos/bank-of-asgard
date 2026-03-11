@@ -1,0 +1,237 @@
+{
+  "info": {
+    "name": "Bank of Asgard — Transactions API",
+    "description": "Bank of Asgard — Transactions API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Get transaction summary for a user (admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "disabled": false,
+                "type": "default"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Returns a summary of transactions for a given `user_sub`, including total count,\nrecent transactions, and monthly counts.\nProtected by the `admin_provision` scope.\n",
+            "url": {
+              "raw": "{{BASE_URL}}/admin/transactions?user_sub={{USER_ID}}&limit=5",
+              "protocol": "",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "admin",
+                "transactions?user_sub={{USER_ID}}&limit=5"
+              ],
+              "query": [
+                {
+                  "key": "user_sub",
+                  "value": "{{USER_ID}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ],
+              "variable": []
+            }
+          }
+        },
+        {
+          "name": "Provision demo transactions for a user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "disabled": false,
+                "type": "default"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "disabled": false,
+                "type": "default"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Seeds the in-memory store with realistic demo transactions for a given `user_sub`.\nProtected by the `admin_provision` scope (client credentials grant).\nThis endpoint is intended for demo setup and is not user-facing.\n",
+            "url": {
+              "raw": "{{baseUrl}}/admin/provision",
+              "protocol": "",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "provision"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"days_back\": 90,\n  \"num_transactions\": 60,\n  \"user_sub\": \"{{USER_ID}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "API info",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "disabled": false,
+                "type": "default"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Returns the name and version of the API. No authentication required.",
+            "url": {
+              "raw": "{{BASE_URL}}/",
+              "protocol": "",
+              "host": [
+                "{{BASE_URL}}/"
+              ],
+              "path": [],
+              "query": [],
+              "variable": []
+            }
+          }
+        },
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "disabled": false,
+                "type": "default"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Returns the current health status and server timestamp. No authentication required.",
+            "url": {
+              "raw": "{{BASE_URL}}/health",
+              "protocol": "",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "health"
+              ],
+              "query": [],
+              "variable": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transactions",
+      "item": [
+        {
+          "name": "Get authenticated user's transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "disabled": false,
+                "type": "default"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Returns the transaction list for the currently authenticated user.\nThe user identity is derived entirely from the JWT `sub` claim — users\ncan only retrieve their own data.\n\nSupports On-Behalf-Of (OBO) tokens: if an agent acts on behalf of a user,\n`sub` is the user's identity and `act.sub` is the agent's client ID.\n",
+            "url": {
+              "raw": "{{baseUrl}}/transactions",
+              "protocol": "",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": ""
+                },
+                {
+                  "key": "end_date",
+                  "value": ""
+                },
+                {
+                  "key": "type",
+                  "value": "debit"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ],
+              "variable": []
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "CLIENT_ID",
+      "value": "123",
+      "type": "default"
+    },
+    {
+      "key": "CLIENT_SECRET",
+      "value": "456",
+      "type": "default"
+    },
+    {
+      "key": "USER_ID",
+      "value": "333",
+      "type": "default"
+    },
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:8010",
+      "type": "default"
+    }
+  ]
+}

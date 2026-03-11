@@ -1,0 +1,679 @@
+openapi: 3.0.3
+x-42c-accept-empty-security: true
+info:
+  title: Bank of Asgard — Transactions API
+  version: "1.0.0"
+  description: |
+    Secure transactions API protected by JWT validation.
+    User endpoints require a bearer token with the `read_transactions` scope.
+    Admin endpoints require a bearer token with the `admin_provision` scope (client credentials grant).
+  contact:
+    name: Bank of Asgard API Support
+    email: api-support@bankofasgard.example
+  license:
+    name: Proprietary
+servers:
+  - url: https://localhost:8010
+    description: Local development server (TLS must be configured locally)
+tags:
+  - name: System
+    description: Health and status endpoints
+  - name: Transactions
+    description: Operations on the authenticated user's transactions
+  - name: Admin
+    description: Administrative operations requiring elevated privileges
+paths:
+  /:
+    get:
+      operationId: getApiInfo
+      tags: [System]
+      summary: API info
+      description: Returns the name and version of the API. No authentication required.
+      security: []
+      responses:
+        '200':
+          description: API name and version
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    enum: ["Bank of Asgard Transactions API"]
+                  version:
+                    type: string
+                    enum: ["1.0.0"]
+                additionalProperties: false
+              example:
+                message: Bank of Asgard Transactions API
+                version: "1.0.0"
+        '400':
+          description: Malformed request syntax on root endpoint
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication enforced by upstream gateway on root endpoint
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /health:
+    get:
+      operationId: getHealth
+      tags: [System]
+      summary: Health check
+      description: Returns the current health status and server timestamp. No authentication required.
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: healthy
+                timestamp: "2025-03-11T10:00:00.000000"
+        '400':
+          description: Malformed request syntax on health endpoint
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication enforced by upstream gateway on health endpoint
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /transactions:
+    get:
+      operationId: listTransactions
+      tags: [Transactions]
+      summary: Get authenticated user's transactions
+      description: |
+        Returns the transaction list for the currently authenticated user.
+        The user identity is derived entirely from the JWT `sub` claim — users
+        can only retrieve their own data.
+
+        Supports On-Behalf-Of (OBO) tokens: if an agent acts on behalf of a user,
+        `sub` is the user's identity and `act.sub` is the agent's client ID.
+      security:
+        - OAuth2: [read_transactions]
+      parameters:
+        - name: start_date
+          in: query
+          description: Filter transactions on or after this date (YYYY-MM-DD).
+          required: false
+          schema:
+            type: string
+            format: date
+            maxLength: 10
+            example: "2025-01-01"
+        - name: end_date
+          in: query
+          description: Filter transactions on or before this date (YYYY-MM-DD).
+          required: false
+          schema:
+            type: string
+            format: date
+            maxLength: 10
+            example: "2025-03-31"
+        - name: type
+          in: query
+          description: Filter by transaction type.
+          required: false
+          schema:
+            type: string
+            enum: [debit, credit, transfer]
+            example: debit
+        - name: limit
+          in: query
+          description: Maximum number of transactions to return.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 1000
+            default: 50
+            example: 20
+      responses:
+        '200':
+          description: List of transactions for the authenticated user
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+              example:
+                transactions:
+                  - id: "txn_a1b2c3d4"
+                    date: "2025-03-01"
+                    amount: 42.50
+                    currency: USD
+                    type: debit
+                    category: Groceries
+                    merchant: Whole Foods Market
+                    description: Weekly grocery run
+                    balance_after: 1234.56
+                    reference: "REF-20250301-001"
+                    status: completed
+                total: 1
+                user_sub: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+        '400':
+          description: Invalid query parameter value for `GET /transactions`
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Bearer token is absent or failed signature validation
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Token lacks the `read_transactions` scope
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /admin/provision:
+    post:
+      operationId: provisionTransactions
+      tags: [Admin]
+      summary: Provision demo transactions for a user
+      description: |
+        Seeds the in-memory store with realistic demo transactions for a given `user_sub`.
+        Protected by the `admin_provision` scope (client credentials grant).
+        This endpoint is intended for demo setup and is not user-facing.
+      security:
+        - OAuth2: [admin_provision]
+      requestBody:
+        required: true
+        description: The target user and generation parameters for demo transaction seeding.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvisionRequest'
+            example:
+              user_sub: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+              num_transactions: 40
+              days_back: 90
+      responses:
+        '200':
+          description: Transactions provisioned successfully
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvisionResponse'
+              example:
+                status: ok
+                provisioned: 40
+                user_sub: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+        '400':
+          description: Invalid request body for `POST /admin/provision`
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Admin token is absent or failed signature validation
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Token lacks the `admin_provision` scope required to seed data
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /admin/transactions:
+    get:
+      operationId: adminListTransactions
+      tags: [Admin]
+      summary: Get transaction summary for a user (admin)
+      description: |
+        Returns a summary of transactions for a given `user_sub`, including total count,
+        recent transactions, and monthly counts.
+        Protected by the `admin_provision` scope.
+      security:
+        - OAuth2: [admin_provision]
+      parameters:
+        - name: user_sub
+          in: query
+          description: The subject identifier of the target user.
+          required: true
+          schema:
+            type: string
+            format: uuid
+            maxLength: 36
+            example: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+        - name: limit
+          in: query
+          description: Maximum number of recent transactions to include in the response.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 5
+            example: 5
+      responses:
+        '200':
+          description: Transaction summary for the specified user
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTransactionSummary'
+              example:
+                user_sub: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+                total: 40
+                recent:
+                  - id: "txn_a1b2c3d4"
+                    date: "2025-03-01"
+                    amount: 42.50
+                    currency: USD
+                    type: debit
+                    category: Groceries
+                    merchant: Whole Foods Market
+                    description: Weekly grocery run
+                    balance_after: 1234.56
+                    reference: "REF-20250301-001"
+                    status: completed
+                monthly_counts:
+                  "2025-03": 5
+                  "2025-02": 8
+                  "2025-01": 12
+        '400':
+          description: Missing or invalid `user_sub` parameter for `GET /admin/transactions`
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Admin token is absent, expired, or has an invalid signature
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Token lacks the `admin_provision` scope required to query admin data
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+components:
+  headers:
+    RateLimitLimit:
+      description: Maximum number of requests permitted in the current rate-limit window.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100000
+    RateLimitReset:
+      description: Unix timestamp (seconds) at which the current rate-limit window resets.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+  responses:
+    TooManyRequests:
+      description: Rate limit exceeded — back off and retry after the reset window.
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalServerError:
+      description: An unexpected error occurred on the server.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      description: |
+        Asgardeo OAuth 2.0. Use the `authorizationCode` flow for user-facing operations
+        and the `clientCredentials` flow for machine-to-machine admin operations.
+        All issued JWTs must conform to RFC8725 (JSON Web Token Best Current Practices):
+        short-lived tokens, explicit `aud` claim validation, and RS256/RS384/RS512 algorithms only.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://api.asgardeo.io/t/{org}/oauth2/authorize
+          tokenUrl: https://api.asgardeo.io/t/{org}/oauth2/token
+          scopes:
+            read_transactions: Read the authenticated user's transactions
+        clientCredentials:
+          tokenUrl: https://api.asgardeo.io/t/{org}/oauth2/token
+          scopes:
+            admin_provision: Provision and view transaction data for any user (admin only)
+  schemas:
+    HealthResponse:
+      type: object
+      description: Response body returned by the health check endpoint.
+      properties:
+        status:
+          type: string
+          enum: [healthy]
+        timestamp:
+          type: string
+          format: date-time
+          maxLength: 35
+          example: "2025-03-11T10:00:00.000000"
+      additionalProperties: false  
+    Transaction:
+      type: object
+      description: A single financial transaction record.
+      properties:
+        id:
+          type: string
+          pattern: '^txn_[a-z0-9]+$'
+          maxLength: 50
+          example: "txn_a1b2c3d4"
+        date:
+          type: string
+          format: date
+          maxLength: 10
+          example: "2025-03-01"
+        amount:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1000000000
+          example: 42.50
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          maxLength: 3
+          example: USD
+        type:
+          type: string
+          enum: [debit, credit, transfer]
+          example: debit
+        category:
+          type: string
+          pattern: '^[^\r\n]{1,100}$'
+          maxLength: 100
+          example: Groceries
+        merchant:
+          type: string
+          pattern: '^[^\r\n]{1,200}$'
+          maxLength: 200
+          example: Whole Foods Market
+        description:
+          type: string
+          pattern: '^[^\r\n]{0,500}$'
+          maxLength: 500
+          example: Weekly grocery run
+        balance_after:
+          type: number
+          format: float
+          minimum: -1000000000
+          maximum: 1000000000
+          example: 1234.56
+        reference:
+          type: string
+          pattern: '^[A-Z0-9\-]{1,50}$'
+          maxLength: 50
+          example: "REF-20250301-001"
+        status:
+          type: string
+          enum: [completed, pending, failed]
+          example: completed
+      additionalProperties: false
+    TransactionListResponse:
+      type: object
+      description: Paginated list of transactions belonging to the authenticated user.
+      additionalProperties: false
+      properties:
+        transactions:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/Transaction'
+          example:
+            - id: "txn_a1b2c3d4"
+              date: "2025-03-01"
+              amount: 42.50
+              currency: USD
+              type: debit
+              category: Groceries
+              merchant: Whole Foods Market
+              description: Weekly grocery run
+              balance_after: 1234.56
+              reference: "REF-20250301-001"
+              status: completed
+        total:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          example: 25
+        user_sub:
+          type: string
+          format: uuid
+          maxLength: 36
+          example: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+    ProvisionRequest:
+      type: object
+      description: Parameters for seeding demo transactions into the in-memory store.
+      additionalProperties: false
+      required:
+        - user_sub
+      properties:
+        user_sub:
+          type: string
+          format: uuid
+          maxLength: 36
+          example: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+        num_transactions:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 1000
+          default: 40
+          example: 40
+        days_back:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 3650
+          default: 90
+          example: 90
+    ProvisionResponse:
+      type: object
+      description: Confirmation of how many transactions were seeded for the user.
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        provisioned:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 1000
+          example: 40
+        user_sub:
+          type: string
+          format: uuid
+          maxLength: 36
+          example: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+    AdminTransactionSummary:
+      type: object
+      description: Aggregated transaction summary for a user, used by admin tooling.
+      additionalProperties: false
+      properties:
+        user_sub:
+          type: string
+          format: uuid
+          maxLength: 36
+          example: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+        total:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 100000
+          example: 40
+        recent:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Transaction'
+          example:
+            - id: "txn_a1b2c3d4"
+              date: "2025-03-01"
+              amount: 42.50
+              currency: USD
+              type: debit
+              category: Groceries
+              merchant: Whole Foods Market
+              description: Weekly grocery run
+              balance_after: 1234.56
+              reference: "REF-20250301-001"
+              status: completed
+        monthly_counts:
+          type: object
+          description: Map of YYYY-MM month strings to transaction counts. Bounded to a rolling 24-month window.
+          maxProperties: 24
+          additionalProperties:
+            type: integer
+            format: int32
+            minimum: 0
+            maximum: 10000
+          example:
+            "2025-03": 5
+            "2025-02": 8
+            "2025-01": 12
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      description: Standard error body returned on 4xx and 5xx responses.
+      properties:
+        detail:
+          type: string
+          pattern: '^[^\r\n]{0,1000}$'
+          maxLength: 1000
+          example: "Not authenticated"
