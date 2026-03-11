@@ -20,7 +20,7 @@ import { environmentConfig } from "../../util/environment-util";
 const GOLD = "#997029";
 const AGENT_WS_URL = environmentConfig.TRANSACTIONS_AGENT_URL || "ws://localhost:8011";
 
-const ChatComponent = ({ sessionId }) => {
+const ChatComponent = ({ sessionId, secured = false }) => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [isConnected, setIsConnected] = useState(false);
@@ -60,7 +60,7 @@ const ChatComponent = ({ sessionId }) => {
 
   // WebSocket connection
   useEffect(() => {
-    const wsUrl = `${AGENT_WS_URL}/chat?session_id=${sessionId}`;
+    const wsUrl = `${AGENT_WS_URL}/chat?session_id=${sessionId}&secured=${secured}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
@@ -342,6 +342,7 @@ const ChatComponent = ({ sessionId }) => {
 
 ChatComponent.propTypes = {
   sessionId: PropTypes.string.isRequired,
+  secured: PropTypes.bool,
 };
 
 export default ChatComponent;

@@ -7,9 +7,13 @@ import {
   Paper,
   Button,
   Divider,
+  Switch,
+  FormControlLabel,
+  Chip,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import LockIcon from "@mui/icons-material/Lock";
+import ShieldIcon from "@mui/icons-material/Shield";
 import ChatComponent from "../components/transactions/ChatComponent";
 import { ROUTES } from "../constants/app-constants";
 
@@ -17,15 +21,22 @@ const GOLD = "#997029";
 
 const TransactionsPage = () => {
   const navigate = useNavigate();
-  const [sessionId] = useState(
+  const [secured, setSecured] = useState(false);
+  const [sessionId, setSessionId] = useState(
     () => "session_" + Math.random().toString(36).substring(2, 15)
   );
+
+  const handleSecuredToggle = (e) => {
+    setSecured(e.target.checked);
+    // New session so the agent reconnects with the updated secured param
+    setSessionId("session_" + Math.random().toString(36).substring(2, 15));
+  };
 
   return (
     <section className="about_section layout_padding">
       <Container maxWidth="xl">
         {/* Page header */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 3 }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 3, flexWrap: "wrap" }}>
           <Button
             startIcon={<ArrowBackIcon />}
             onClick={() => navigate(ROUTES.USER_PROFILE)}
@@ -43,6 +54,38 @@ const TransactionsPage = () => {
           >
             Transaction Assistant
           </Typography>
+          <Box sx={{ ml: "auto", display: "flex", alignItems: "center", gap: 1 }}>
+            <ShieldIcon sx={{ color: secured ? GOLD : "#bbb", fontSize: 20 }} />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={secured}
+                  onChange={handleSecuredToggle}
+                  sx={{
+                    "& .MuiSwitch-switchBase.Mui-checked": { color: GOLD },
+                    "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { bgcolor: GOLD },
+                  }}
+                />
+              }
+              label={
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>AI Guardrails</Typography>
+                  <Chip
+                    label={secured ? "ON" : "OFF"}
+                    size="small"
+                    sx={{
+                      height: 18,
+                      fontSize: "0.65rem",
+                      fontWeight: 700,
+                      bgcolor: secured ? "#e8f5e9" : "#f5f5f5",
+                      color: secured ? "#2e7d32" : "#999",
+                    }}
+                  />
+                </Box>
+              }
+              sx={{ m: 0 }}
+            />
+          </Box>
         </Box>
 
         <Box
@@ -55,7 +98,7 @@ const TransactionsPage = () => {
         >
           {/* Left column — AI chat */}
           <Box sx={{ flex: "0 0 420px", minWidth: 300 }}>
-            <ChatComponent sessionId={sessionId} />
+            <ChatComponent sessionId={sessionId} secured={secured} />
           </Box>
 
           {/* Right column — Info panel */}

@@ -153,30 +153,23 @@ _default_models = {
     "openai": "gpt-4o-mini",
 }
 
-if _use_gateway:
-    logger.info("LLM routing via WSO2 API Gateway (provider=%s)", llm_provider)
-    _gw_token_manager = GatewayTokenManager(
-        token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
-        client_id=os.environ["GATEWAY_CLIENT_ID"],
-        client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
-    )
-    _gw_http_client = httpx.AsyncClient(auth=GatewayBearerAuth(_gw_token_manager))
 
+def _build_gateway_model_client(base_url: str, token_manager: GatewayTokenManager):
+    """Build a model client routed via the WSO2 API Gateway at the given base URL."""
+    http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager))
     if llm_provider == 'anthropic':
-        # Gateway exposes Anthropic's native API — use the proper Anthropic client
-        model_client = AnthropicChatCompletionClient(
+        return AnthropicChatCompletionClient(
             model=llm_model or _default_models["anthropic"],
-            base_url=os.environ["GATEWAY_BASE_URL"],
-            api_key="unused",  # overridden by http_client Bearer auth
-            http_client=_gw_http_client,
+            base_url=base_url,
+            api_key="unused",
+            http_client=http_client,
         )
     else:
-        # OpenAI / Gemini: gateway exposes an OpenAI-compatible endpoint
-        model_client = OpenAIChatCompletionClient(
+        return OpenAIChatCompletionClient(
             model=llm_model or _default_models.get(llm_provider, "gpt-4o-mini"),
-            base_url=os.environ["GATEWAY_BASE_URL"],
-            api_key="unused",  # overridden by http_client Bearer auth
-            http_client=_gw_http_client,
+            base_url=base_url,
+            api_key="unused",
+            http_client=http_client,
             model_info=ModelInfo(
                 vision=True,
                 function_calling=True,
@@ -185,6 +178,19 @@ if _use_gateway:
                 family=ModelFamily.UNKNOWN,
             ),
         )
+
+
+if _use_gateway:
+    logger.info("LLM routing via WSO2 API Gateway (provider=%s)", llm_provider)
+    _gw_token_manager = GatewayTokenManager(
+        token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
+        client_id=os.environ["GATEWAY_CLIENT_ID"],
+        client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
+    )
+    model_client = _build_gateway_model_client(os.environ["GATEWAY_BASE_URL"], _gw_token_manager)
+    model_client_secured = _build_gateway_model_client(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_token_manager)
+    logger.info("Gateway base URL: %s", os.environ["GATEWAY_BASE_URL"])
+    logger.info("Gateway secured URL: %s", os.environ["GATEWAY_BASE_URL_SECURED"])
 elif llm_provider == 'gemini':
     model_client = OpenAIChatCompletionClient(
         model=llm_model or "gemini-2.5-flash-lite",
@@ -203,6 +209,7 @@ elif llm_provider == 'anthropic':
         model=llm_model or "claude-sonnet-4-5-20250929",
         api_key=anthropic_api_key,
     )
+    model_client_secured = model_client
 else:  # default: openai
     model_client = OpenAIChatCompletionClient(
         model=llm_model or "gpt-4o-mini",
@@ -212,6 +219,7 @@ else:  # default: openai
             "max_tokens": 2000,
         }
     )
+    model_client_secured = model_client
 
 # Per-session state — each WebSocket gets its own auth manager and token cache
 auth_managers: Dict[str, AutogenAuthManager] = {}
@@ -219,10 +227,37 @@ state_mapping: Dict[str, str] = {}
 websocket_connections: Dict[str, WebSocket] = {}
 
 
+def _extract_gateway_error(e: Exception) -> str | None:
+    """Walk the exception chain looking for known gateway HTTP errors and return a user-friendly message."""
+    cause = e
+    while cause is not None:
+        if isinstance(cause, httpx.HTTPStatusError):
+            status = cause.response.status_code
+            if status == 446:
+                logger.warning("Guardrail triggered (446): %s", cause.response.text)
+                try:
+                    data = cause.response.json()
+                    msg = data.get("message") or data.get("detail")
+                    if isinstance(msg, dict):
+                        msg = msg.get("actionReason") or msg.get("action") or str(msg)
+                    return msg or cause.response.text or "Your request was blocked by an AI guardrail policy."
+                except Exception:
+                    return cause.response.text or "Your request was blocked by an AI guardrail policy."
+            if status == 429:
+                logger.warning("Rate limit hit (429): %s", cause.response.text)
+                return "I'm currently busy — the AI service is at capacity. Please try again in a moment."
+        cause = getattr(cause, "__cause__", None) or getattr(cause, "__context__", None)
+    # Fallback: check string representation in case the lib swallowed the original exception
+    msg = str(e)
+    if "446" in msg:
+        return "Your request was blocked by an AI guardrail policy."
+    if "429" in msg:
+        return "I'm currently busy — the AI service is at capacity. Please try again in a moment."
+    return None
+
+
 def _user_friendly_error(e: Exception) -> str:
     msg = str(e)
-    if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
-        return "I'm currently unavailable due to API rate limits. Please try again shortly."
     if "401" in msg or "authentication" in msg.lower() or "api key" in msg.lower():
         return "There is a configuration problem with the AI service. Please contact the administrator."
     if "timeout" in msg.lower():
@@ -252,14 +287,18 @@ async def run_agent(assistant: AssistantAgent, websocket: WebSocket):
                 TextResponse(content=response.chat_message.content).model_dump()
             )
         except Exception as e:
-            logger.error(f"Agent error processing message: {e}")
-            await websocket.send_json(
-                TextResponse(content=_user_friendly_error(e)).model_dump()
-            )
+            guardrail_msg = _extract_gateway_error(e)
+            if guardrail_msg:
+                await websocket.send_json(TextResponse(content=guardrail_msg).model_dump())
+            else:
+                logger.error(f"Agent error processing message: {e}")
+                await websocket.send_json(
+                    TextResponse(content=_user_friendly_error(e)).model_dump()
+                )
 
 
 @app.websocket("/chat")
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
+async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: bool = False):
     """WebSocket endpoint for the Transaction Assistant chat."""
 
     async def message_handler(message: AuthRequestMessage):
@@ -294,9 +333,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         ))
     )
 
+    active_client = model_client_secured if secured else model_client
+    logger.info("Session %s using %s gateway", session_id, "secured" if secured else "base")
+
     banking_assistant = AssistantAgent(
         "banking_assistant",
-        model_client=model_client,
+        model_client=active_client,
         tools=[get_transactions_tool],
         reflect_on_tool_use=True,
         system_message=agent_system_prompt,
