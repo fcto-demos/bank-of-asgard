@@ -262,6 +262,8 @@ def _user_friendly_error(e: Exception) -> str:
         return "There is a configuration problem with the AI service. Please contact the administrator."
     if "timeout" in msg.lower():
         return "The request timed out. Please try again."
+    if "no oauth token" in msg.lower() or "oauth" in msg.lower():
+        return "I wasn't able to authorise access to your transactions. Please try again."
     return "An unexpected error occurred. Please try again."
 
 
