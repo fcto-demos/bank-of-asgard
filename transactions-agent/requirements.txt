@@ -15,4 +15,3 @@ python-multipart>=0.0.5
 starlette>=0.20.0
 websockets>=10.0
 asgardeo-ai==0.2.2
-amp-instrumentation

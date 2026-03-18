@@ -1,3 +1,0 @@
-services:
-  transactions-agent:
-    command: ["amp-instrument", "uvicorn", "app.service:app", "--host", "0.0.0.0", "--port", "8011"]
