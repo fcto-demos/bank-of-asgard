@@ -159,7 +159,7 @@ When changing a port, also update:
 
 ## Transactions AI Agent — Setup
 
-The project includes an AI-powered transaction assistant. See **[docs/transactions-agent-setup.md](docs/transactions-agent-setup.md)** for the full architecture, security pattern, and end-to-end test checklist. The summary below covers the required configuration steps.
+The project includes an AI-powered transaction assistant built with **LangChain**. See **[docs/transactions-agent-setup.md](docs/transactions-agent-setup.md)** for the full architecture, security pattern, and end-to-end test checklist. The summary below covers the required configuration steps.
 
 ### Asgardeo / WSO2 IS Configuration
 
@@ -226,11 +226,14 @@ gateway:
 ```env
 # transactions-agent/.env
 GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
+GATEWAY_BASE_URL_SECURED=<GATEWAY_BASE_URL_SECURED>   # guardrail-enabled endpoint (optional)
 GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
 GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
 GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
 ```
 The agent fetches and automatically refreshes an OAuth2 client credentials token on every LLM request. No provider API key is needed when the gateway is enabled.
+
+`GATEWAY_BASE_URL_SECURED` points to the guardrail-protected variant of the gateway endpoint (e.g. with prompt injection / content policies enforced). When set, the frontend can activate it by connecting to the agent WebSocket with `?secured=true`. If unset, the agent falls back to `GATEWAY_BASE_URL` for both modes.
 
 ### Transactions Agent
 
@@ -252,6 +255,7 @@ OPENAI_API_KEY=<OPENAI_API_KEY>
 # ANTHROPIC_API_KEY=<ANTHROPIC_API_KEY>
 
 # WSO2 Agent Manager — optional, only needed when running with instrumentation (see below)
+# Requires amp-instrumentation and opentelemetry-instrumentation-langchain<0.53.0 (already pinned in requirements.txt)
 # AMP_OTEL_ENDPOINT=http://host.containers.internal:22893/otel   # use this when running in a container
 # AMP_OTEL_ENDPOINT=http://localhost:22893/otel                   # use this when running natively
 # AMP_AGENT_API_KEY=<AMP_AGENT_API_KEY>
