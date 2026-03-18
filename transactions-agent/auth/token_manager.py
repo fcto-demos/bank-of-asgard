@@ -49,14 +49,7 @@ class TokenManager:
             OAuth token if found and valid, None otherwise
         """
         key = self._create_cache_key(config)
-        token = self.token_store.get(key)
-
-        # Clean up expired tokens
-        if token and token.is_expired():
-            self.token_store.pop(key, None)
-            return None
-
-        return token
+        return self.token_store.get(key)
 
     def _create_cache_key(self, config: AuthConfig) -> Tuple:
         """Create a cache key from auth configuration.
