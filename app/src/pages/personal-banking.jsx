@@ -221,6 +221,21 @@ const PersonalBankingPage = ({ setSiteSection }) => {
         </div>
       </section>
 
+      <section className="layout_padding-bottom">
+        <div className="container">
+          <div style={{ textAlign: "center" }}>
+            <p style={{ marginBottom: "8px", color: "#666", fontSize: "14px" }}>
+              Secured identity powered by
+            </p>
+            <img
+              src="/images/powered-by-aws.png"
+              alt="Powered by AWS"
+              style={{ height: "60px" }}
+            />
+          </div>
+        </div>
+      </section>
+
       <section className="client_section layout_padding">
         <div className="container ">
           <div className="heading_container heading_center">

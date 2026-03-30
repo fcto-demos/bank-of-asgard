@@ -6,14 +6,11 @@ from pathlib import Path
 from typing import Literal, Dict
 
 import httpx
+import openai
 import yaml
 from fastapi.responses import HTMLResponse
-from autogen_agentchat.agents import AssistantAgent
-from autogen_agentchat.messages import TextMessage
-from autogen_core import CancellationToken
-from autogen_ext.models.anthropic import AnthropicChatCompletionClient
-from autogen_ext.models.openai import OpenAIChatCompletionClient
-from autogen_core.models import ModelFamily, ModelInfo
+from strands import Agent
+from strands.models import AnthropicModel, OpenAIModel
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
 from pydantic import BaseModel
@@ -21,7 +18,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.prompt import agent_system_prompt
 from app.tools import get_my_transactions
-from autogen.tool import SecureFunctionTool
+from strands.tool import SecureStrandsTool
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
 
 from asgardeo_ai import AgentConfig
@@ -36,11 +33,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Suppress verbose third-party INFO logs
-logging.getLogger("autogen_core.events").setLevel(logging.WARNING)
-logging.getLogger("autogen_core").setLevel(logging.WARNING)
-logging.getLogger("autogen_agentchat").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("anthropic").setLevel(logging.WARNING)
+logging.getLogger("strands").setLevel(logging.WARNING)
 
 load_dotenv()
 
@@ -154,29 +150,24 @@ _default_models = {
 }
 
 
-def _build_gateway_model_client(base_url: str, token_manager: GatewayTokenManager):
-    """Build a model client routed via the WSO2 API Gateway at the given base URL."""
+def _build_gateway_model(gw_url: str, token_manager: GatewayTokenManager):
+    """Build a Strands model client routed via the WSO2 API Gateway."""
     http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager))
     if llm_provider == 'anthropic':
-        return AnthropicChatCompletionClient(
-            model=llm_model or _default_models["anthropic"],
-            base_url=base_url,
+        return AnthropicModel(
+            client_args={"base_url": gw_url, "api_key": "unused", "http_client": http_client},
+            model_id=llm_model or _default_models["anthropic"],
+            max_tokens=4096,
+        )
+    else:
+        gw_openai_client = openai.AsyncOpenAI(
+            base_url=gw_url,
             api_key="unused",
             http_client=http_client,
         )
-    else:
-        return OpenAIChatCompletionClient(
-            model=llm_model or _default_models.get(llm_provider, "gpt-4o-mini"),
-            base_url=base_url,
-            api_key="unused",
-            http_client=http_client,
-            model_info=ModelInfo(
-                vision=True,
-                function_calling=True,
-                json_output=True,
-                structured_output=True,
-                family=ModelFamily.UNKNOWN,
-            ),
+        return OpenAIModel(
+            client=gw_openai_client,
+            model_id=llm_model or _default_models.get(llm_provider, "gpt-4o-mini"),
         )
 
 
@@ -187,37 +178,31 @@ if _use_gateway:
         client_id=os.environ["GATEWAY_CLIENT_ID"],
         client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
     )
-    model_client = _build_gateway_model_client(os.environ["GATEWAY_BASE_URL"], _gw_token_manager)
-    model_client_secured = _build_gateway_model_client(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_token_manager)
+    model_client = _build_gateway_model(os.environ["GATEWAY_BASE_URL"], _gw_token_manager)
+    model_client_secured = _build_gateway_model(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_token_manager)
     logger.info("Gateway base URL: %s", os.environ["GATEWAY_BASE_URL"])
     logger.info("Gateway secured URL: %s", os.environ["GATEWAY_BASE_URL_SECURED"])
 elif llm_provider == 'gemini':
-    model_client = OpenAIChatCompletionClient(
-        model=llm_model or "gemini-2.5-flash-lite",
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        api_key=gemini_api_key,
-        model_info=ModelInfo(
-            vision=True,
-            function_calling=True,
-            json_output=True,
-            structured_output=True,
-            family=ModelFamily.UNKNOWN,
-        ),
+    model_client = OpenAIModel(
+        client_args={
+            "api_key": gemini_api_key,
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        },
+        model_id=llm_model or _default_models["gemini"],
     )
+    model_client_secured = model_client
 elif llm_provider == 'anthropic':
-    model_client = AnthropicChatCompletionClient(
-        model=llm_model or "claude-sonnet-4-5-20250929",
-        api_key=anthropic_api_key,
+    model_client = AnthropicModel(
+        client_args={"api_key": anthropic_api_key},
+        model_id=llm_model or _default_models["anthropic"],
+        max_tokens=4096,
     )
     model_client_secured = model_client
 else:  # default: openai
-    model_client = OpenAIChatCompletionClient(
-        model=llm_model or "gpt-4o-mini",
-        api_key=openai_api_key,
-        model_kwargs={
-            "temperature": 0.1,
-            "max_tokens": 2000,
-        }
+    model_client = OpenAIModel(
+        client_args={"api_key": openai_api_key},
+        model_id=llm_model or _default_models["openai"],
+        params={"temperature": 0.1, "max_tokens": 2000},
     )
     model_client_secured = model_client
 
@@ -267,7 +252,7 @@ def _user_friendly_error(e: Exception) -> str:
     return "An unexpected error occurred. Please try again."
 
 
-async def run_agent(assistant: AssistantAgent, websocket: WebSocket):
+async def run_agent(assistant: Agent, websocket: WebSocket):
     """Run the chat loop — receive user messages and stream agent responses."""
     while True:
         user_input = await websocket.receive_text()
@@ -277,16 +262,9 @@ async def run_agent(assistant: AssistantAgent, websocket: WebSocket):
             break
 
         try:
-            response = await assistant.on_messages(
-                [TextMessage(content=user_input, source="user")],
-                cancellation_token=CancellationToken()
-            )
-
-            for i, msg in enumerate(response.inner_messages):
-                logger.debug(f"[Agent Step {i + 1}] {msg.content}")
-
+            result = await assistant.invoke_async(user_input)
             await websocket.send_json(
-                TextResponse(content=response.chat_message.content).model_dump()
+                TextResponse(content=str(result)).model_dump()
             )
         except Exception as e:
             guardrail_msg = _extract_gateway_error(e)
@@ -318,8 +296,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: boo
     websocket_connections[session_id] = websocket
 
     # Wire the transactions tool with OBO token auth
-    get_transactions_tool = SecureFunctionTool(
-        get_my_transactions,
+    get_transactions_tool = SecureStrandsTool(
+        func=get_my_transactions,
         description=(
             "Fetch the current user's bank transactions. "
             "Supports optional filters: start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), "
@@ -335,15 +313,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: boo
         ))
     )
 
-    active_client = model_client_secured if secured else model_client
+    active_model = model_client_secured if secured else model_client
     logger.info("Session %s using %s gateway", session_id, "secured" if secured else "base")
 
-    banking_assistant = AssistantAgent(
-        "banking_assistant",
-        model_client=active_client,
+    banking_assistant = Agent(
+        model=active_model,
         tools=[get_transactions_tool],
-        reflect_on_tool_use=True,
-        system_message=agent_system_prompt,
+        system_prompt=agent_system_prompt,
+        callback_handler=None,
     )
 
     await websocket.accept()
