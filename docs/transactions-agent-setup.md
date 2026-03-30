@@ -84,6 +84,8 @@ In the IS Console → **Agents** → **+ New Agent**:
 - Click **Register** — the console will display the agent's **Agent ID** and **Agent Secret** once. Copy both immediately.
   - These become `AGENT_ID` and `AGENT_SECRET` in the environment variables.
 
+> **Agent secret expiry:** Agent secrets have the same validity as user passwords. If you have set password policies and expiry time, those secrets will expire. When the secret expires, the agent fails to authenticate with the error `Agent authentication failed with status: FAIL_INCOMPLETE` (Asgardeo error code `ABA-60003: Password has expired`). This looks like a connectivity or library issue but is purely a credential problem. Fix: regenerate the secret in the IS console under the agent's settings and update `AGENT_SECRET` in your environment.
+
 ### 3. Authorise the Server Application for Provisioning and Role Assignment
 
 The server application (`SERVER_APP_CLIENT_ID`) needs two sets of permissions:

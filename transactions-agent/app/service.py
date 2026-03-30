@@ -8,6 +8,13 @@ from pathlib import Path
 from typing import Literal, Dict, List, Any
 
 import httpx
+
+# Configure logging before asgardeo imports so the patch is in place when its clients are created
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 import yaml
 from fastapi.responses import HTMLResponse
 from langchain.agents import create_agent
@@ -27,18 +34,11 @@ from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig,
 from asgardeo_ai import AgentConfig
 from asgardeo.models import AsgardeoConfig
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
 logger = logging.getLogger(__name__)
 
 # Suppress verbose third-party INFO logs
 logging.getLogger("langchain").setLevel(logging.WARNING)
 logging.getLogger("langchain_core").setLevel(logging.WARNING)
-logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 
 load_dotenv()
