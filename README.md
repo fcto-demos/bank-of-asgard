@@ -143,17 +143,44 @@ When changing a port, also update:
 
 4. Create a copy of `app/public/config.example.js` inside the `app/public/` folder. And name it as `config.js`. Update the [config values](docs/config-properties.md) accordingly.
 
-## Starting Front and Backend Apps
+## Starting All Services
+
+The project consists of **four services**, each with its own configuration. Start them all for full functionality.
+
+### 1. React Frontend (port 5173)
 
 1. Navigate to `App_home/app` and run `npm i`.
-
 2. From within the `App_home/app` directory, execute `npm start` to run the application.
 
-3. Create a copy of `server/.env.example` inside the `server/` folder. And name it as `.env`. Update the according to the commented instructions.
+### 2. Node/Express Server (port 3002)
 
+3. Create a copy of `server/.env.example` inside the `server/` folder and name it `.env`. Update it according to the commented instructions.
 4. Navigate to `App_home/server` and run `npm i`.
-
 5. From within the `App_home/server` directory, execute `nodemon server.js` to run the server.
+
+### 3. Transactions API (port 8010)
+
+6. Create a copy of `transactions-api/.env.example` inside `transactions-api/` and name it `.env`. Fill in the JWKS and CORS values (see [Transactions API](#transactions-api) below).
+7. From within the `transactions-api/` directory:
+
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8010
+```
+
+### 4. Transactions Agent (port 8011)
+
+8. Create a copy of `transactions-agent/.env.example` inside `transactions-agent/` and name it `.env`. Fill in the IDP, agent credentials, and LLM API key values (see [Transactions Agent](#transactions-agent) below).
+9. From within the `transactions-agent/` directory:
+
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.service:app --reload --port 8011
+```
+
+> Alternatively, run all four services together with `podman compose up --build -d` from the repo root (see [Running with Docker / Podman](#running-with-docker--podman-recommended)).
 
 ---
 
@@ -183,15 +210,17 @@ Before running the agent services, complete the following in your identity provi
 
    - Ensure those scopes are present: `internal_role_mgt_view`, `internal_role_mgt_users_update`
 
-4. Configure the existing **frontend SPA application** (the one using `APP_CLIENT_ID` in `config.js`)
+4. **Create a dedicated IS application for the Transactions Agent** (Console → Applications → New Application → Standard-Based Application / Traditional Web Application — a **confidential client**, not a SPA):
 
-   - **Add `read_transactions` scope** to the existing frontend SPA application (the one using `APP_CLIENT_ID` in `config.js`) so users can grant the agent access.
+   - Name: e.g. `Transactions Agent App`
+   - Grant types: `Code`, `Refresh Token`
+   - Authorized redirect URLs: `http://localhost:8011/callback`
+   - Allowed origins: `http://localhost:8011`
+   - Under API Authorization, add `Transactions API` with scope `read_transactions`
 
+   Copy the generated **Client ID** into `IDP_CLIENT_ID` in `transactions-agent/.env`.
 
-   - Add the agent redirect URI to the Authorized redirect URLs list: `http://localhost:8011/callback`
-
-
-   - Add the agent endpoint to Allowed Origins list: `http://localhost:8011`
+   > **Note:** This is a separate application from the frontend SPA (`APP_CLIENT_ID` in `config.js`). Do **not** add the agent's redirect URI or `read_transactions` scope to the existing frontend SPA application.
 
 
 ### Transactions API
@@ -292,18 +321,4 @@ podman compose down
 
 ### Running Natively (development)
 
-1. From within the `transactions-api/` directory:
-
-```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8010
-```
-
-2. From within the `transactions-agent/` directory:
-
-```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.service:app --reload --port 8011
-```
+See steps 3 and 4 in [Starting All Services](#starting-all-services) above for the native run commands for the Transactions API and Transactions Agent.

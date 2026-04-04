@@ -1,0 +1,13 @@
+include = ["transactions-api/**", "transactions-agent/**"]
+
+[lint]
+# E/F/W = pycodestyle/pyflakes errors, I = isort, B = bugbear, S = security (bandit-equivalent)
+select = ["E", "F", "W", "I", "B", "S"]
+ignore = [
+  "S101",  # allow assert statements
+  "S105",  # allow hardcoded passwords in test/example files
+  "B008",  # allow function calls in default args (common in FastAPI/Depends)
+]
+
+[format]
+quote-style = "double"

@@ -18,7 +18,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.prompt import agent_system_prompt
 from app.tools import get_my_transactions
-from strands.tool import SecureStrandsTool
+from strands_ext.tool import SecureStrandsTool
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
 
 from asgardeo_ai import AgentConfig
@@ -37,6 +37,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("anthropic").setLevel(logging.WARNING)
 logging.getLogger("strands").setLevel(logging.WARNING)
+
+# Suppress known strands/pydantic incompatibility warning for ParsedTextBlock (citations)
+import warnings
+warnings.filterwarnings("ignore", message=".*PydanticSerializationUnexpectedValue.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*ParsedTextBlock.*", category=UserWarning)
 
 load_dotenv()
 
@@ -222,7 +227,9 @@ def _extract_gateway_error(e: Exception) -> str | None:
                 logger.warning("Guardrail triggered (446): %s", cause.response.text)
                 try:
                     data = cause.response.json()
-                    msg = data.get("message") or data.get("detail")
+                    # Prefer description (e.g. "Violation of Bedrock Guardrails detected.")
+                    # over message which may be a generic "Runtime Error"
+                    msg = data.get("description") or data.get("message") or data.get("detail")
                     if isinstance(msg, dict):
                         msg = msg.get("actionReason") or msg.get("action") or str(msg)
                     return msg or cause.response.text or "Your request was blocked by an AI guardrail policy."

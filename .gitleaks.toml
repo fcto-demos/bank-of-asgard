@@ -1,0 +1,18 @@
+title = "Bank of Asgard — Gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Ignore placeholder values in example env files"
+paths = [
+  '''\.env\.example$''',
+  '''config\.example\.js$''',
+  '''config\.prod\.js$''',
+]
+
+[[allowlists]]
+description = "Ignore conditional-auth-script placeholder tokens"
+paths = [
+  '''scripts/.*\.js$''',
+]
