@@ -10,7 +10,7 @@
 #   anthropic: claude-sonnet-4-5-20250929
 
 provider: anthropic
-# model: gpt-4o-mini
+# model: claude-sonnet-4-5-20250929
 
 # WSO2 API Gateway — optional, disabled by default.
 # When enabled, LLM calls are routed via the gateway using OAuth2 client credentials
