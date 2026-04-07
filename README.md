@@ -57,24 +57,27 @@ When changing a port, also update:
 
 1. Add authorized redirect URL: `http://localhost:5173` and allowed origin: `http://localhost:5173` (Adapt this to the port used by the app. 5173 is the defaut Vite port.)
 
-2. Add the `mobile`, `country`, `email` and `accountType` to the **profile** scope ( `User Attributes & Stores` &rarr; `Attributes` &rarr; `OpenId Connect` &rarr; `Scopes` &rarr; `Profile` &rarr; `New Attribute`)
+2. Navigate in protocol tab, in Access Token section Enable JWT (Instead of Opaque Token)
 
-3. Enable the following scopes and attributes within the client application created.  
+3. Add the `mobile`, `country`, `email` and `accountType` to the **profile** scope ( `User Attributes & Stores` &rarr; `Attributes` &rarr; `OpenId Connect` &rarr; `Scopes` &rarr; `Profile` &rarr; `New Attribute`)
+
+4. Enable the following scopes and attributes within the client application created.  
     * Profile: `Country, First Name, Last Name, Username, Birth Date, AccountType, Business Name, Email`
     * Email: `email`
     * Phone : `telephone`
     * Address:   `country`
 
-4. Enable the following authenticators within the client application:
+5. Enable the following authenticators within the client application:
 
      * `Identifier First` - First Step
      * `Username and Password`, `Passkey` - Second Step
      * `TOTP` and `Email OTP` - Third Step
-5. Configure the conditional authentication script (Replace the `<NODE_SERVER_BASE_PATH>` with server URL) with the one found at [conditional-auth-script.js](./scripts/conditional-auth-script.js).
+6. Configure the conditional authentication script (Replace the `<NODE_SERVER_BASE_PATH>` with server URL) with the one found at [conditional-auth-script.js](./scripts/conditional-auth-script.js).
 
 > [!IMPORTANT]	
 >
 > If you are using Asgardeo or an identity server deployment on a VM for example, you must expose the server (running on localhost, port 3002) to the Internet. You can do this with something like **[ngrok](https://ngrok.com)** for example and use that URL as NODE_SERVER_BASE_PATH.
+> For Dev environment (localhost) NODE_SERVER_BASE_PATH = http://localhost:3002
 
 6. As part of the demo, you create, modify and delete users and roles. You therefore must enable API authorization access for the following API resources:
 
@@ -110,7 +113,9 @@ When changing a port, also update:
 4. Add the Authorized redirect URLs and allowed origins:
    redirect url: `https://localhost:3002`, allowed origin: `https://localhost:3002 http://localhost:5173`
 
-5. Enable API Authorization access for the following API resources:
+5. Navigate in protocol tab, in Access Token section Enable JWT (Instead of Opaque Token)
+
+6. Enable API Authorization access for the following API resources:
 
      - Management APIs
        - SCIM2 Users API with the scopes:
@@ -132,6 +137,16 @@ When changing a port, also update:
          internal_org_user_mgt_view internal_org_role_mgt_delete internal_org_role_mgt_create internal_org_role_mgt_update internal_org_role_mgt_view
          ```
 
+## Transaction Application Application
+
+This application is used for the OBO (On Behalf use case)
+
+1. Create a Traditional web application (Bank of Asgard - Transaction Agent) with following redirect url http://localhost:8011/callback.
+2. Navigate to the Protocol tab, grant type section allow : Code, Client Credential, Token exchanges
+3. In the same tab, access token section enable JWT
+4. In User Attributes section, enable Role (you should have openid profile roles scopes)
+5. Navigate to the "Shared Access" tab and share the application with all organizations.
+6. Navigate to the "Advanced" tab and enable App-Native Authentication
 
 ## Additional Setup
 
