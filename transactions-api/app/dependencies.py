@@ -29,16 +29,17 @@ class TokenData(BaseModel):
 class JWKSClient:
     """JWKS client for fetching and caching JSON Web Key Sets"""
 
-    def __init__(self, jwks_url: str, cache_ttl: int = 3600):
+    def __init__(self, jwks_url: str, cache_ttl: int = 3600, ssl_verify: bool = True):
         self.jwks_url = jwks_url
         self.cache_ttl = cache_ttl
+        self.ssl_verify = ssl_verify
         self._jwks_cache: Optional[Dict[str, Any]] = None
         self._cache_timestamp: float = 0
 
     def _fetch_jwks(self) -> Dict[str, Any]:
         """Fetch JWKS from the JWKS URL"""
         try:
-            response = requests.get(self.jwks_url, timeout=10)
+            response = requests.get(self.jwks_url, timeout=10, verify=self.ssl_verify)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:
@@ -100,7 +101,8 @@ def get_jwks_client() -> JWKSClient:
         )
 
     cache_ttl = int(os.getenv('JWKS_CACHE_TTL', '3600'))
-    return JWKSClient(jwks_url, cache_ttl)
+    ssl_verify = os.getenv('SSL_ENABLED', 'true').lower() != 'false'
+    return JWKSClient(jwks_url, cache_ttl, ssl_verify)
 
 
 async def validate_token(
