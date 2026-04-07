@@ -44,6 +44,16 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 
 load_dotenv()
 
+# Disable SSL verification for httpx when IDP_SSL_ENABLED=false (Needed for local WSO2 IS with self-signed certificates.).
+# As asgardeo SDK does not expose an ssl_verify option, so we patch httpx.AsyncClient.
+if os.environ.get('IDP_SSL_ENABLED', 'true').lower() == 'false':
+    _orig_async_client_init = httpx.AsyncClient.__init__
+    def _patched_async_client_init(self, *args, **kwargs):
+        kwargs.setdefault('verify', False)
+        _orig_async_client_init(self, *args, **kwargs)
+    httpx.AsyncClient.__init__ = _patched_async_client_init
+    logger.warning("SSL verification disabled for httpx (IDP_SSL_ENABLED=false) — do not use in production")
+
 
 class GatewayTokenManager:
     """Fetches and caches an OAuth2 client-credentials token for the WSO2 API Gateway."""
