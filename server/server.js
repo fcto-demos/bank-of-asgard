@@ -23,7 +23,7 @@ import pino from "pino";
 
 import { getAccessToken, requireBearer } from "./middleware/auth.js";
 import { addUserToAdminRole, addUserToRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getRoleIdByName, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
-import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, USER_STORE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
+import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, USER_STORE_NAME, VITE_REACT_APP_CLIENT_BASE_URL, RISK_CHECK_ENABLED } from "./config.js";
 
 const corsOptions = {
   origin: [VITE_REACT_APP_CLIENT_BASE_URL],
@@ -42,6 +42,19 @@ const app = express();
 const logger = pino({
   level: process.env.LOG_LEVEL || "debug",
 });
+
+function isPrivateOrBogonIp(ip) {
+  return (
+    /^127\./.test(ip) ||          // loopback
+    /^10\./.test(ip) ||           // RFC 1918
+    /^192\.168\./.test(ip) ||     // RFC 1918
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) || // RFC 1918
+    /^169\.254\./.test(ip) ||     // link-local
+    /^::1$/.test(ip) ||           // IPv6 loopback
+    /^fc00:/i.test(ip) ||         // IPv6 unique local
+    ip === "0.0.0.0"
+  );
+}
 
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
@@ -212,31 +225,45 @@ app.post("/business-signup", async (req, res) => {
   }
 });
 
-
-
 // IP geolocation request
 app.post("/risk", async (req, res) => {
+  if (!RISK_CHECK_ENABLED) {
+    logger.debug("POST /risk: check disabled via environment variable, returning no risk");
+    return res.json({ hasRisk: false });
+  }
+
   try {
     let { ip, country } = req.body;
 
+    logger.debug({ ip, country }, "POST /risk: evaluating...");
+
     if (!ip || !country) {
+      logger.warn({ ip, country }, "POST /risk: missing required fields (ip or country)");
       return res
         .status(400)
         .json({ error: "IP address and country name are required" });
     }
-    
+
+    // For private/bogon IPs, omit the ip param so the API resolves the caller's real public IP
+    const resolvedIp = isPrivateOrBogonIp(ip) ? null : ip;
+    if (resolvedIp !== ip) {
+      logger.debug({ ip }, "POST /risk: private/bogon IP detected, falling back to caller's public IP");
+    }
+    const geoUrl = resolvedIp
+      ? `https://api.ipgeolocation.io/ipgeo?apiKey=${GEO_API_KEY}&ip=${resolvedIp}&fields=country_name`
+      : `https://api.ipgeolocation.io/ipgeo?apiKey=${GEO_API_KEY}&fields=country_name`;
+
     // Call the IP Geolocation API
-    const response = await axios.get(
-      `https://api.ipgeolocation.io/ipgeo?apiKey=${GEO_API_KEY}&ip=${ip}&fields=country_name`
-    );
+    const response = await axios.get(geoUrl);
 
     const country_name = response.data.country_name;
     // Determine risk based on country code
     const hasRisk = country_name !== country;
-    console.log("This country shows risk: " + hasRisk);
+    logger.info({ ip, country, resolved: country_name, hasRisk }, "POST /risk: result");
     res.json({ hasRisk });
   } catch (error) {
-    console.error("Error fetching IP geolocation:", error.message);
+    logger.error({ message: error.message }, "POST /risk: geolocation failed (If problem persists, option is to disable risk check via environment variable RISK_CHECK_ENABLED");
+    // TODO (To be discussed with owner): We should consider returning a Risk detected (true) with 2xx instead of a 500, to avoid blocking login due to transient issues with the geolocation API.
     res.status(500).json({ error: "Failed to process request" });
   }
 });
