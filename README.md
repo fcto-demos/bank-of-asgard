@@ -145,7 +145,7 @@ This application is used for the OBO (On Behalf use case)
 2. Navigate to the Protocol tab, grant type section allow : Code, Client Credential, Token exchanges
 3. In the same tab, access token section enable JWT
 4. In User Attributes section, enable Role (you should have openid profile roles scopes)
-5. Navigate to the "Shared Access" tab and share the application with all organizations.
+5. Navigate to the "Roles" tab and select organizations.
 6. Navigate to the "Advanced" tab and enable App-Native Authentication
 
 ## Additional Setup
@@ -157,6 +157,22 @@ This application is used for the OBO (On Behalf use case)
 3. [Optional] Configure [Onfido identity verification](https://wso2.com/asgardeo/docs/guides/identity-verification/add-identity-verification-with-onfido/) for your organization - If you do not have access to Onfido, you won't be able to use the profile verification feature of the application.
 
 4. Create a copy of `app/public/config.example.js` inside the `app/public/` folder. And name it as `config.js`. Update the [config values](docs/config-properties.md) accordingly.
+
+## Theming
+1. From the root menu, select Branding
+2. Select application Bank of Asgard - Front End
+3. Define the following theme
+   1. Design -> Login Layout -> Right Image
+   2. Design -> Theme Preferences -> Image
+      1. Logo URL -> https://d0475ddc-9481-4752-8b92-1c94a2eb27f6.e1-us-east-azure.choreoapps.dev/images/logo.png
+      2. Favicon URL -> https://d0475ddc-9481-4752-8b92-1c94a2eb27f6.e1-us-east-azure.choreoapps.dev/favicon.svg
+      3. Side Image URL -> https://d0475ddc-9481-4752-8b92-1c94a2eb27f6.e1-us-east-azure.choreoapps.dev/images/image-bg2.jpg
+   3. Design -> Color Palette -> Primary Color -> #825f24
+   4. Design -> Color Palette -> Secondary Color -> #E0E1E2
+
+> [!NOTE]
+>
+> The organization should also have a default Branding (when deployed from scratch)
 
 ## Starting Front and Backend Apps
 
