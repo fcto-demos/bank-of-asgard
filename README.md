@@ -57,24 +57,27 @@ When changing a port, also update:
 
 1. Add authorized redirect URL: `http://localhost:5173` and allowed origin: `http://localhost:5173` (Adapt this to the port used by the app. 5173 is the defaut Vite port.)
 
-2. Add the `mobile`, `country`, `email` and `accountType` to the **profile** scope ( `User Attributes & Stores` &rarr; `Attributes` &rarr; `OpenId Connect` &rarr; `Scopes` &rarr; `Profile` &rarr; `New Attribute`)
+2. Navigate in protocol tab, in Access Token section Enable JWT (Instead of Opaque Token)
 
-3. Enable the following scopes and attributes within the client application created.  
+3. Add the `mobile`, `country`, `email` and `accountType` to the **profile** scope ( `User Attributes & Stores` &rarr; `Attributes` &rarr; `OpenId Connect` &rarr; `Scopes` &rarr; `Profile` &rarr; `New Attribute`)
+
+4. Enable the following scopes and attributes within the client application created.  
     * Profile: `Country, First Name, Last Name, Username, Birth Date, AccountType, Business Name, Email`
     * Email: `email`
     * Phone : `telephone`
     * Address:   `country`
 
-4. Enable the following authenticators within the client application:
+5. Enable the following authenticators within the client application:
 
      * `Identifier First` - First Step
      * `Username and Password`, `Passkey` - Second Step
      * `TOTP` and `Email OTP` - Third Step
-5. Configure the conditional authentication script (Replace the `<NODE_SERVER_BASE_PATH>` with server URL) with the one found at [conditional-auth-script.js](./scripts/conditional-auth-script.js).
+6. Configure the conditional authentication script (Replace the `<NODE_SERVER_BASE_PATH>` with server URL) with the one found at [conditional-auth-script.js](./scripts/conditional-auth-script.js).
 
 > [!IMPORTANT]	
 >
 > If you are using Asgardeo or an identity server deployment on a VM for example, you must expose the server (running on localhost, port 3002) to the Internet. You can do this with something like **[ngrok](https://ngrok.com)** for example and use that URL as NODE_SERVER_BASE_PATH.
+> For Dev environment (localhost) NODE_SERVER_BASE_PATH = http://localhost:3002
 
 6. As part of the demo, you create, modify and delete users and roles. You therefore must enable API authorization access for the following API resources:
 
@@ -110,7 +113,9 @@ When changing a port, also update:
 4. Add the Authorized redirect URLs and allowed origins:
    redirect url: `https://localhost:3002`, allowed origin: `https://localhost:3002 http://localhost:5173`
 
-5. Enable API Authorization access for the following API resources:
+5. Navigate in protocol tab, in Access Token section Enable JWT (Instead of Opaque Token)
+
+6. Enable API Authorization access for the following API resources:
 
      - Management APIs
        - SCIM2 Users API with the scopes:
@@ -132,6 +137,16 @@ When changing a port, also update:
          internal_org_user_mgt_view internal_org_role_mgt_delete internal_org_role_mgt_create internal_org_role_mgt_update internal_org_role_mgt_view
          ```
 
+## Transaction Application Application
+
+This application is used for the OBO (On Behalf use case)
+
+1. Create a Traditional web application (Bank of Asgard - Transaction Agent) with following redirect url http://localhost:8011/callback.
+2. Navigate to the Protocol tab, grant type section allow : Code, Client Credential, Token exchanges
+3. In the same tab, access token section enable JWT
+4. In User Attributes section, enable Role (you should have openid profile roles scopes)
+5. Navigate to the "Roles" tab and select organizations.
+6. Navigate to the "Advanced" tab and enable App-Native Authentication
 
 ## Additional Setup
 
@@ -142,6 +157,22 @@ When changing a port, also update:
 3. [Optional] Configure [Onfido identity verification](https://wso2.com/asgardeo/docs/guides/identity-verification/add-identity-verification-with-onfido/) for your organization - If you do not have access to Onfido, you won't be able to use the profile verification feature of the application.
 
 4. Create a copy of `app/public/config.example.js` inside the `app/public/` folder. And name it as `config.js`. Update the [config values](docs/config-properties.md) accordingly.
+
+## Theming
+1. From the root menu, select Branding
+2. Select application Bank of Asgard - Front End
+3. Define the following theme
+   1. Design -> Login Layout -> Right Image
+   2. Design -> Theme Preferences -> Image
+      1. Logo URL -> https://d0475ddc-9481-4752-8b92-1c94a2eb27f6.e1-us-east-azure.choreoapps.dev/images/logo.png
+      2. Favicon URL -> https://d0475ddc-9481-4752-8b92-1c94a2eb27f6.e1-us-east-azure.choreoapps.dev/favicon.svg
+      3. Side Image URL -> https://d0475ddc-9481-4752-8b92-1c94a2eb27f6.e1-us-east-azure.choreoapps.dev/images/image-bg2.jpg
+   3. Design -> Color Palette -> Primary Color -> #825f24
+   4. Design -> Color Palette -> Secondary Color -> #E0E1E2
+
+> [!NOTE]
+>
+> The organization should also have a default Branding (when deployed from scratch)
 
 ## Starting Front and Backend Apps
 
@@ -250,6 +281,7 @@ TRANSACTIONS_API_BASE_URL=http://transactions-api:8010   # use container name wh
 OPENAI_API_KEY=<OPENAI_API_KEY>
 # GEMINI_API_KEY=<GEMINI_API_KEY>
 # ANTHROPIC_API_KEY=<ANTHROPIC_API_KEY>
+# MISTRAL_API_KEY=<MISTRAL_API_KEY>
 
 ```
 

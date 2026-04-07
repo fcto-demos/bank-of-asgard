@@ -132,7 +132,7 @@ AGENT_SECRET=<agent-client-secret>
 
 TRANSACTIONS_API_BASE_URL=http://localhost:8010   # ← not the docker container name
 
-OPENAI_API_KEY=<your-key>   # or GEMINI_API_KEY / ANTHROPIC_API_KEY
+OPENAI_API_KEY=<your-key>   # or GEMINI_API_KEY / ANTHROPIC_API_KEY / MISTRAL_API_KEY
 ```
 
 > If you previously used Docker, note that `TRANSACTIONS_API_BASE_URL` used the container name (`http://transactions-api:8010`). On the VM it must be `http://localhost:8010`.

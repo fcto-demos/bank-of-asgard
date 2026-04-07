@@ -44,6 +44,16 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 
 load_dotenv()
 
+# Disable SSL verification for httpx when SSL_ENABLED=false (Needed for local WSO2 IS with self-signed certificates.).
+# As asgardeo SDK does not expose an ssl_verify option, so we patch httpx.AsyncClient.
+if os.environ.get('SSL_ENABLED', 'true').lower() == 'false':
+    _orig_async_client_init = httpx.AsyncClient.__init__
+    def _patched_async_client_init(self, *args, **kwargs):
+        kwargs.setdefault('verify', False)
+        _orig_async_client_init(self, *args, **kwargs)
+    httpx.AsyncClient.__init__ = _patched_async_client_init
+    logger.warning("SSL verification disabled for httpx (SSL_ENABLED=false) — do not use in production")
+
 
 class GatewayTokenManager:
     """Fetches and caches an OAuth2 client-credentials token for the WSO2 API Gateway."""
@@ -131,6 +141,7 @@ llm_model = _llm_cfg.get("model")
 openai_api_key = os.environ.get('OPENAI_API_KEY')
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
 anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
+mistral_api_key = os.environ.get('MISTRAL_API_KEY')
 
 app = FastAPI(
     title="Bank of Asgard — Transactions Agent",
@@ -151,12 +162,16 @@ _default_models = {
     "gemini": "gemini-2.5-flash-lite",
     "anthropic": "claude-sonnet-4-5-20250929",
     "openai": "gpt-4o-mini",
+    "mistral": "mistral-tiny",
 }
+
+
 
 
 def _build_gateway_model_client(base_url: str, token_manager: GatewayTokenManager):
     """Build a model client routed via the WSO2 API Gateway at the given base URL."""
-    http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager))
+    _ssl_verify = os.environ.get('SSL_ENABLED', 'true').lower() != 'false'
+    http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager), verify=_ssl_verify)
     if llm_provider == 'anthropic':
         return AnthropicChatCompletionClient(
             model=llm_model or _default_models["anthropic"],
@@ -208,6 +223,20 @@ elif llm_provider == 'anthropic':
     model_client = AnthropicChatCompletionClient(
         model=llm_model or "claude-sonnet-4-5-20250929",
         api_key=anthropic_api_key,
+    )
+    model_client_secured = model_client
+elif llm_provider == 'mistral':
+    model_client = OpenAIChatCompletionClient(
+        model=llm_model or _default_models["mistral"],
+        base_url="https://api.mistral.ai/v1",
+        api_key=mistral_api_key,
+        model_info=ModelInfo(
+            vision=False,
+            function_calling=True,
+            json_output=True,
+            structured_output=True,
+            family=ModelFamily.UNKNOWN,
+        ),
     )
     model_client_secured = model_client
 else:  # default: openai
