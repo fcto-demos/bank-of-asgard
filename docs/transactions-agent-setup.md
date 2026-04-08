@@ -61,6 +61,17 @@ Token structure (OBO):
 
 The following must be configured in your Asgardeo organisation **before** running the services.
 
+The full setup requires **four IS entries**:
+
+| # | What | Kind | Credentials used in |
+|---|---|---|---|
+| 1 | **Frontend SPA** | Application | `APP_CLIENT_ID` in `app/public/config.js` |
+| 2 | **Server TWA** | Application | `SERVER_APP_CLIENT_ID` / `SERVER_APP_CLIENT_SECRET` in `server/.env` |
+| 3 | **Agent identity** | Agent — an IS principal, similar to a user | `AGENT_ID` / `AGENT_SECRET` in `transactions-agent/.env` |
+| 4 | **Agent application** | Application — public client, token exchange grant | `IDP_CLIENT_ID` in `transactions-agent/.env` |
+
+Entries 1 and 2 are registered as part of the main [README setup](../README.md#identity-provider-setup). The steps below add entries 3 and 4 and extend permissions on the existing two.
+
 ### 1. Register the Transactions API Resource
 
 In the Asgardeo Console → **API Resources**:

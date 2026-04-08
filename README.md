@@ -19,7 +19,6 @@
 
 - Asgardeo (https://console.asgardeo.io) or WSO2 Identity Server 7.2+
 
-  
 
 # Default Ports
 
@@ -36,7 +35,22 @@ When changing a port, also update:
 - `app/public/config.js` → `API_BASE_URL` / `API_SERVICE_URL` (if changing port 3002) or `TRANSACTIONS_AGENT_URL` (if changing port 8011)
 - Any redirect URIs registered in the identity provider console
 
-# Configuration Instructions
+# Identity Provider Setup
+
+The full setup requires:
+
+1. The creation of 3 applications (Frontend/Backend/Agent)
+2. The registration of the agent identity (credentials)
+3. The creation of custom attributes and addition of these attributes to the OpenID connect profiles.
+
+Following table summarizes the apps and credentials setup and where this information is configured in the various environment files. 
+
+| #    | What                  | Kind                                              | Credentials used in                                          |
+| ---- | --------------------- | ------------------------------------------------- | ------------------------------------------------------------ |
+| 1    | **Frontend SPA**      | Application                                       | `APP_CLIENT_ID` in `app/public/config.js`                    |
+| 2    | **Server TWA**        | Application                                       | `SERVER_APP_CLIENT_ID` / `SERVER_APP_CLIENT_SECRET` in `server/.env` |
+| 3    | **Agent identity**    | Agent — an IS principal, similar to a user        | `AGENT_ID` / `AGENT_SECRET` in `transactions-agent/.env`     |
+| 4    | **Agent application** | Application — public client, token exchange grant | `IDP_CLIENT_ID` in `transactions-agent/.env`                 |
 
 ## Custom Attributes
 
@@ -55,7 +69,7 @@ When changing a port, also update:
    > The organization switch grant type is available only after shared access is enabled.
 
 
-1. Add authorized redirect URL: `http://localhost:5173` and allowed origin: `http://localhost:5173` (Adapt this to the port used by the app. 5173 is the defaut Vite port.)
+1. Add authorized redirect URL: `http://localhost:5173` and allowed origin: `http://localhost:5173` (Adapt this to the port used by the app. 5173 is the default Vite port.)
 
 2. Add the `mobile`, `country`, `email` and `accountType` to the **profile** scope ( `User Attributes & Stores` &rarr; `Attributes` &rarr; `OpenId Connect` &rarr; `Scopes` &rarr; `Profile` &rarr; `New Attribute`)
 
@@ -70,11 +84,11 @@ When changing a port, also update:
      * `Identifier First` - First Step
      * `Username and Password`, `Passkey` - Second Step
      * `TOTP` and `Email OTP` - Third Step
-5. Configure the conditional authentication script (Replace the `<NODE_SERVER_BASE_PATH>` with server URL) with the one found at [conditional-auth-script.js](./scripts/conditional-auth-script.js).
+5. Configure the conditional authentication script (replace the `<NODE_SERVER_BASE_PATH>` with the backend server URL) with the one found at [conditional-auth-script.js](./scripts/conditional-auth-script.js).
 
 > [!IMPORTANT]	
 >
-> If you are using Asgardeo or an identity server deployment on a VM for example, you must expose the server (running on localhost, port 3002) to the Internet. You can do this with something like **[ngrok](https://ngrok.com)** for example and use that URL as NODE_SERVER_BASE_PATH.
+> If you are using Asgardeo or an identity server deployment on a VM for example, you must expose the server (running on localhost, port 3002) so that the identity server can access it: the server exposes a /risk endpoint which is called when a user  logs in. You can do this with something like **[ngrok](https://ngrok.com)** for example and then use the ngrok URL as the value for NODE_SERVER_BASE_PATH. 
 
 6. As part of the demo, you create, modify and delete users and roles. You therefore must enable API authorization access for the following API resources:
 
@@ -141,29 +155,9 @@ When changing a port, also update:
 
 3. [Optional] Configure [Onfido identity verification](https://wso2.com/asgardeo/docs/guides/identity-verification/add-identity-verification-with-onfido/) for your organization - If you do not have access to Onfido, you won't be able to use the profile verification feature of the application.
 
-4. Create a copy of `app/public/config.example.js` inside the `app/public/` folder. And name it as `config.js`. Update the [config values](docs/config-properties.md) accordingly.
+## Transactions Agent
 
-## Starting Front and Backend Apps
 
-1. Navigate to `App_home/app` and run `npm i`.
-
-2. From within the `App_home/app` directory, execute `npm start` to run the application.
-
-3. Create a copy of `server/.env.example` inside the `server/` folder. And name it as `.env`. Update the according to the commented instructions.
-
-4. Navigate to `App_home/server` and run `npm i`.
-
-5. From within the `App_home/server` directory, execute `nodemon server.js` to run the server.
-
----
-
-## Transactions AI Agent — Setup
-
-The project includes an AI-powered transaction assistant. See **[docs/transactions-agent-setup.md](docs/transactions-agent-setup.md)** for the full architecture, security pattern, and end-to-end test checklist. The summary below covers the required configuration steps.
-
-### Asgardeo / WSO2 IS Configuration
-
-Before running the agent services, complete the following in your identity provider console:
 
 1. **Register the Transactions API resource** (Console → API Resources):
 
@@ -173,26 +167,48 @@ Before running the agent services, complete the following in your identity provi
 
 2. **Register the Agent identity** (Console → Agents → New Agent):
 
+   - The agent gets its own IS principal (like a user account, not an application registration)
    - Name: `Transactions Agent`
+   - Copy the generated **Agent ID** and **Agent Secret** — shown only once. These become `AGENT_ID` and `AGENT_SECRET`.
 
-   - Copy the generated **Agent ID** and **Agent Secret** — shown only once
-
-3. Authorise the **server application** for provisioning (Console → Applications → server app → API Authorisation):
+3. **Register the Agent application** (Console → Applications → New Application → public client):
+   - Enable the **Token Exchange** grant type — this allows the agent to perform the OBO exchange on behalf of users
+   - Add the redirect URI: `http://localhost:8011/callback`
+   - Add the allowed origin: `http://localhost:8011`
+   - Copy the generated **Client ID** — this becomes `IDP_CLIENT_ID` in `transactions-agent/.env`
+   
+4. Authorise the **server application** for provisioning (Console → Applications → server app → API Authorisation):
 
    - Add `Transactions API` with scope `admin_provision`
-
    - Ensure those scopes are present: `internal_role_mgt_view`, `internal_role_mgt_users_update`
 
-4. Configure the existing **frontend SPA application** (the one using `APP_CLIENT_ID` in `config.js`)
+5. Configure the existing **frontend SPA application** (`APP_CLIENT_ID` in `config.js`):
 
-   - **Add `read_transactions` scope** to the existing frontend SPA application (the one using `APP_CLIENT_ID` in `config.js`) so users can grant the agent access.
+   - **Add `read_transactions` scope** so users can grant the agent access via the consent flow
 
+---
 
-   - Add the agent redirect URI to the Authorized redirect URLs list: `http://localhost:8011/callback`
+# Application Setup
 
+## Frontend & Backend
 
-   - Add the agent endpoint to Allowed Origins list: `http://localhost:8011`
+1. Create a copy of `app/public/config.example.js` inside the `app/public/` folder and name it `config.js`. Update the [config values](docs/config-properties.md) accordingly.
 
+2. Navigate to `App_home/app` and run `npm i`.
+
+3. From within the `App_home/app` directory, execute `npm start` to run the application.
+
+4. Create a copy of `server/.env.example` inside the `server/` folder and name it `.env`. Update according to the commented instructions.
+
+5. Navigate to `App_home/server` and run `npm i`.
+
+6. From within the `App_home/server` directory, execute `nodemon server.js` to run the server.
+
+---
+
+## Transactions Agent
+
+> See **[docs/transactions-agent-setup.md](docs/transactions-agent-setup.md)** for the full architecture, OBO security pattern, LLM provider details, provisioning guide, and end-to-end test checklist.
 
 ### Transactions API
 
@@ -217,7 +233,7 @@ provider: openai
 ```
 Default models: `openai → gpt-4o-mini`, `gemini → gemini-2.5-flash-lite`, `anthropic → claude-sonnet-4-5-20250929`.
 
-**Optional — WSO2 API Gateway:** to route LLM calls via a gateway instead of a direct API key, enable the gateway option and set the required variables in the agent's `.env`:
+**Optional — WSO2 API Gateway:** to route LLM calls via a gateway instead of a direct API key:
 ```yaml
 # llm_config.yaml
 gateway:
@@ -230,7 +246,7 @@ GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
 GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
 GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
 ```
-The agent fetches and automatically refreshes an OAuth2 client credentials token on every LLM request. No provider API key is needed when the gateway is enabled.
+See [docs/transactions-agent-setup.md](docs/transactions-agent-setup.md) for gateway token refresh behaviour and fallback options.
 
 ### Transactions Agent
 

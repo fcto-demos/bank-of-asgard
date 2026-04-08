@@ -26,3 +26,4 @@ package-lock.json
 *.sln
 *.sw?
 /.vite
+docs/.$architecture.drawio.bkp
