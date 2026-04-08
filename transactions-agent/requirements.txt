@@ -1,7 +1,9 @@
 fastapi==0.115.9
 uvicorn[standard]==0.34.2
-autogen_agentchat==0.7.5
-autogen-ext[openai,anthropic]==0.7.5
+langchain>=1.0.0
+langchain-core>=1.0.0
+langchain-openai>=0.3.0
+langchain-anthropic>=0.3.0
 python-dotenv>=0.19.0
 pyyaml>=6.0
 authlib==1.5.2
@@ -9,9 +11,12 @@ tiktoken==0.9.0
 cachetools==5.5.2
 requests==2.32.3
 httpx>=0.28.0
-pydantic>=1.8.0
+pydantic>=2.0.0
 PyJWT>=2.0.0
 python-multipart>=0.0.5
 starlette>=0.20.0
 websockets>=10.0
 asgardeo-ai==0.2.2
+amp-instrumentation
+opentelemetry-instrumentation-langchain<0.53.0
+langchain-mistralai>=0.2.0

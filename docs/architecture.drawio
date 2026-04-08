@@ -1,0 +1,116 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.1 Chrome/142.0.7444.265 Electron/39.8.0 Safari/537.36" version="29.6.1">
+  <diagram name="Bank of Asgard Architecture" id="arch-main">
+    <mxGraphModel dx="1002" dy="605" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="zone_local" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;opacity=20;pointerEvents=0;" value="" vertex="1">
+          <mxGeometry height="870" width="880" x="30" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="zone_local_lbl" parent="1" style="text;fontStyle=1;fontSize=14;fontColor=#6c8ebf;align=left;html=1;" value="Local Services" vertex="1">
+          <mxGeometry height="24" width="180" x="130" y="46" as="geometry" />
+        </mxCell>
+        <mxCell id="zone_ext" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;opacity=20;pointerEvents=0;" value="" vertex="1">
+          <mxGeometry height="870" width="290" x="950" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="zone_ext_lbl" parent="1" style="text;fontStyle=1;fontSize=14;fontColor=#82b366;align=left;html=1;" value="External Services" vertex="1">
+          <mxGeometry height="24" width="200" x="970" y="38" as="geometry" />
+        </mxCell>
+        <mxCell id="browser" parent="1" style="ellipse;whiteSpace=wrap;fillColor=#0050ef;strokeColor=#001DBC;fontColor=#ffffff;fontStyle=1;fontSize=12;html=1;" value="&lt;b&gt;User / Browser&lt;/b&gt;" vertex="1">
+          <mxGeometry height="60" width="160" x="365" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="frontend" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;html=1;" value="&lt;b&gt;React Frontend&lt;/b&gt;&lt;br&gt;&lt;i&gt;:5173 (Vite + React 19)&lt;/i&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;- Transactions Chat UI (WebSocket client)&lt;br&gt;- Auth, Profile, Signup Pages&lt;br&gt;- Identity Verification (Onfido SDK)&lt;br&gt;- AI Guardrails toggle&lt;/font&gt;" vertex="1">
+          <mxGeometry height="105" width="310" x="255" y="185" as="geometry" />
+        </mxCell>
+        <mxCell id="backend" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;html=1;" value="&lt;b&gt;Express Backend Server&lt;/b&gt;&lt;br&gt;&lt;i&gt;:3002 (Node.js)&lt;/i&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;- User &amp; Organization management&lt;br&gt;- Risk / Geolocation checks&lt;br&gt;- Transaction data provisioning&lt;br&gt;- SCIM2 orchestration&lt;/font&gt;" vertex="1">
+          <mxGeometry height="110" width="280" x="55" y="410" as="geometry" />
+        </mxCell>
+        <mxCell id="agent" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;html=1;" value="&lt;b&gt;Transactions Agent&lt;/b&gt;&lt;br&gt;&lt;i&gt;:8011 (FastAPI + LangChain)&lt;/i&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;- WebSocket chat server&lt;br&gt;- LangChain AI Agent + tool use&lt;br&gt;- OAuth2 PKCE flow (user consent popup)&lt;br&gt;- OBO token management (1h TTL cache)&lt;br&gt;- SecureLangChainTool (token hidden from LLM)&lt;br&gt;- AI Guardrails support (?secured=true)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="150" width="290" x="510" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="txapi" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;html=1;" value="&lt;b&gt;Transactions API&lt;/b&gt;&lt;br&gt;&lt;i&gt;:8010 (FastAPI + Python)&lt;/i&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;- JWT / OBO token validation&lt;br&gt;- User-isolated transaction data (keyed by sub)&lt;br&gt;- Scopes: read_transactions, admin_provision&lt;br&gt;- In-memory transaction store&lt;/font&gt;" vertex="1">
+          <mxGeometry height="110" width="290" x="510" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="llmconfig" parent="1" style="shape=note;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;size=15;html=1;" value="&lt;b&gt;llm_config.yaml&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;provider: openai | gemini | anthropic&lt;br&gt;gateway.enabled: true | false&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="230" x="55" y="650" as="geometry" />
+        </mxCell>
+        <mxCell id="oboflow" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;html=1;" value="&lt;b&gt;OBO Token Flow&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;1. User message triggers tool call&lt;br&gt;2. No cached token → auth_request (WS msg)&lt;br&gt;3. Browser opens OAuth2 PKCE popup&lt;br&gt;4. Agent exchanges auth code + agent credentials&lt;br&gt;5. Asgardeo returns OBO token&lt;br&gt;&amp;nbsp;&amp;nbsp;&amp;nbsp;{ sub: user, act.sub: agent }&lt;br&gt;6. Token injected into API call (hidden from LLM)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="120" width="290" x="55" y="760" as="geometry" />
+        </mxCell>
+        <mxCell id="asgardeo" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;html=1;" value="&lt;b&gt;Asgardeo / WSO2 IS&lt;/b&gt;&lt;br&gt;&lt;i&gt;Identity Provider&lt;/i&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;- OAuth2 / OIDC / PKCE flows&lt;br&gt;- SCIM2 Users, Orgs, Roles&lt;br&gt;- JWKS endpoint (JWT validation)&lt;br&gt;- OBO token exchange&lt;br&gt;- Multi-tenant Organizations&lt;/font&gt;" vertex="1">
+          <mxGeometry height="145" width="250" x="965" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="llmproviders" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;html=1;" value="&lt;b&gt;LLM Providers&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;OpenAI (gpt-4o-mini)&lt;br&gt;Google Gemini (gemini-2.5-flash-lite)&lt;br&gt;Anthropic Claude (claude-sonnet-4-5)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="105" width="250" x="965" y="285" as="geometry" />
+        </mxCell>
+        <mxCell id="gateway" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;html=1;" value="&lt;b&gt;WSO2 API Gateway&lt;/b&gt; &lt;i&gt;(Optional)&lt;/i&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;- LLM call routing&lt;br&gt;- AI Guardrails (prompt injection detection)&lt;br&gt;- HTTP 446 on guardrail trigger&lt;br&gt;- OAuth2 client credentials auth&lt;/font&gt;" vertex="1">
+          <mxGeometry height="115" width="250" x="965" y="455" as="geometry" />
+        </mxCell>
+        <mxCell id="geoapi" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;html=1;" value="&lt;b&gt;IP Geolocation API&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;ipgeolocation.io&lt;br&gt;Risk detection at login&lt;/font&gt;" vertex="1">
+          <mxGeometry height="75" width="250" x="965" y="635" as="geometry" />
+        </mxCell>
+        <mxCell id="onfido" parent="1" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;html=1;" value="&lt;b&gt;Onfido&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px;&quot;&gt;Identity Verification / KYC&lt;br&gt;(Optional SDK integration)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="75" width="250" x="965" y="775" as="geometry" />
+        </mxCell>
+        <mxCell id="e01" edge="1" parent="1" source="browser" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;html=1;" target="frontend" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e02" edge="1" parent="1" source="frontend" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;html=1;" target="backend" value="REST API&lt;br&gt;/signup, /risk, /business">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e03" edge="1" parent="1" source="frontend" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;strokeColor=#9673a6;fontColor=#9673a6;html=1;" target="agent" value="WebSocket&lt;br&gt;/chat?session_id=...">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e04" edge="1" parent="1" source="frontend" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;dashed=1;strokeColor=#82b366;html=1;" target="onfido" value="SDK (optional)&lt;br&gt;KYC">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e05" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;html=1;" target="asgardeo" value="SCIM2 + OAuth2&lt;br&gt;Users, Orgs, Roles">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e06" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;html=1;" target="txapi" value="REST (Bearer)&lt;br&gt;POST /admin/provision">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e07" edge="1" parent="1" source="backend" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;html=1;" target="geoapi" value="REST&lt;br&gt;IP risk check">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="930" y="465" />
+              <mxPoint x="930" y="673" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e08" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;strokeColor=#9673a6;fontColor=#9673a6;html=1;" target="asgardeo" value="OAuth2 PKCE&lt;br&gt;+ OBO token exchange">
+          <mxGeometry relative="1" x="-0.1698" y="35" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="930" y="465" />
+              <mxPoint x="930" y="153" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e09" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;strokeColor=#9673a6;fontColor=#9673a6;html=1;" target="txapi" value="REST (OBO token)&lt;br&gt;GET /transactions">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;strokeColor=#9673a6;fontColor=#9673a6;dashed=1;html=1;" target="llmproviders" value="REST (API key)&lt;br&gt;direct LLM inference">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="agent" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;strokeColor=#9673a6;fontColor=#9673a6;dashed=1;html=1;" target="gateway" value="OAuth2 client creds&lt;br&gt;LLM routing (if gateway.enabled)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="gateway" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;dashed=1;strokeColor=#82b366;html=1;" target="llmproviders" value="routes + guardrails">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="txapi" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;strokeColor=#b85450;fontColor=#b85450;html=1;" target="asgardeo" value="JWKS validation&lt;br&gt;/oauth2/jwks">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1340" y="715" />
+              <mxPoint x="1340" y="153" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e14" edge="1" parent="1" source="llmconfig" style="edgeStyle=orthogonalEdgeStyle;fontSize=10;dashed=1;strokeColor=#d6b656;html=1;" target="agent" value="reads config">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
