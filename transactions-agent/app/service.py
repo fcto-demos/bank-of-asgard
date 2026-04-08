@@ -19,6 +19,7 @@ import yaml
 from fastapi.responses import HTMLResponse
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
+from langchain_mistralai import ChatMistralAI
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
@@ -229,7 +230,6 @@ elif llm_provider == 'anthropic':
     )
     llm_secured = llm
 elif llm_provider == 'mistral':
-    from langchain_mistralai import ChatMistralAI
     llm = ChatMistralAI(
         model=llm_model or _default_models["mistral"],
         mistral_api_key=mistral_api_key,
