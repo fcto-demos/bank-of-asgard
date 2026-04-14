@@ -1,0 +1,20 @@
+[Unit]
+Description=Bank of Asgard Transactions API (FastAPI)
+Documentation=https://github.com/asgardeo/bank-of-asgard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/bank-of-asgard/transactions-api
+
+ExecStart=/bin/bash -lc 'source %h/bank-of-asgard/transactions-api/.venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8010'
+
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bank-of-asgard-api
+
+[Install]
+WantedBy=default.target

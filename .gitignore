@@ -26,3 +26,7 @@ package-lock.json
 *.sln
 *.sw?
 /.vite
+docs/.$architecture.drawio.bkp
+test_bedrock_converse.py
+.gitignore
+test_gateway_converse.py

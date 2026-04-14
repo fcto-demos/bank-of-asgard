@@ -1,6 +1,6 @@
 # LLM provider configuration for Bank of Asgard AI agents.
 #
-# provider: openai | gemini | anthropic
+# provider: openai | gemini | anthropic | bedrock
 # model:    override the default model for the chosen provider
 #           (comment out to use the built-in default)
 #
@@ -8,9 +8,13 @@
 #   openai:    gpt-4o-mini
 #   gemini:    gemini-2.5-flash-lite
 #   anthropic: claude-sonnet-4-5-20250929
+#   bedrock:   eu.anthropic.claude-sonnet-4-6-20250514-v1:0
+#              (uses AWS_DEFAULT_REGION env var, defaults to eu-north-1)
+#              With gateway enabled: routed via WSO2 gateway (Anthropic-compatible API).
+#              Without gateway: calls Bedrock Converse API directly via boto3.
 
-provider: anthropic
-# model: gpt-4o-mini
+provider: bedrock
+# model: anthropic.claude-sonnet-4-6
 
 # WSO2 API Gateway — optional, disabled by default.
 # When enabled, LLM calls are routed via the gateway using OAuth2 client credentials

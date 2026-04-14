@@ -9,8 +9,8 @@ Step-by-step guide to deploy Bank of Asgard on a VM behind a DigitalOcean Load B
 ```
 Browser
   │
-  ├─ https://app.apis.coach:444  ──►  DO LB  ──►  VM:5173  (Vite preview — frontend SPA)
-  └─ wss://boa-agent.apis.coach:445  ─►  DO LB  ──►  VM:8011  (uvicorn — transactions agent)
+  ├─ https://app.apis.coach:444       ──►  DO LB  ──►  VM:5173  (Vite preview — frontend SPA)
+  └─ wss://boa-agent.apis.coach:445   ──►  DO LB  ──►  VM:8011  (uvicorn — transactions agent)
 
 VM also runs (directly, no LB):
   └─ localhost:3002   Node/Express backend server
@@ -80,72 +80,130 @@ git clone <your-repo-url> bank-of-asgard
 
 ---
 
-## 4. Frontend — configure & deploy
+## 4. Transactions API — configure & deploy
 
-### 4a. Set the production config
-
-```bash
-cp ~/bank-of-asgard/app/public/config.prod.js ~/bank-of-asgard/app/public/config.js
-```
-
-Open `config.js` and fill in the two placeholder values:
-
-```js
-API_BASE_URL:     "https://api.apis.coach",   // URL where server/ is exposed
-API_SERVICE_URL:  "https://api.apis.coach",   // same
-```
-
-All other values are already set for the `apis.coach` domain.
-
-### 4b. Run the deploy script
+### 4a. Configure `.env`
 
 ```bash
-bash ~/bank-of-asgard/script/deploy-app.sh
+cp ~/bank-of-asgard/transactions-api/.env.example \
+   ~/bank-of-asgard/transactions-api/.env
+```
+
+Edit `.env`:
+
+```dotenv
+JWKS_URL=https://api.asgardeo.io/t/<ORG_NAME>/oauth2/jwks
+JWT_ISSUER=https://api.asgardeo.io/t/<ORG_NAME>/oauth2/token
+JWKS_CACHE_TTL=3600
+CORS_ORIGINS=https://app.apis.coach:444,http://localhost:3002
+```
+
+### 4b. Deploy
+
+```bash
+bash ~/bank-of-asgard/script/deploy-api.sh
 ```
 
 This will:
-1. `npm install` + `npm run build` (produces `dist/`)
-2. Install `~/.config/systemd/user/bank-of-asgard-app.service`
-3. Enable and start the service
-4. Enable linger so it starts at boot without a login session
+1. Create a Python venv at `transactions-api/.venv` and `pip install -r requirements.txt`
+2. Validate that `.env` exists
+3. Install `~/.config/systemd/user/bank-of-asgard-api.service`
+4. Enable and start the service
 
 ---
 
-## 5. Transactions agent — configure & deploy
+## 5. Node/Express Server — configure & deploy
 
-### 5a. Set the production `.env`
+### 5a. Configure `.env`
+
+```bash
+cp ~/bank-of-asgard/server/.env.example \
+   ~/bank-of-asgard/server/.env
+```
+
+Edit `.env`:
+
+```dotenv
+PORT=3002
+SERVER_APP_CLIENT_ID=<your-twa-client-id>
+SERVER_APP_CLIENT_SECRET=<your-twa-client-secret>
+IDP_BASE_URL=https://api.asgardeo.io/t/<ORG_NAME>
+IDP_TOKEN_ENDPOINT=https://api.asgardeo.io/t/<ORG_NAME>/oauth2/token
+VITE_REACT_APP_CLIENT_BASE_URL=https://app.apis.coach:444
+GEO_API_KEY=<your-ipgeolocation-key>
+USER_STORE_NAME=DEFAULT
+TRANSACTIONS_API_URL=http://localhost:8010   # ← not the Docker container name
+```
+
+### 5b. Deploy
+
+```bash
+bash ~/bank-of-asgard/script/deploy-server.sh
+```
+
+This will:
+1. `npm install`
+2. Validate that `.env` exists and warn if the Docker container name is still set
+3. Install `~/.config/systemd/user/bank-of-asgard-server.service`
+4. Enable and start the service
+
+---
+
+## 6. Transactions Agent — configure & deploy
+
+### 6a. Configure `.env`
 
 ```bash
 cp ~/bank-of-asgard/transactions-agent/.env.example \
    ~/bank-of-asgard/transactions-agent/.env
 ```
 
-Edit `.env` and set the following values:
+Edit `.env`:
 
 ```dotenv
 IDP_CLIENT_ID=<your-client-id>
-IDP_BASE_URL=https://identity.dev.apis.coach:9445
+IDP_BASE_URL=https://api.asgardeo.io/t/<ORG_NAME>
 IDP_REDIRECT_URI=https://boa-agent.apis.coach:445/callback   # ← must match Asgardeo app settings
 
 AGENT_ID=<agent-client-id>
 AGENT_SECRET=<agent-client-secret>
 
-TRANSACTIONS_API_BASE_URL=http://localhost:8010   # ← not the docker container name
+TRANSACTIONS_API_BASE_URL=http://localhost:8010
 
-OPENAI_API_KEY=<your-key>   # or GEMINI_API_KEY / ANTHROPIC_API_KEY
+# WSO2 API Gateway (when gateway.enabled: true in llm_config.yaml)
+GATEWAY_BASE_URL=<gateway-base-url>
+GATEWAY_BASE_URL_SECURED=<gateway-secured-url>
+GATEWAY_TOKEN_ENDPOINT=<gateway-token-endpoint>
+GATEWAY_CLIENT_ID=<gateway-client-id>
+GATEWAY_CLIENT_SECRET=<gateway-client-secret>
 ```
 
-> If you previously used Docker, note that `TRANSACTIONS_API_BASE_URL` used the container name (`http://transactions-api:8010`). On the VM it must be `http://localhost:8010`.
+### 6b. Configure LLM provider
 
-### 5b. Place the LLM config
+`llm_config.yaml` at the repo root controls which LLM is used.
 
-The agent expects `llm_config.yaml` at the project root:
+**Bedrock via WSO2 API Gateway (current setup):**
 
-```bash
-cp ~/bank-of-asgard/llm_config.yaml ~/bank-of-asgard/transactions-agent/  # or symlink
+```yaml
+provider: bedrock
+# model: eu.anthropic.claude-sonnet-4-6   # default; uncomment to override
+
+gateway:
+  enabled: true
 ```
 
-### 5c. Run the deploy script
+The gateway handles AWS authentication on its backend. No AWS credentials are needed on the VM — only the `GATEWAY_*` env vars above.
+
+**Other supported providers** (set `gateway.enabled: false` and provide the matching API key):
+
+| provider | Default model | Env var |
+|---|---|---|
+| `anthropic` | `claude-sonnet-4-5-20250929` | `ANTHROPIC_API_KEY` |
+| `openai` | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| `gemini` | `gemini-2.5-flash-lite` | `GEMINI_API_KEY` |
+| `bedrock` (no gateway) | `eu.anthropic.claude-sonnet-4-6` | AWS credentials via `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`; region from `AWS_DEFAULT_REGION` (default `eu-north-1`) |
+
+### 6c. Deploy
 
 ```bash
 bash ~/bank-of-asgard/script/deploy-agent.sh
@@ -159,7 +217,56 @@ This will:
 
 ---
 
-## 6. Asgardeo — update redirect URIs
+## 7. Frontend — configure & deploy
+
+### 7a. Set the production config
+
+```bash
+cp ~/bank-of-asgard/app/public/config.prod.js ~/bank-of-asgard/app/public/config.js
+```
+
+Open `config.js` and fill in:
+
+```js
+API_BASE_URL:     "https://api.apis.coach",
+API_SERVICE_URL:  "https://api.apis.coach",
+```
+
+All other values are already set for the `apis.coach` domain.
+
+### 7b. Deploy
+
+```bash
+bash ~/bank-of-asgard/script/deploy-app.sh
+```
+
+This will:
+1. `npm install` + `npm run build` (produces `dist/`)
+2. Install `~/.config/systemd/user/bank-of-asgard-app.service`
+3. Enable and start the service
+4. Enable linger so it starts at boot without a login session
+
+---
+
+## 8. Full deploy (all services at once)
+
+After a `git pull`, redeploy everything in dependency order:
+
+```bash
+cd ~/bank-of-asgard && git pull
+bash ~/bank-of-asgard/script/deploy-all.sh
+```
+
+To redeploy a single service:
+
+```bash
+cd ~/bank-of-asgard && git pull
+bash ~/bank-of-asgard/script/deploy-agent.sh   # for example
+```
+
+---
+
+## 9. Asgardeo — update redirect URIs
 
 In your Asgardeo console, update the **Allowed redirect URLs** for the agent application to include:
 
@@ -171,46 +278,29 @@ Remove any `localhost` entries that were used for local development.
 
 ---
 
-## 7. Redeploying after a code change
-
-**Frontend** (rebuild required):
-```bash
-cd ~/bank-of-asgard && git pull
-bash ~/bank-of-asgard/script/deploy-app.sh
-```
-
-**Agent** (restarts the service, rebuilds venv if needed):
-```bash
-cd ~/bank-of-asgard && git pull
-bash ~/bank-of-asgard/script/deploy-agent.sh
-```
-
-**Config-only change** (no rebuild needed — `config.js` is loaded at runtime):
-```bash
-# Edit ~/bank-of-asgard/app/public/config.js, then:
-systemctl --user restart bank-of-asgard-app
-```
-
----
-
-## 8. Service management
+## 10. Service management
 
 ```bash
 # Status
-systemctl --user status bank-of-asgard-app
+systemctl --user status bank-of-asgard-api
+systemctl --user status bank-of-asgard-server
 systemctl --user status bank-of-asgard-agent
+systemctl --user status bank-of-asgard-app
 
 # Logs (live)
-journalctl --user -u bank-of-asgard-app -f
-journalctl --user -u bank-of-asgard-agent -f
+journalctl --user -u bank-of-asgard-api    -f
+journalctl --user -u bank-of-asgard-server -f
+journalctl --user -u bank-of-asgard-agent  -f
+journalctl --user -u bank-of-asgard-app    -f
 
 # Restart
-systemctl --user restart bank-of-asgard-app
+systemctl --user restart bank-of-asgard-api
+systemctl --user restart bank-of-asgard-server
 systemctl --user restart bank-of-asgard-agent
+systemctl --user restart bank-of-asgard-app
 
-# Stop
-systemctl --user stop bank-of-asgard-app
-systemctl --user stop bank-of-asgard-agent
+# Stop all
+systemctl --user stop bank-of-asgard-api bank-of-asgard-server bank-of-asgard-agent bank-of-asgard-app
 ```
 
 ---
@@ -221,16 +311,22 @@ systemctl --user stop bank-of-asgard-agent
 |---|---|---|
 | Frontend | `http://0.0.0.0:5173` | `https://app.apis.coach:444` |
 | Agent WebSocket | `http://0.0.0.0:8011` | `wss://boa-agent.apis.coach:445` |
-| Backend server | `http://localhost:6000` | (configure separately) |
+| Node server | `http://localhost:3002` | (internal only) |
 | Transactions API | `http://localhost:8010` | (internal only) |
 
 ## Reference — deployment files
 
 | File | Purpose |
 |---|---|
-| `script/deploy-app.sh` | Build and install frontend service |
+| `script/deploy-all.sh` | Deploy all four services in order |
+| `script/deploy-api.sh` | Setup venv and install transactions-api service |
+| `script/deploy-server.sh` | npm install and install Node server service |
 | `script/deploy-agent.sh` | Setup venv and install agent service |
-| `script/bank-of-asgard-app.service` | Systemd unit for the frontend |
+| `script/deploy-app.sh` | Build and install frontend service |
+| `script/bank-of-asgard-api.service` | Systemd unit for the transactions API |
+| `script/bank-of-asgard-server.service` | Systemd unit for the Node server |
 | `script/bank-of-asgard-agent.service` | Systemd unit for the agent |
-| `script/nginx-lb.conf` | DO LB forwarding rules reference |
+| `script/bank-of-asgard-app.service` | Systemd unit for the frontend |
+| `script/do-lb-config.md` | DO LB forwarding rules reference |
 | `app/public/config.prod.js` | Production frontend config template |
+| `llm_config.yaml` | LLM provider selection (repo root) |

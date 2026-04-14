@@ -1,5 +1,4 @@
 # DigitalOcean Load Balancer forwarding rules for Bank of Asgard
-# (No nginx required on the VM — DO LB routes directly by port)
 #
 # Configure these two forwarding rules in:
 #   DO Console → Networking → Load Balancers → Forwarding Rules

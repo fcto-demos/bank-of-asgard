@@ -23,6 +23,13 @@ services:
       - "8011:8011"
     env_file: ./transactions-agent/.env
     volumes:
+      # llm_config.yaml is mounted from ~/podman_share/ because Podman's VM only
+      # shares paths under ~/ — external volumes (e.g. /Volumes/MYDATA) are not
+      # accessible. Keep ~/podman_share/llm_config.yaml as a symlink to the repo
+      # file so edits stay in sync:
+      #   ln -sf <repo>/llm_config.yaml ~/podman_share/llm_config.yaml
+      # For plain Docker (no VM), you can mount directly:
+      #   - ./llm_config.yaml:/app/llm_config.yaml:ro
       - ~/podman_share/llm_config.yaml:/app/llm_config.yaml:ro,z
     networks:
       - bank-network

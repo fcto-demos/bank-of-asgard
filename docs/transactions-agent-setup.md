@@ -169,31 +169,62 @@ TRANSACTIONS_AGENT_URL: "ws://localhost:8011"
 
 ## Running the Services
 
-### Docker / Podman (recommended)
+### Podman (macOS)
 
-The `docker-compose.yml` at the repo root orchestrates both services on a shared `bank-network`.
+Podman on macOS runs containers inside a Linux VM. The VM only mounts paths under `~/` — **external volumes such as `/Volumes/MYDATA` are not visible to Podman**. This is why `llm_config.yaml` cannot be mounted directly from the repo when the repo lives on an external drive.
 
-**Important:** `llm_config.yaml` is mounted into the agent container from `~/podman_share/llm_config.yaml` on the host (`:ro,z` — read-only, SELinux relabelled for Podman compatibility). This keeps the config outside the image so you can change the LLM provider or gateway settings without rebuilding.
+**One-time setup:**
 
 ```bash
-# 1. Place llm_config.yaml where the compose file expects it
+# Create the shared directory (already inside ~/, visible to the Podman VM)
 mkdir -p ~/podman_share
-cp llm_config.yaml ~/podman_share/llm_config.yaml
 
-# 2. Build and start both services (from the repo root)
-docker compose up --build -d
-# or with Podman:
-podman-compose up --build -d
-
-# View logs
-docker compose logs -f transactions-api
-docker compose logs -f transactions-agent
-
-# Stop
-docker compose down
+# Symlink llm_config.yaml so edits in the repo are reflected immediately
+ln -sf /path/to/bank-of-asgard/llm_config.yaml ~/podman_share/llm_config.yaml
 ```
 
-> **Note:** When running via Docker/Podman, set `TRANSACTIONS_API_BASE_URL=http://transactions-api:8010` in `transactions-agent/.env` so the agent reaches the API container by its service name on the shared network. Use `http://localhost:8010` for native development instead.
+The symlink means you only ever edit `llm_config.yaml` in the repo — no manual copy/sync step.
+
+**Build and start:**
+
+```bash
+cd ~/path/to/bank-of-asgard
+podman-compose up --build -d
+
+# Logs
+podman-compose logs -f transactions-agent
+
+# Stop
+podman-compose down
+```
+
+**After changing `llm_config.yaml`** — no rebuild needed, just restart the agent container:
+
+```bash
+podman-compose restart transactions-agent
+```
+
+---
+
+### Docker (Linux / Docker Desktop)
+
+On Linux or Docker Desktop, the repo directory is directly accessible — no `~/podman_share` needed. Edit `docker-compose.yml` to mount the file directly:
+
+```yaml
+volumes:
+  - ./llm_config.yaml:/app/llm_config.yaml:ro
+```
+
+Then:
+
+```bash
+docker compose up --build -d
+docker compose logs -f transactions-agent
+```
+
+---
+
+> **Note:** When running via Podman or Docker, set `TRANSACTIONS_API_BASE_URL=http://transactions-api:8010` in `transactions-agent/.env` so the agent reaches the API container by its service name on the shared network. Use `http://localhost:8010` for native development instead.
 
 ### Natively (development)
 
