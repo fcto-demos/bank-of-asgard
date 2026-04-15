@@ -5,10 +5,12 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/bank-of-asgard/transactions-agent
+User=boa
+Group=boa
+WorkingDirectory=/home/boa/bank-of-asgard/transactions-agent
 
 # Activates the venv and starts uvicorn on all interfaces — DO LB accesses via VM's IP
-ExecStart=/bin/bash -lc 'source %h/bank-of-asgard/transactions-agent/.venv/bin/activate && uvicorn app.service:app --host 0.0.0.0 --port 8011'
+ExecStart=/bin/bash -lc 'source /home/boa/bank-of-asgard/transactions-agent/.venv/bin/activate && uvicorn app.service:app --host 0.0.0.0 --port 8011'
 
 Restart=on-failure
 RestartSec=5
@@ -17,5 +19,12 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bank-of-asgard-agent
 
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/boa/bank-of-asgard
+
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

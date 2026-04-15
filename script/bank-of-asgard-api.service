@@ -5,9 +5,11 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/bank-of-asgard/transactions-api
+User=boa
+Group=boa
+WorkingDirectory=/home/boa/bank-of-asgard/transactions-api
 
-ExecStart=/bin/bash -lc 'source %h/bank-of-asgard/transactions-api/.venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8010'
+ExecStart=/bin/bash -lc 'source /home/boa/bank-of-asgard/transactions-api/.venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8010'
 
 Restart=on-failure
 RestartSec=5
@@ -16,5 +18,12 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bank-of-asgard-api
 
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/boa/bank-of-asgard
+
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

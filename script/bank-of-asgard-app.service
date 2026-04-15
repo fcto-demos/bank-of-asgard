@@ -5,7 +5,9 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/bank-of-asgard/app
+User=boa
+Group=boa
+WorkingDirectory=/home/boa/bank-of-asgard/app
 
 # Use a login shell so nvm/node paths from ~/.profile are available
 ExecStart=/bin/bash -lc 'npm run preview'
@@ -13,10 +15,16 @@ ExecStart=/bin/bash -lc 'npm run preview'
 Restart=on-failure
 RestartSec=5
 
-# Keep stdout/stderr in the journal
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bank-of-asgard-app
 
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/boa/bank-of-asgard
+
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

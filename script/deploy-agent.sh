@@ -8,7 +8,7 @@ AGENT_DIR="$PROJECT_ROOT/transactions-agent"
 VENV_DIR="$AGENT_DIR/.venv"
 SERVICE_NAME="bank-of-asgard-agent"
 SERVICE_FILE="$SCRIPT_DIR/${SERVICE_NAME}.service"
-SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+SYSTEMD_DIR="/etc/systemd/system"
 
 echo "=== Bank of Asgard — Transactions Agent Deploy ==="
 
@@ -47,26 +47,22 @@ echo "      .env found."
 
 # ── 3. Install service file ───────────────────────────────────────────────────
 echo ""
-echo "[3/4] Installing systemd user service..."
-mkdir -p "$SYSTEMD_USER_DIR"
-cp "$SERVICE_FILE" "$SYSTEMD_USER_DIR/${SERVICE_NAME}.service"
-systemctl --user daemon-reload
-echo "      Service installed: ${SYSTEMD_USER_DIR}/${SERVICE_NAME}.service"
+echo "[3/4] Installing systemd service..."
+cp "$SERVICE_FILE" "$SYSTEMD_DIR/${SERVICE_NAME}.service"
+sudo systemctl daemon-reload
+echo "      Service installed: ${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 
 # ── 4. Enable & restart ───────────────────────────────────────────────────────
 echo ""
 echo "[4/4] Enabling and (re)starting service..."
-systemctl --user enable "$SERVICE_NAME"
-systemctl --user restart "$SERVICE_NAME"
+sudo systemctl enable "$SERVICE_NAME"
+sudo systemctl restart "$SERVICE_NAME"
 sleep 1
-systemctl --user status "$SERVICE_NAME" --no-pager --lines=5
-
-# Linger (in case not already set by deploy-app.sh)
-loginctl enable-linger "$(whoami)" 2>/dev/null || true
+sudo systemctl status "$SERVICE_NAME" --no-pager --lines=5
 
 echo ""
 echo "=== Done ==="
-echo "  Service   : systemctl --user status ${SERVICE_NAME}"
-echo "  Logs      : journalctl --user -u ${SERVICE_NAME} -f"
+echo "  Service   : sudo systemctl status ${SERVICE_NAME}"
+echo "  Logs      : journalctl -u ${SERVICE_NAME} -f"
 echo "  Local WS  : ws://127.0.0.1:8011"
 echo "  Public WS : wss://boa-agent.apis.coach  (via LB)"

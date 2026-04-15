@@ -73,9 +73,11 @@ sudo apt-get install -y nodejs
 # Install Python 3.11+
 sudo apt-get install -y python3.11 python3.11-venv python3-pip
 
-# Clone the project
-cd ~
-git clone <your-repo-url> bank-of-asgard
+# Create the dedicated service user
+sudo useradd --system --create-home --shell /bin/bash boa
+
+# Clone the project into the boa home directory
+sudo -u boa git clone <your-repo-url> /home/boa/bank-of-asgard
 ```
 
 ---
@@ -85,8 +87,8 @@ git clone <your-repo-url> bank-of-asgard
 ### 4a. Configure `.env`
 
 ```bash
-cp ~/bank-of-asgard/transactions-api/.env.example \
-   ~/bank-of-asgard/transactions-api/.env
+sudo -u boa cp /home/boa/bank-of-asgard/transactions-api/.env.example \
+               /home/boa/bank-of-asgard/transactions-api/.env
 ```
 
 Edit `.env`:
@@ -101,14 +103,14 @@ CORS_ORIGINS=https://app.apis.coach:444,http://localhost:3002
 ### 4b. Deploy
 
 ```bash
-bash ~/bank-of-asgard/script/deploy-api.sh
+sudo -u boa bash /home/boa/bank-of-asgard/script/deploy-api.sh
 ```
 
 This will:
 1. Create a Python venv at `transactions-api/.venv` and `pip install -r requirements.txt`
 2. Validate that `.env` exists
-3. Install `~/.config/systemd/user/bank-of-asgard-api.service`
-4. Enable and start the service
+3. Install `/etc/systemd/system/bank-of-asgard-api.service`
+4. Enable and start the service (runs as `boa`)
 
 ---
 
@@ -117,8 +119,8 @@ This will:
 ### 5a. Configure `.env`
 
 ```bash
-cp ~/bank-of-asgard/server/.env.example \
-   ~/bank-of-asgard/server/.env
+sudo -u boa cp /home/boa/bank-of-asgard/server/.env.example \
+               /home/boa/bank-of-asgard/server/.env
 ```
 
 Edit `.env`:
@@ -138,14 +140,14 @@ TRANSACTIONS_API_URL=http://localhost:8010   # ← not the Docker container name
 ### 5b. Deploy
 
 ```bash
-bash ~/bank-of-asgard/script/deploy-server.sh
+sudo -u boa bash /home/boa/bank-of-asgard/script/deploy-server.sh
 ```
 
 This will:
 1. `npm install`
 2. Validate that `.env` exists and warn if the Docker container name is still set
-3. Install `~/.config/systemd/user/bank-of-asgard-server.service`
-4. Enable and start the service
+3. Install `/etc/systemd/system/bank-of-asgard-server.service`
+4. Enable and start the service (runs as `boa`)
 
 ---
 
@@ -154,8 +156,8 @@ This will:
 ### 6a. Configure `.env`
 
 ```bash
-cp ~/bank-of-asgard/transactions-agent/.env.example \
-   ~/bank-of-asgard/transactions-agent/.env
+sudo -u boa cp /home/boa/bank-of-asgard/transactions-agent/.env.example \
+               /home/boa/bank-of-asgard/transactions-agent/.env
 ```
 
 Edit `.env`:
@@ -206,14 +208,14 @@ The gateway handles AWS authentication on its backend. No AWS credentials are ne
 ### 6c. Deploy
 
 ```bash
-bash ~/bank-of-asgard/script/deploy-agent.sh
+sudo -u boa bash /home/boa/bank-of-asgard/script/deploy-agent.sh
 ```
 
 This will:
 1. Create a Python venv at `transactions-agent/.venv` and `pip install -r requirements.txt`
 2. Validate that `.env` exists and warn about any remaining `localhost` references
-3. Install `~/.config/systemd/user/bank-of-asgard-agent.service`
-4. Enable and start the service
+3. Install `/etc/systemd/system/bank-of-asgard-agent.service`
+4. Enable and start the service (runs as `boa`)
 
 ---
 
@@ -222,7 +224,8 @@ This will:
 ### 7a. Set the production config
 
 ```bash
-cp ~/bank-of-asgard/app/public/config.prod.js ~/bank-of-asgard/app/public/config.js
+sudo -u boa cp /home/boa/bank-of-asgard/app/public/config.prod.js \
+               /home/boa/bank-of-asgard/app/public/config.js
 ```
 
 Open `config.js` and fill in:
@@ -237,14 +240,13 @@ All other values are already set for the `apis.coach` domain.
 ### 7b. Deploy
 
 ```bash
-bash ~/bank-of-asgard/script/deploy-app.sh
+sudo -u boa bash /home/boa/bank-of-asgard/script/deploy-app.sh
 ```
 
 This will:
 1. `npm install` + `npm run build` (produces `dist/`)
-2. Install `~/.config/systemd/user/bank-of-asgard-app.service`
-3. Enable and start the service
-4. Enable linger so it starts at boot without a login session
+2. Install `/etc/systemd/system/bank-of-asgard-app.service`
+3. Enable and start the service (runs as `boa`, starts at boot automatically)
 
 ---
 
@@ -253,15 +255,15 @@ This will:
 After a `git pull`, redeploy everything in dependency order:
 
 ```bash
-cd ~/bank-of-asgard && git pull
-bash ~/bank-of-asgard/script/deploy-all.sh
+sudo -u boa git -C /home/boa/bank-of-asgard pull
+sudo -u boa bash /home/boa/bank-of-asgard/script/deploy-all.sh
 ```
 
 To redeploy a single service:
 
 ```bash
-cd ~/bank-of-asgard && git pull
-bash ~/bank-of-asgard/script/deploy-agent.sh   # for example
+sudo -u boa git -C /home/boa/bank-of-asgard pull
+sudo -u boa bash /home/boa/bank-of-asgard/script/deploy-agent.sh   # for example
 ```
 
 ---
@@ -282,25 +284,25 @@ Remove any `localhost` entries that were used for local development.
 
 ```bash
 # Status
-systemctl --user status bank-of-asgard-api
-systemctl --user status bank-of-asgard-server
-systemctl --user status bank-of-asgard-agent
-systemctl --user status bank-of-asgard-app
+sudo systemctl status bank-of-asgard-api
+sudo systemctl status bank-of-asgard-server
+sudo systemctl status bank-of-asgard-agent
+sudo systemctl status bank-of-asgard-app
 
 # Logs (live)
-journalctl --user -u bank-of-asgard-api    -f
-journalctl --user -u bank-of-asgard-server -f
-journalctl --user -u bank-of-asgard-agent  -f
-journalctl --user -u bank-of-asgard-app    -f
+journalctl -u bank-of-asgard-api    -f
+journalctl -u bank-of-asgard-server -f
+journalctl -u bank-of-asgard-agent  -f
+journalctl -u bank-of-asgard-app    -f
 
 # Restart
-systemctl --user restart bank-of-asgard-api
-systemctl --user restart bank-of-asgard-server
-systemctl --user restart bank-of-asgard-agent
-systemctl --user restart bank-of-asgard-app
+sudo systemctl restart bank-of-asgard-api
+sudo systemctl restart bank-of-asgard-server
+sudo systemctl restart bank-of-asgard-agent
+sudo systemctl restart bank-of-asgard-app
 
 # Stop all
-systemctl --user stop bank-of-asgard-api bank-of-asgard-server bank-of-asgard-agent bank-of-asgard-app
+sudo systemctl stop bank-of-asgard-api bank-of-asgard-server bank-of-asgard-agent bank-of-asgard-app
 ```
 
 ---

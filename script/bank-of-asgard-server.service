@@ -5,7 +5,9 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/bank-of-asgard/server
+User=boa
+Group=boa
+WorkingDirectory=/home/boa/bank-of-asgard/server
 
 # Use a login shell so nvm/node paths from ~/.profile are available
 ExecStart=/bin/bash -lc 'node server.js'
@@ -17,5 +19,12 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=bank-of-asgard-server
 
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/boa/bank-of-asgard
+
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
