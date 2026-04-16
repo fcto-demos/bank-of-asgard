@@ -5,27 +5,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_DIR="$PROJECT_ROOT/transactions-agent"
-VENV_DIR="$AGENT_DIR/.venv"
+VENV_NAME="boa-agent"
 SERVICE_NAME="bank-of-asgard-agent"
 SERVICE_FILE="$SCRIPT_DIR/${SERVICE_NAME}.service"
 SYSTEMD_DIR="/etc/systemd/system"
 
 echo "=== Bank of Asgard — Transactions Agent Deploy ==="
 
-# ── 1. Python venv ────────────────────────────────────────────────────────────
+# ── 1. Python virtualenv ──────────────────────────────────────────────────────
 echo ""
 echo "[1/4] Setting up Python virtual environment..."
 cd "$AGENT_DIR"
 
-if [ ! -d "$VENV_DIR" ]; then
-  python3 -m venv "$VENV_DIR"
-  echo "      Created venv at $VENV_DIR"
-fi
+export PYENV_ROOT="$HOME/.pyenv"
+export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init -)"
+eval "$(pyenv virtualenv-init -)"
 
-source "$VENV_DIR/bin/activate"
+pyenv virtualenv 3.11 "$VENV_NAME" 2>/dev/null || echo "      Virtualenv '$VENV_NAME' already exists."
+pyenv local "$VENV_NAME"
 pip install --quiet --upgrade pip
 pip install --quiet -r requirements.txt
-echo "      Dependencies installed."
+echo "      Dependencies installed in '$VENV_NAME'."
 
 # ── 2. .env check ─────────────────────────────────────────────────────────────
 echo ""

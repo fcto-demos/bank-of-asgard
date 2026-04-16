@@ -9,7 +9,7 @@ User=boa
 Group=boa
 WorkingDirectory=/home/boa/bank-of-asgard/transactions-api
 
-ExecStart=/bin/bash -lc 'source /home/boa/bank-of-asgard/transactions-api/.venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8010'
+ExecStart=/bin/bash -lc 'uvicorn app.main:app --host 0.0.0.0 --port 8010'
 
 Restart=on-failure
 RestartSec=5

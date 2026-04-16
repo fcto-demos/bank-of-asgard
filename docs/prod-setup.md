@@ -9,7 +9,7 @@ Step-by-step guide to deploy Bank of Asgard on a VM behind a DigitalOcean Load B
 ```
 Browser
   │
-  ├─ https://app.apis.coach:444       ──►  DO LB  ──►  VM:5173  (Vite preview — frontend SPA)
+  ├─ https://boa.apis.coach:444       ──►  DO LB  ──►  VM:5173  (Vite preview — frontend SPA)
   └─ wss://boa-agent.apis.coach:445   ──►  DO LB  ──►  VM:8011  (uvicorn — transactions agent)
 
 VM also runs (directly, no LB):
@@ -27,7 +27,7 @@ Add two A records pointing to the DO LB public IP:
 
 | Hostname | Type | Value |
 |---|---|---|
-| `app.apis.coach` | A | `<LB public IP>` |
+| `boa.apis.coach` | A | `<LB public IP>` |
 | `boa-agent.apis.coach` | A | `<LB public IP>` |
 
 ---
@@ -47,7 +47,7 @@ In **DO Console → Networking → Load Balancers**:
 
 ### TLS certificate
 
-Attach certificates for `app.apis.coach` and `boa-agent.apis.coach` under the **SSL** tab. Use Let's Encrypt via DO if you don't already have certs.
+Attach certificates for `boa.apis.coach` and `boa-agent.apis.coach` under the **SSL** tab. Use Let's Encrypt via DO if you don't already have certs.
 
 ### Idle timeout (critical for WebSocket)
 
@@ -70,15 +70,46 @@ SSH into the VM and run:
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
-# Install Python 3.11+
-sudo apt-get install -y python3.11 python3.11-venv python3-pip
+# Install pyenv build dependencies
+sudo apt-get install -y make build-essential libssl-dev zlib1g-dev \
+  libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm \
+  libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+  libffi-dev liblzma-dev
 
 # Create the dedicated service user
 sudo useradd --system --create-home --shell /bin/bash boa
 
+# Install pyenv and Python 3.11 as the boa user
+sudo -u boa bash -c '
+  curl -fsSL https://pyenv.run | bash
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  eval "$(pyenv init -)"
+  pyenv install 3.11
+'
+
 # Clone the project into the boa home directory
 sudo -u boa git clone <your-repo-url> /home/boa/bank-of-asgard
+
+# Pin Python 3.11 to this project only (writes .python-version in the repo root)
+sudo -u boa bash -c '
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  eval "$(pyenv init -)"
+  cd /home/boa/bank-of-asgard && pyenv local 3.11
+'
 ```
+
+> The deploy scripts and service unit files rely on pyenv virtualenv auto-activation via `.python-version` files (written by `pyenv local`). Make sure both pyenv and pyenv-virtualenv are initialised for the `boa` user by adding the following to `/home/boa/.profile`:
+>
+> ```bash
+> export PYENV_ROOT="$HOME/.pyenv"
+> export PATH="$PYENV_ROOT/bin:$PATH"
+> eval "$(pyenv init -)"
+> eval "$(pyenv virtualenv-init -)"
+> ```
+>
+> The service units use `ExecStart=/bin/bash -lc '...'` (login shell), so `.profile` is sourced automatically on each start.
 
 ---
 
@@ -107,10 +138,10 @@ sudo -u boa bash /home/boa/bank-of-asgard/script/deploy-api.sh
 ```
 
 This will:
-1. Create a Python venv at `transactions-api/.venv` and `pip install -r requirements.txt`
+1. Create pyenv virtualenv `boa-api` (if it doesn't exist), set it locally via `pyenv local`, and `pip install -r requirements.txt`
 2. Validate that `.env` exists
 3. Install `/etc/systemd/system/bank-of-asgard-api.service`
-4. Enable and start the service (runs as `boa`)
+4. Enable and start the service (runs as `boa`, virtualenv auto-activated by pyenv)
 
 ---
 
@@ -212,10 +243,10 @@ sudo -u boa bash /home/boa/bank-of-asgard/script/deploy-agent.sh
 ```
 
 This will:
-1. Create a Python venv at `transactions-agent/.venv` and `pip install -r requirements.txt`
+1. Create pyenv virtualenv `boa-agent` (if it doesn't exist), set it locally via `pyenv local`, and `pip install -r requirements.txt`
 2. Validate that `.env` exists and warn about any remaining `localhost` references
 3. Install `/etc/systemd/system/bank-of-asgard-agent.service`
-4. Enable and start the service (runs as `boa`)
+4. Enable and start the service (runs as `boa`, virtualenv auto-activated by pyenv)
 
 ---
 
