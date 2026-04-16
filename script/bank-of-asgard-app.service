@@ -3,6 +3,7 @@ Description=Bank of Asgard Frontend App
 Documentation=https://github.com/asgardeo/bank-of-asgard
 After=network.target
 
+
 [Service]
 Type=simple
 User=boa
@@ -14,6 +15,8 @@ ExecStart=/bin/bash -lc 'npm run preview'
 
 Restart=on-failure
 RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 StandardOutput=journal
 StandardError=journal
@@ -23,8 +26,7 @@ SyslogIdentifier=bank-of-asgard-app
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
 ReadWritePaths=/home/boa/bank-of-asgard
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
