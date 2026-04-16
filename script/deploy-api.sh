@@ -8,7 +8,7 @@ API_DIR="$PROJECT_ROOT/transactions-api"
 VENV_NAME="boa-api"
 SERVICE_NAME="bank-of-asgard-api"
 SERVICE_FILE="$SCRIPT_DIR/${SERVICE_NAME}.service"
-SYSTEMD_DIR="/etc/systemd/system"
+SYSTEMD_DIR="/etc/systemd/user"
 
 echo "=== Bank of Asgard — Transactions API Deploy ==="
 
@@ -42,7 +42,7 @@ echo "      .env found."
 # ── 3. Install service file ───────────────────────────────────────────────────
 echo ""
 echo "[3/4] Installing systemd service..."
-cp "$SERVICE_FILE" "$SYSTEMD_DIR/${SERVICE_NAME}.service"
+sudo install -m 644 "$SERVICE_FILE" "$SYSTEMD_DIR/${SERVICE_NAME}.service"
 sudo systemctl daemon-reload
 echo "      Service installed: ${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 

@@ -27,21 +27,12 @@ if [ ! -f "$SERVER_DIR/.env" ]; then
   echo "    cp $SERVER_DIR/.env.example $SERVER_DIR/.env"
   exit 1
 fi
-if grep -q "localhost:8010\|transactions-api:8010" "$SERVER_DIR/.env" 2>/dev/null; then
-  # Remind if still using Docker container name
-  if grep -q "transactions-api:8010" "$SERVER_DIR/.env" 2>/dev/null; then
-    echo ""
-    echo "  WARNING: TRANSACTIONS_API_URL uses the Docker container name."
-    echo "  For native deployment set: TRANSACTIONS_API_URL=http://localhost:8010"
-    echo ""
-  fi
-fi
 echo "      .env found."
 
 # ── 3. Install service file ───────────────────────────────────────────────────
 echo ""
 echo "[3/4] Installing systemd service..."
-cp "$SERVICE_FILE" "$SYSTEMD_DIR/${SERVICE_NAME}.service"
+sudo install -m 644 "$SERVICE_FILE" "$SYSTEMD_DIR/${SERVICE_NAME}.service"
 sudo systemctl daemon-reload
 echo "      Service installed: ${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 

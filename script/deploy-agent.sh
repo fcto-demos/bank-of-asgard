@@ -49,7 +49,7 @@ echo "      .env found."
 # ── 3. Install service file ───────────────────────────────────────────────────
 echo ""
 echo "[3/4] Installing systemd service..."
-cp "$SERVICE_FILE" "$SYSTEMD_DIR/${SERVICE_NAME}.service"
+sudo install -m 644 "$SERVICE_FILE" "$SYSTEMD_DIR/${SERVICE_NAME}.service"
 sudo systemctl daemon-reload
 echo "      Service installed: ${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 
