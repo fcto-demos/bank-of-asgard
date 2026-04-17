@@ -26,6 +26,7 @@ const TransactionsPage = () => {
     () => "session_" + Math.random().toString(36).substring(2, 15)
   );
 
+
   const handleSecuredToggle = (e) => {
     setSecured(e.target.checked);
     // New session so the agent reconnects with the updated secured param
@@ -184,6 +185,7 @@ const TransactionsPage = () => {
                   style={{ height: "140px" }}
                 />
               </Box>
+
             </Paper>
           </Box>
         </Box>

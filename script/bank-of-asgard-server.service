@@ -2,6 +2,8 @@
 Description=Bank of Asgard Node/Express Backend Server
 Documentation=https://github.com/asgardeo/bank-of-asgard
 After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -14,8 +16,7 @@ ExecStart=/bin/bash -lc 'node server.js'
 
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
+
 
 StandardOutput=journal
 StandardError=journal

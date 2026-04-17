@@ -1,5 +1,5 @@
 var moneyTransferThres = 10000;
-var riskEndpoint = "<NODE_SERVER_BASE_PATH>/risk"
+var riskEndpoint = "https://boa.apis.coach:447/risk"
 var enrolUserInAuthenticationFlow = "false";
 var loginType = "";
 
@@ -193,7 +193,7 @@ var onLoginRequest = function(context) {
                 var parameterMap = {
                     'errorCode': 'login_failed',
                     'errorMessage': 'login could not be completed',
-                    "errorURI": 'https://localhost:9443/authenticationendpoint/login.jsp'
+                    "errorURI": 'https://identity.dev.apis.coach:9445/authenticationendpoint/login.do'
                 };
                 fail(parameterMap);
 

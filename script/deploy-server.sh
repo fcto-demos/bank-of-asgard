@@ -14,8 +14,7 @@ echo "=== Bank of Asgard — Node Server Deploy ==="
 # ── 1. npm install ────────────────────────────────────────────────────────────
 echo ""
 echo "[1/4] Installing Node dependencies..."
-cd "$SERVER_DIR"
-npm install --prefer-offline
+bash -lc "cd '$SERVER_DIR' && npm install"
 echo "      Dependencies installed."
 
 # ── 2. .env check ─────────────────────────────────────────────────────────────

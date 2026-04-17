@@ -1,9 +1,9 @@
 // Production config for https://app.apis.coach
 // Copy this to config.js on the VM before running the deploy script.
 window.config = {
-  API_BASE_URL: "https://api.apis.coach",         // ← update to your backend URL
-  API_SERVICE_URL: "https://api.apis.coach",      // ← update to your backend URL
-  APP_BASE_URL: "https://app.apis.coach:444",
+  API_BASE_URL: "https://boa.apis.coach:451",
+  API_SERVICE_URL: "https://boa.apis.coach:451",
+  APP_BASE_URL: "https://boa.apis.coach:449",
   IDP_BASE_URL: "https://identity.dev.apis.coach:9445",
   ORGANIZATION_NAME: "carbon.super",
   APP_CLIENT_ID: "6VfEfHraf0U7ZEPj3Ku7kCKlfBoa",
@@ -14,7 +14,7 @@ window.config = {
   IDENTITY_VERIFICATION_CLAIMS: [
     "http://wso2.org/claims/dob",
   ],
-  TRANSACTIONS_AGENT_URL: "wss://boa-agent.apis.coach:445",
+  TRANSACTIONS_AGENT_URL: "wss://boa-agent.apis.coach:450",
   DEMO_USERS: {
     personal: {
       firstName: "Personal",

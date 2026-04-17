@@ -12,17 +12,17 @@
     "lint": "eslint ."
   },
   "keywords": [],
-  "devDependencies": {
-    "@eslint/js": "^9.19.0",
-    "eslint": "^9.19.0",
-    "eslint-plugin-security": "^3.0.1",
-    "globals": "^15.14.0"
-  },
   "dependencies": {
     "axios": "1.15.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "pino": "^9.6.0"
+    "cors": "2.8.6",
+    "dotenv": "16.6.1",
+    "express": "4.22.1",
+    "pino": "9.14.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.4",
+    "eslint": "9.39.4",
+    "eslint-plugin-security": "3.0.1",
+    "globals": "15.15.0"
   }
 }

@@ -2,7 +2,8 @@
 Description=Bank of Asgard Transactions Agent (WebSocket)
 Documentation=https://github.com/asgardeo/bank-of-asgard
 After=network.target
-
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -14,8 +15,7 @@ ExecStart=/bin/bash -lc 'uvicorn app.service:app --host 0.0.0.0 --port 8011'
 
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
+
 
 StandardOutput=journal
 StandardError=journal

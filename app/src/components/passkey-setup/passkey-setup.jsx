@@ -25,7 +25,12 @@ const PasskeySetup = () => {
     const [passkeys, setPasskeys] = useState([]);
     const [error, setError] = useState(null);
 
-    const request = requestConfig => http.request(requestConfig);
+    const request = requestConfig =>
+        http.request(requestConfig)
+            .then(response => ({
+                ...response,
+                data: typeof response.data === "string" ? JSON.parse(response.data) : response.data
+            }));
 
     useEffect(() => {
         fetchPasskeys();
@@ -39,7 +44,6 @@ const PasskeySetup = () => {
             headers: { "Content-Type": "application/json" },
         })
             .then((response) => {
-                console.log(response);
                 setPasskeys(response.data || []);
             })
             .catch((err) => {
@@ -98,8 +102,6 @@ const PasskeySetup = () => {
 
             return obj
         }
-        console.log(pubKeyCred);
-
         return pubKeyCred
     }
 
@@ -145,8 +147,6 @@ const PasskeySetup = () => {
                     throw new Error("Passkey registration failed.");
                 }
 
-                console.log(credential);
-
                 const payload = {
                     requestId: requestId,
                     credential: credential
@@ -155,12 +155,11 @@ const PasskeySetup = () => {
                 try {
                     assertionresponse = publicKeyCredentialToJSON(payload.credential);
                 } catch (error) {
-                    console.log(error);
+                    console.error(error);
                 }
 
                 payload.credential = assertionresponse;
                 let finalPay = JSON.stringify(payload);
-                console.log(finalPay);
                 return request({
                     method: "POST",
                     url: `${environmentConfig.IDP_BASE_URL}/api/users/v2/me/webauthn/finish-registration`,

@@ -71,8 +71,9 @@ const UserProfilePage = ({ setSiteSection }) => {
       url: `${environmentConfig.IDP_BASE_URL}/scim2/Me`,
     }).then((response) => {
       if (response.data) {
+        const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data;
         if (
-          response.data["urn:scim:schemas:extension:custom:User"]
+          data["urn:scim:schemas:extension:custom:User"]
             ?.accountType === ACCOUNT_TYPES.BUSINESS
         ) {
           setSiteSection(SITE_SECTIONS.BUSINESS);
@@ -80,18 +81,18 @@ const UserProfilePage = ({ setSiteSection }) => {
           setSiteSection(SITE_SECTIONS.PERSONAL);
         }
         setUserInfo({
-          userId: response.data.id || "",
-          username: response.data.userName || "",
+          userId: data.id || "",
+          username: data.userName || "",
           accountType:
-            response.data["urn:scim:schemas:extension:custom:User"]
-              .accountType || "N/A",
-          email: response.data.emails[0] || "",
-          givenName: response.data.name.givenName || "",
-          familyName: response.data.name.familyName || "",
-          mobile: response.data.phoneNumbers[0].value || "",
-          country: response.data["urn:scim:wso2:schema"].country || "",
-          birthdate: response.data["urn:scim:wso2:schema"].dateOfBirth || "",
-          picture: response.data.picture || "",
+            data["urn:scim:schemas:extension:custom:User"]
+              ?.accountType || "N/A",
+          email: data.emails?.[0] || "",
+          givenName: data.name?.givenName || "",
+          familyName: data.name?.familyName || "",
+          mobile: data.phoneNumbers?.[0]?.value || "",
+          country: data["urn:scim:wso2:schema"]?.country || "",
+          birthdate: data["urn:scim:wso2:schema"]?.dateOfBirth || "",
+          picture: data.picture || "",
         });
       }
       return;

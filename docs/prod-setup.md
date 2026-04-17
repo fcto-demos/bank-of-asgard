@@ -9,15 +9,15 @@ Step-by-step guide to deploy Bank of Asgard on a VM behind a DigitalOcean Load B
 ```
 Browser
   │
-  ├─ https://boa.apis.coach:444       ──►  DO LB  ──►  VM:5173  (Vite preview — frontend SPA)
-  └─ wss://boa-agent.apis.coach:445   ──►  DO LB  ──►  VM:8011  (uvicorn — transactions agent)
+  ├─ https://boa.apis.coach:449       ──►  DO LB  ──►  VM:5173  (Vite preview — frontend SPA)
+  ├─ https://boa.apis.coach:451       ──►  DO LB  ──►  VM:3002  (Node/Express backend server)
+  └─ wss://boa-agent.apis.coach:450   ──►  DO LB  ──►  VM:8011  (uvicorn — transactions agent)
 
 VM also runs (directly, no LB):
-  └─ localhost:3002   Node/Express backend server
   └─ localhost:8010   Transactions API
 ```
 
-Both domains point to the **same LB IP**. The LB differentiates them by listening port (444 vs 445), so no nginx is needed on the VM.
+All public hostnames point to the **same LB IP**. The LB differentiates services by listening port, so no nginx is needed on the VM.
 
 ---
 
@@ -40,8 +40,9 @@ In **DO Console → Networking → Load Balancers**:
 
 | Protocol | Entry port | Protocol | Target port | Purpose |
 |---|---|---|---|---|
-| HTTPS | 444 | HTTP | 5173 | Frontend |
-| HTTPS | 445 | HTTP | 8011 | Agent (WebSocket) |
+| HTTPS | 449 | HTTP | 5173 | Frontend |
+| HTTPS | 450 | HTTP | 8011 | Agent (WebSocket) |
+| HTTPS | 451 | HTTP | 3002 | Node/Express server |
 
 > Both rules **must use HTTP** (not TCP) so the LB forwards the WebSocket `Upgrade` header to the agent.
 
@@ -76,11 +77,15 @@ sudo apt-get install -y make build-essential libssl-dev zlib1g-dev \
   libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
   libffi-dev liblzma-dev
 
-# Create the dedicated service user
+# Create the dedicated service user and add to systemd-journal for log access
 sudo useradd --system --create-home --shell /bin/bash boa
+sudo usermod -aG systemd-journal boa
 
-# Install pyenv and Python 3.11 as the boa user
-sudo -u boa bash -c '
+# Login as boa user
+sudo -u boa -i
+
+# Install pyenv and Python 3.11 for the boa user
+bash -c '
   curl -fsSL https://pyenv.run | bash
   export PYENV_ROOT="$HOME/.pyenv"
   export PATH="$PYENV_ROOT/bin:$PATH"
@@ -89,27 +94,19 @@ sudo -u boa bash -c '
 '
 
 # Clone the project into the boa home directory
-sudo -u boa git clone <your-repo-url> /home/boa/bank-of-asgard
-
-# Pin Python 3.11 to this project only (writes .python-version in the repo root)
-sudo -u boa bash -c '
-  export PYENV_ROOT="$HOME/.pyenv"
-  export PATH="$PYENV_ROOT/bin:$PATH"
-  eval "$(pyenv init -)"
-  cd /home/boa/bank-of-asgard && pyenv local 3.11
-'
+git clone <your-repo-url> /home/boa/bank-of-asgard
 ```
 
-> The deploy scripts and service unit files rely on pyenv virtualenv auto-activation via `.python-version` files (written by `pyenv local`). Make sure both pyenv and pyenv-virtualenv are initialised for the `boa` user by adding the following to `/home/boa/.profile`:
->
-> ```bash
-> export PYENV_ROOT="$HOME/.pyenv"
-> export PATH="$PYENV_ROOT/bin:$PATH"
-> eval "$(pyenv init -)"
-> eval "$(pyenv virtualenv-init -)"
-> ```
->
-> The service units use `ExecStart=/bin/bash -lc '...'` (login shell), so `.profile` is sourced automatically on each start.
+Add the following to `/home/boa/.profile` so pyenv and virtualenv auto-activation are available in login shells (used by the service units):
+
+```bash
+export PYENV_ROOT="$HOME/.pyenv"
+export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init -)"
+eval "$(pyenv virtualenv-init -)"
+```
+
+The service units use `ExecStart=/bin/bash -lc '...'` (login shell), so `.profile` is sourced automatically on each start and pyenv virtualenvs are auto-activated via `.python-version` files.
 
 ---
 
@@ -162,10 +159,9 @@ SERVER_APP_CLIENT_ID=<your-twa-client-id>
 SERVER_APP_CLIENT_SECRET=<your-twa-client-secret>
 IDP_BASE_URL=https://api.asgardeo.io/t/<ORG_NAME>
 IDP_TOKEN_ENDPOINT=https://api.asgardeo.io/t/<ORG_NAME>/oauth2/token
-VITE_REACT_APP_CLIENT_BASE_URL=https://app.apis.coach:444
+VITE_REACT_APP_CLIENT_BASE_URL=https://boa.apis.coach:449
 GEO_API_KEY=<your-ipgeolocation-key>
 USER_STORE_NAME=DEFAULT
-TRANSACTIONS_API_URL=http://localhost:8010   # ← not the Docker container name
 ```
 
 ### 5b. Deploy
@@ -320,11 +316,11 @@ sudo systemctl status bank-of-asgard-server
 sudo systemctl status bank-of-asgard-agent
 sudo systemctl status bank-of-asgard-app
 
-# Logs (live)
-journalctl -u bank-of-asgard-api    -f
-journalctl -u bank-of-asgard-server -f
-journalctl -u bank-of-asgard-agent  -f
-journalctl -u bank-of-asgard-app    -f
+# Logs (live) - Run this as user boa
+journalctl --user -u bank-of-asgard-api    -f
+journalctl --user -u bank-of-asgard-server -f
+journalctl --user -u bank-of-asgard-agent  -f
+journalctl --user -u bank-of-asgard-app    -f
 
 # Restart
 sudo systemctl restart bank-of-asgard-api
@@ -342,9 +338,9 @@ sudo systemctl stop bank-of-asgard-api bank-of-asgard-server bank-of-asgard-agen
 
 | Service | Local | Public |
 |---|---|---|
-| Frontend | `http://0.0.0.0:5173` | `https://app.apis.coach:444` |
-| Agent WebSocket | `http://0.0.0.0:8011` | `wss://boa-agent.apis.coach:445` |
-| Node server | `http://localhost:3002` | (internal only) |
+| Frontend | `http://0.0.0.0:5173` | `https://boa.apis.coach:449` |
+| Node/Express server | `http://localhost:3002` | `https://boa.apis.coach:451` |
+| Agent WebSocket | `http://0.0.0.0:8011` | `wss://boa-agent.apis.coach:450` |
 | Transactions API | `http://localhost:8010` | (internal only) |
 
 ## Reference — deployment files

@@ -6,8 +6,9 @@
 # ┌──────────────────────┬────────────────┬──────────────────────────────┐
 # │ Entry point          │ Forwarding     │ Notes                        │
 # ├──────────────────────┼────────────────┼──────────────────────────────┤
-# │ HTTPS : 444          │ HTTP : 5173    │ Frontend (Vite preview)      │
-# │ HTTPS : 445          │ HTTP : 8011    │ Agent (WebSocket / uvicorn)  │
+# │ HTTPS : 449          │ HTTP : 5173    │ Frontend (Vite preview)      │
+# │ HTTPS : 450          │ HTTP : 8011    │ Agent (WebSocket / uvicorn)  │
+# │ HTTPS : 451          │ HTTP : 3002    │ Node/Express server          │
 # └──────────────────────┴────────────────┴──────────────────────────────┘
 #
 # Both rules must use protocol HTTP (not TCP) so the LB passes the
@@ -19,9 +20,10 @@
 #   DO Console → Load Balancers → Settings → Advanced → Idle timeout
 #
 # DNS:
-#   app.apis.coach        A  →  <LB public IP>
+#   boa.apis.coach        A  →  <LB public IP>
 #   boa-agent.apis.coach  A  →  <LB public IP>
 #
 # Resulting URLs after deploy:
-#   Frontend : https://app.apis.coach:444
-#   Agent WS : wss://boa-agent.apis.coach:445
+#   Frontend : https://boa.apis.coach:449
+#   Server   : https://boa.apis.coach:451
+#   Agent WS : wss://boa-agent.apis.coach:450

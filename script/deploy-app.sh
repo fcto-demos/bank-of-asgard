@@ -14,9 +14,8 @@ echo "=== Bank of Asgard — Frontend Deploy ==="
 # ── 1. Build ──────────────────────────────────────────────────────────────────
 echo ""
 echo "[1/4] Building app..."
-cd "$APP_DIR"
-npm install --prefer-offline
-npm run build
+# Use a login shell so nvm/node paths from ~/.profile are available
+bash -lc "cd '$APP_DIR' && npm install && npm run build"
 echo "      Build complete → dist/"
 
 # ── 2. Install service file ───────────────────────────────────────────────────
