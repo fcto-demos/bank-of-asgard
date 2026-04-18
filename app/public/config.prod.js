@@ -1,8 +1,6 @@
-// Production config for https://app.apis.coach
-// Copy this to config.js on the VM before running the deploy script.
 window.config = {
-  API_BASE_URL: "https://boa.apis.coach:451",
-  API_SERVICE_URL: "https://boa.apis.coach:451",
+  API_BASE_URL: "http://localhost:3002",
+  API_SERVICE_URL: "https://boa.apis.coach:447",
   APP_BASE_URL: "https://boa.apis.coach:449",
   IDP_BASE_URL: "https://identity.dev.apis.coach:9445",
   ORGANIZATION_NAME: "carbon.super",
@@ -14,7 +12,7 @@ window.config = {
   IDENTITY_VERIFICATION_CLAIMS: [
     "http://wso2.org/claims/dob",
   ],
-  TRANSACTIONS_AGENT_URL: "wss://boa-agent.apis.coach:450",
+  TRANSACTIONS_AGENT_URL: "wss://boa-agent.apis.coach:450",  
   DEMO_USERS: {
     personal: {
       firstName: "Personal",
@@ -27,15 +25,16 @@ window.config = {
       mobile: "0411111111"
     },
     business: {
-      firstName: "Loki",
-      lastName: "Laufeyson",
-      username: "loki.laufeyson",
-      email: "loki@asgard.demo",
+      firstName: "Biz",
+      lastName: "Developer",
+      username: "bizadmin",
+      email: "bizdev@asgard.demo",
       password: "Demo@12345",
       dateOfBirth: "1987-06-01",
-      country: "Norway",
+      country: "Spain",
       mobile: "0422222222",
-      businessName: "Asgard Enterprises"
+      businessName: "Major Enterprises"
     }
   }
 }
+
