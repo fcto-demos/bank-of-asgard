@@ -36,7 +36,10 @@ const UserProfilePage = ({ setSiteSection }) => {
 
   const request = (requestConfig) =>
     http.request(requestConfig)
-      .then((response) => response)
+      .then((response) => ({
+        ...response,
+        data: typeof response.data === "string" ? JSON.parse(response.data) : response.data,
+      }))
       .catch((error) => error);
 
   useEffect(() => {
@@ -84,13 +87,13 @@ const UserProfilePage = ({ setSiteSection }) => {
           username: response.data.userName || "",
           accountType:
             response.data["urn:scim:schemas:extension:custom:User"]
-              .accountType || "N/A",
-          email: response.data.emails[0] || "",
-          givenName: response.data.name.givenName || "",
-          familyName: response.data.name.familyName || "",
-          mobile: response.data.phoneNumbers[0].value || "",
-          country: response.data["urn:scim:wso2:schema"].country || "",
-          birthdate: response.data["urn:scim:wso2:schema"].dateOfBirth || "",
+              ?.accountType || "N/A",
+          email: response.data.emails?.[0] || "",
+          givenName: response.data.name?.givenName || "",
+          familyName: response.data.name?.familyName || "",
+          mobile: response.data.phoneNumbers?.[0]?.value || "",
+          country: response.data["urn:scim:wso2:schema"]?.country || "",
+          birthdate: response.data["urn:scim:wso2:schema"]?.dateOfBirth || "",
           picture: response.data.picture || "",
         });
       }
