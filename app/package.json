@@ -1,8 +1,8 @@
 {
-  "name": "@asgardeo/react.samples.bank.of.asgard.app",
-  "description": "Asgardeo react sample app - Bank of Asgard",
+  "name": "@fcto-demos/bank.of.asgard.app",
+  "description": "FCTO Demos - Bank of Asgard",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "author": "WSO2",
   "license": "Apache-2.0",
@@ -13,7 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@asgardeo/react": "0.22.2",
+    "@asgardeo/react": "0.22.5",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@fortawesome/free-brands-svg-icons": "6.7.2",
@@ -24,16 +24,16 @@
     "@mui/material": "6.5.0",
     "@mui/x-data-grid": "8.28.1",
     "@vitejs/plugin-react": "4.7.0",
-    "axios": "1.15.0",
+    "axios": "1.15.1",
     "notistack": "3.0.2",
-    "onfido-sdk-ui": "14.70.0",
+    "onfido-sdk-ui": "14.72.0",
     "prop-types": "15.8.1",
     "qrcode.react": "4.2.0",
-    "react": "19.2.4",
+    "react": "19.2.5",
     "react-bootstrap": "2.10.10",
-    "react-dom": "19.2.4",
+    "react-dom": "19.2.5",
     "react-markdown": "10.1.0",
-    "react-router": "7.13.2",
+    "react-router": "7.14.1",
     "remark-gfm": "4.0.1",
     "vite": "6.4.2",
     "vite-plugin-svgr": "4.5.0"
@@ -45,8 +45,8 @@
     "eslint": "9.39.4",
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "5.2.0",
-    "eslint-plugin-react-refresh": "0.4.26",
+    "eslint-plugin-react-refresh": "0.5.2",
     "globals": "15.15.0",
-    "sass-embedded": "1.98.0"
+    "sass-embedded": "1.99.0"
   }
 }
