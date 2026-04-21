@@ -388,6 +388,30 @@ app.patch("/business-update", async (req, res) => {
   }
 });
 
+app.post("/reprovision", requireBearer, async (req, res) => {
+  try {
+    const userInfo = await axios.get(`${IDP_BASE_URL}/oauth2/userinfo`, {
+      headers: { Authorization: `Bearer ${req.token}` },
+      httpsAgent: agent,
+    });
+    const sub = userInfo.data.sub;
+    if (!sub) {
+      return res.status(400).json({ error: "Could not resolve user identity" });
+    }
+    const adminToken = await getAccessToken();
+    await axios.post(
+      `${TRANSACTIONS_API_URL}/admin/provision`,
+      { user_sub: sub, num_transactions: 60 },
+      { headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" } }
+    );
+    logger.info({ sub }, "POST /reprovision: transactions provisioned");
+    res.json({ status: "ok", user_sub: sub });
+  } catch (error) {
+    logger.error({ message: error.message }, "POST /reprovision: failed");
+    res.status(500).json({ error: "Failed to reprovision transactions" });
+  }
+});
+
 app.get("/transactions-summary", requireBearer, async (req, res) => {
   try {
     const userInfo = await axios.get(`${IDP_BASE_URL}/oauth2/userinfo`, {

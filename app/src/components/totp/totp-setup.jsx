@@ -33,7 +33,10 @@ const TotpSetup = () => {
 
     const request = requestConfig =>
         http.request(requestConfig)
-            .then(response => response)
+            .then(response => ({
+                ...response,
+                data: typeof response.data === "string" ? JSON.parse(response.data) : response.data,
+            }))
             .catch(error => error);
 
     useEffect(() => {
