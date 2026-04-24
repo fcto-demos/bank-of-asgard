@@ -10,7 +10,7 @@
 #   anthropic: claude-sonnet-4-5-20250929
 #   mistral:   mistral-tiny
 
-provider: anthropic
+provider: mistral
 # model: claude-sonnet-4-5-20250929
 
 # WSO2 API Gateway — optional, disabled by default.

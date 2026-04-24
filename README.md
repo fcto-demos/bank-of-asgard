@@ -302,6 +302,28 @@ TRANSACTIONS_AGENT_URL: "ws://localhost:8011"
 > [!NOTE]
 > WSO2 Agent Manager instrumentation is not supported on this branch (AutoGen is not compatible with the OpenTelemetry LangChain instrumentation package). To test Agent Manager integration, switch to the `feat/langchain-migration` branch.
 
+### Setup of Agent Manager (Optional)
+
+If you would like to enable the Agent Manager to instrument the Transaction agent, follow the quick-start guide:
+
+<https://wso2.github.io/agent-manager/docs/v0.12.x/getting-started/quick-start/>
+
+It will launch inside a Docker image.
+
+1. Access the Agent Manager console.
+2. Click **Add an Agent**, select **Externally Hosted**, and name it:
+   ```
+   Bank of Asgard - Transaction Agent
+   ```
+3. Once registered, export the following environment variables:
+
+```bash
+export AMP_OTEL_ENDPOINT="http://localhost:22893/otel"
+export AMP_AGENT_API_KEY="<YOUR_KEY>"
+```
+
+
+
 ### Running with Docker / Podman (recommended)
 
 1. Copy `llm_config.yaml` to `~/podman_share/llm_config.yaml` on the host (this directory is mounted by default when you create the Podman machine) - The compose file mounts this path into the agent container so the config file is kept outside the image and never rebuilt on change.
@@ -342,8 +364,23 @@ uvicorn app.main:app --reload --port 8010
 
 2. From within the `transactions-agent/` directory:
 
-```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.service:app --reload --port 8011
-```
+   **With Agent Manager:**
+
+   ```bash
+   python3 -m venv venv && source venv/bin/activate
+   pip install -r requirements.txt
+
+   export AMP_OTEL_ENDPOINT="http://localhost:22893/otel"
+   export AMP_AGENT_API_KEY="<YOUR_KEY>"
+
+   amp-instrument uvicorn app.service:app --reload --port 8011
+   ```
+
+   **Without Agent Manager:**
+
+   ```bash
+   python3 -m venv venv && source venv/bin/activate
+   pip install -r requirements.txt
+   uvicorn app.service:app --reload --port 8011
+   ```
+
