@@ -44,7 +44,10 @@ const BusinessProfilePage = ({ setSiteSection }) => {
   const scopes = "openid profile internal_login internal_org_application_mgt_update internal_org_application_mgt_delete internal_org_application_mgt_create internal_org_application_mgt_view internal_org_user_mgt_update internal_org_user_mgt_delete internal_org_user_mgt_list internal_org_user_mgt_create internal_org_user_mgt_view internal_org_idp_view internal_org_idp_delete internal_org_idp_update internal_org_idp_create internal_org_role_mgt_delete internal_org_role_mgt_create internal_org_role_mgt_update internal_org_role_mgt_view";
   const request = (requestConfig) =>
     http.request(requestConfig)
-      .then((response) => response)
+      .then((response) => ({
+        ...response,
+        data: typeof response.data === "string" ? JSON.parse(response.data) : response.data,
+      }))
       .catch((error) => error);
 
   useEffect(() => {
@@ -105,17 +108,17 @@ const BusinessProfilePage = ({ setSiteSection }) => {
           username: response.data.userName || "",
           accountType:
             response.data["urn:scim:schemas:extension:custom:User"]
-              .accountType || "N/A",
+              ?.accountType || "N/A",
           businessName: response.data["urn:scim:schemas:extension:custom:User"]
-              .businessName || "N/A",
-          email: response.data.emails[0] || "",
-          givenName: response.data.name.givenName || "",
-          familyName: response.data.name.familyName || "",
-          mobile: response.data.phoneNumbers[0].value || "",
-          country: response.data["urn:scim:wso2:schema"].country || "",
-          birthdate: response.data["urn:scim:wso2:schema"].dateOfBirth || "",
+              ?.businessName || "N/A",
+          email: response.data.emails?.[0] || "",
+          givenName: response.data.name?.givenName || "",
+          familyName: response.data.name?.familyName || "",
+          mobile: response.data.phoneNumbers?.[0]?.value || "",
+          country: response.data["urn:scim:wso2:schema"]?.country || "",
+          birthdate: response.data["urn:scim:wso2:schema"]?.dateOfBirth || "",
           picture: response.data.picture || "",
-          role: response.data.roles[0].display || "N/A"
+          role: response.data.roles?.[0]?.display || "N/A"
         });
       }
       return;

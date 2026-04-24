@@ -53,8 +53,6 @@ export const getAccessToken = async () => {
     return tokenData.access_token;
   }
 
-  console.log(`Fetching new access token using CLIENT_ID: ${CLIENT_ID}`);
-
   try {
     const response = await axios.post(
       TOKEN_ENDPOINT,

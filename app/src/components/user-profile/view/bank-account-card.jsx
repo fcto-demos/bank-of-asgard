@@ -35,8 +35,9 @@ const BankAccountCard = ({ userInfo }) => {
   const { bankAccountData } = useContext(BankAccountContext);
   const { getAccessToken } = useAsgardeo();
   const [txnSummary, setTxnSummary] = useState(null);
+  const [provisioning, setProvisioning] = useState(false);
 
-  useEffect(() => {
+  const loadSummary = () =>
     getAccessToken()
       .then((token) =>
         fetch(`${environmentConfig.API_SERVICE_URL}/transactions-summary`, {
@@ -46,7 +47,22 @@ const BankAccountCard = ({ userInfo }) => {
       .then((res) => res.json())
       .then((data) => setTxnSummary(data))
       .catch(() => setTxnSummary({ total: 0, recent: [], monthly_counts: {} }));
-  }, []);
+
+  useEffect(() => { loadSummary(); }, []);
+
+  const handleReprovision = () => {
+    setProvisioning(true);
+    getAccessToken()
+      .then((token) =>
+        fetch(`${environmentConfig.API_SERVICE_URL}/reprovision`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      )
+      .then(() => loadSummary())
+      .catch(() => {})
+      .finally(() => setProvisioning(false));
+  };
 
   return (
     <div
@@ -117,7 +133,21 @@ const BankAccountCard = ({ userInfo }) => {
           {txnSummary === null ? (
             <p style={{ fontSize: "13px", color: "#999", margin: "6px 0 10px" }}>Loading...</p>
           ) : txnSummary.total === 0 ? (
-            <p style={{ fontSize: "13px", color: "#c88", margin: "6px 0 10px" }}>No transactions provisioned yet.</p>
+            <div style={{ margin: "6px 0 10px" }}>
+              <p style={{ fontSize: "13px", color: "#c88", marginBottom: "8px" }}>No transactions provisioned yet.</p>
+              <button
+                onClick={handleReprovision}
+                disabled={provisioning}
+                style={{
+                  background: "none", border: "none", padding: 0,
+                  fontSize: "12px", color: provisioning ? "#bbb" : "#aaa",
+                  cursor: provisioning ? "default" : "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                {provisioning ? "Provisioning…" : "Provision demo data"}
+              </button>
+            </div>
           ) : (
             <>
               <p style={{ fontSize: "13px", color: "#666", marginBottom: "8px" }}>
