@@ -1,6 +1,6 @@
 # LLM provider configuration for Bank of Asgard AI agents.
 #
-# provider: openai | gemini | anthropic
+# provider: openai | gemini | anthropic | mistral
 # model:    override the default model for the chosen provider
 #           (comment out to use the built-in default)
 #
@@ -8,8 +8,9 @@
 #   openai:    gpt-4o-mini
 #   gemini:    gemini-2.5-flash-lite
 #   anthropic: claude-sonnet-4-5-20250929
+#   mistral:   mistral-tiny
 
-provider: anthropic
+provider: mistral
 # model: claude-sonnet-4-5-20250929
 
 # WSO2 API Gateway — optional, disabled by default.

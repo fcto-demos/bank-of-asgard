@@ -19,6 +19,7 @@ import yaml
 from fastapi.responses import HTMLResponse
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
+from langchain_mistralai import ChatMistralAI
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
@@ -42,6 +43,16 @@ logging.getLogger("langchain_core").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 
 load_dotenv()
+
+# Disable SSL verification for httpx when SSL_ENABLED=false (Needed for local WSO2 IS with self-signed certificates.).
+# As asgardeo SDK does not expose an ssl_verify option, so we patch httpx.AsyncClient.
+if os.environ.get('SSL_ENABLED', 'true').lower() == 'false':
+    _orig_async_client_init = httpx.AsyncClient.__init__
+    def _patched_async_client_init(self, *args, **kwargs):
+        kwargs.setdefault('verify', False)
+        _orig_async_client_init(self, *args, **kwargs)
+    httpx.AsyncClient.__init__ = _patched_async_client_init
+    logger.warning("SSL verification disabled for httpx (SSL_ENABLED=false) — do not use in production")
 
 
 class GatewayTokenManager:
@@ -150,6 +161,7 @@ llm_model = _llm_cfg.get("model")
 openai_api_key = os.environ.get('OPENAI_API_KEY')
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
 anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
+mistral_api_key = os.environ.get('MISTRAL_API_KEY')
 
 app = FastAPI(
     title="Bank of Asgard — Transactions Agent",
@@ -170,6 +182,7 @@ _default_models = {
     "gemini": "gemini-2.5-flash-lite",
     "anthropic": "claude-sonnet-4-5-20250929",
     "openai": "gpt-4o-mini",
+    "mistral": "mistral-tiny",
 }
 
 
@@ -214,6 +227,12 @@ elif llm_provider == 'anthropic':
     llm = ChatAnthropic(
         model=llm_model or "claude-sonnet-4-5-20250929",
         anthropic_api_key=anthropic_api_key,
+    )
+    llm_secured = llm
+elif llm_provider == 'mistral':
+    llm = ChatMistralAI(
+        model=llm_model or _default_models["mistral"],
+        mistral_api_key=mistral_api_key,
     )
     llm_secured = llm
 else:  # default: openai

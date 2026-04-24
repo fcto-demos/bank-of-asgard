@@ -151,6 +151,8 @@ TRANSACTIONS_API_BASE_URL=http://localhost:8010
 OPENAI_API_KEY=<OPENAI_API_KEY>
 # GEMINI_API_KEY=<GEMINI_API_KEY>
 # ANTHROPIC_API_KEY=<ANTHROPIC_API_KEY>
+# MISTRAL_API_KEY=<MISTRAL_API_KEY>
+
 
 # WSO2 API Gateway (only when gateway.enabled: true in llm_config.yaml)
 # GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
@@ -332,7 +334,7 @@ GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
 | `GATEWAY_CLIENT_ID` | Client ID for the gateway OAuth2 application |
 | `GATEWAY_CLIENT_SECRET` | Client secret for the gateway OAuth2 application |
 
-When `gateway.enabled: true`, no provider API key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) is required. The `provider` field in `llm_config.yaml` still controls the default model name used in the request.
+When `gateway.enabled: true`, no provider API key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY` etc.) is required. The `provider` field in `llm_config.yaml` still controls the default model name used in the request.
 
 **Token refresh behaviour:**
 - The token is cached in memory inside `GatewayTokenManager`

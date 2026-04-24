@@ -26,4 +26,5 @@ package-lock.json
 *.sln
 *.sw?
 /.vite
+__pycache__
 docs/.$architecture.drawio.bkp

@@ -19,3 +19,4 @@ websockets>=10.0
 asgardeo-ai==0.2.2
 amp-instrumentation
 opentelemetry-instrumentation-langchain<0.53.0
+langchain-mistralai>=0.2.0
