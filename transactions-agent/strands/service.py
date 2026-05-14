@@ -48,6 +48,8 @@ warnings.filterwarnings("ignore", message=".*ParsedTextBlock.*", category=UserWa
 
 load_dotenv()
 
+_ssl_verify = os.environ.get("SSL_VERIFY", "true").lower() != "false"
+
 
 class GatewayTokenManager:
     """Fetches and caches an OAuth2 client-credentials token for the WSO2 API Gateway."""
@@ -69,7 +71,7 @@ class GatewayTokenManager:
         async with self._lock:
             if self._token and time.monotonic() < self._expires_at:
                 return self._token
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(verify=_ssl_verify) as client:
                 resp = await client.post(
                     self._token_endpoint,
                     data={"grant_type": "client_credentials"},
@@ -215,14 +217,14 @@ def _build_gateway_model(gw_url: str, token_manager: GatewayTokenManager):
         model.client.meta.events.register('before-send.bedrock-runtime.*', _inject_bearer)
         return model
     elif llm_provider == 'anthropic':
-        http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager))
+        http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager), verify=_ssl_verify)
         return AnthropicModel(
             client_args={"base_url": gw_url, "api_key": "unused", "http_client": http_client},
             model_id=llm_model or _default_models["anthropic"],
             max_tokens=4096,
         )
     else:
-        http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager))
+        http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager), verify=_ssl_verify)
         gw_openai_client = openai.AsyncOpenAI(
             base_url=gw_url,
             api_key="unused",

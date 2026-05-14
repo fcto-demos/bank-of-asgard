@@ -12,6 +12,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 TRANSACTIONS_API_BASE_URL = os.environ.get("TRANSACTIONS_API_BASE_URL", "http://localhost:8010")
+_ssl_verify = os.environ.get("SSL_VERIFY", "true").lower() != "false"
 
 
 async def get_my_transactions(
@@ -52,7 +53,7 @@ async def get_my_transactions(
 
     url = f"{TRANSACTIONS_API_BASE_URL}/transactions"
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(verify=_ssl_verify) as client:
         response = await client.get(url, headers=headers, params=params, timeout=15.0)
         response.raise_for_status()
         return response.json()

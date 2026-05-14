@@ -44,6 +44,8 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 
 load_dotenv()
 
+_ssl_verify = os.environ.get("SSL_VERIFY", "true").lower() != "false"
+
 
 class GatewayTokenManager:
     """Fetches and caches an OAuth2 client-credentials token for the WSO2 API Gateway."""
@@ -60,7 +62,7 @@ class GatewayTokenManager:
         async with self._lock:
             if self._token and time.monotonic() < self._expires_at:
                 return self._token
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(verify=_ssl_verify) as client:
                 resp = await client.post(
                     self._token_endpoint,
                     data={"grant_type": "client_credentials"},
@@ -156,7 +158,7 @@ _default_models = {
 
 def _build_gateway_model_client(base_url: str, token_manager: GatewayTokenManager):
     """Build a model client routed via the WSO2 API Gateway at the given base URL."""
-    http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager))
+    http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager), verify=_ssl_verify)
     if llm_provider == 'anthropic':
         return AnthropicChatCompletionClient(
             model=llm_model or _default_models["anthropic"],
