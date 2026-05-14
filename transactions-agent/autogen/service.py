@@ -115,7 +115,7 @@ def _load_llm_config() -> dict:
     Searches: /app/ (Docker mount), then project root (native development).
     """
     candidates = [
-        Path(__file__).parent.parent / "llm_config.yaml",        # Docker: /app/llm_config.yaml
+        Path(__file__).parent / "llm_config.yaml",               # Docker: /app/llm_config.yaml
         Path(__file__).parent.parent.parent / "llm_config.yaml", # native: repo root
     ]
     for path in candidates:
