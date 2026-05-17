@@ -323,6 +323,12 @@ cp llm_config.yaml ~/podman_share/llm_config.yaml
 podman compose --profile langchain up --build -d
 ```
 
+To enable **WSO2 Agent Manager (AMP) instrumentation** (supported by `langchain` and `strands` only), pass the overlay file and set `AMP_AGENT_API_KEY` in `.env`:
+
+```bash
+podman compose -f docker-compose.yml -f docker-compose.amp.yml --profile langchain up --build -d
+```
+
 3. View logs
 
 ```bash

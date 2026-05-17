@@ -221,6 +221,30 @@ docker compose down
 
 > **Note:** When running via Docker/Podman, set `TRANSACTIONS_API_BASE_URL=http://transactions-api:8010` in `transactions-agent/.env` so the agent reaches the API container by its service name on the shared network. Use `http://localhost:8010` for native development instead.
 
+### With WSO2 Agent Manager (AMP) instrumentation
+
+Pass the `docker-compose.amp.yml` overlay alongside the base file to enable OpenTelemetry instrumentation via AMP. Supported by the `langchain` and `strands` profiles only — `autogen` does not include the instrumentation packages.
+
+Set `AMP_AGENT_API_KEY` (and optionally `AMP_OTEL_ENDPOINT`) in `transactions-agent/.env`, then:
+
+```bash
+# LangChain agent with AMP instrumentation
+docker compose -f docker-compose.yml -f docker-compose.amp.yml --profile langchain up --build -d
+
+# Strands agent with AMP instrumentation
+docker compose -f docker-compose.yml -f docker-compose.amp.yml --profile strands up --build -d
+```
+
+`AMP_OTEL_ENDPOINT` defaults to `http://host.containers.internal:22893/otel` (container-to-host routing). Override it in `.env` if your Agent Manager runs elsewhere.
+
+| Profile | AMP? | Command |
+|---|---|---|
+| `autogen` | No | `docker compose --profile autogen up` |
+| `strands` | No | `docker compose --profile strands up` |
+| `langchain` | No | `docker compose --profile langchain up` |
+| `strands` | ✅ | `docker compose -f docker-compose.yml -f docker-compose.amp.yml --profile strands up` |
+| `langchain` | ✅ | `docker compose -f docker-compose.yml -f docker-compose.amp.yml --profile langchain up` |
+
 ### Natively (development)
 
 **Transactions API:**
