@@ -1,0 +1,21 @@
+# Overlay for WSO2 Agent Manager (AMP) instrumentation.
+#
+# Use alongside docker-compose.yml with the agent profile:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.amp.yml --profile langchain up
+#   docker compose -f docker-compose.yml -f docker-compose.amp.yml --profile strands up
+#
+# Supported by: langchain, strands  (autogen lacks the instrumentation packages)
+#
+# AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY must be set in transactions-agent/.env
+
+services:
+  transactions-agent-langchain:
+    environment:
+      AMP_OTEL_ENDPOINT: ${AMP_OTEL_ENDPOINT:-http://host.containers.internal:22893/otel}
+      AMP_AGENT_API_KEY: ${AMP_AGENT_API_KEY}
+
+  transactions-agent-strands:
+    environment:
+      AMP_OTEL_ENDPOINT: ${AMP_OTEL_ENDPOINT:-http://host.containers.internal:22893/otel}
+      AMP_AGENT_API_KEY: ${AMP_AGENT_API_KEY}
