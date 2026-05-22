@@ -1,0 +1,59 @@
+name: Code Quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  python-quality:
+    name: Python — Ruff (${{ matrix.agent }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [langchain, strands, autogen]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff — lint, complexity & security rules
+        working-directory: transactions-agent/${{ matrix.agent }}
+        run: ruff check . --output-format github
+
+  frontend-quality:
+    name: Frontend — ESLint
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18]
+        pnpm-version: [8]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ matrix.pnpm-version }}
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: ESLint
+        working-directory: app
+        run: pnpm run lint
