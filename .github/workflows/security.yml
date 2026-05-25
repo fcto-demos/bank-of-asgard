@@ -34,31 +34,23 @@ jobs:
         run: pip-audit -r requirements.txt --progress-spinner off
 
   frontend-audit:
-    name: Frontend — pnpm audit
+    name: Frontend — npm audit
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [18]
-        pnpm-version: [8]
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ matrix.pnpm-version }}
-          run_install: false
+          node-version: 18
 
       - name: Install dependencies
-        run: pnpm install
+        working-directory: app
+        run: npm install
 
       - name: Audit frontend dependencies
-        run: pnpm audit --audit-level moderate
+        working-directory: app
+        run: npm audit --audit-level moderate
 
   trivy-scan:
     name: Trivy — filesystem & secrets scan
@@ -70,7 +62,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Trivy — scan for vulnerabilities, secrets & misconfigurations
+      - name: Trivy — print findings to log
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Trivy — generate SARIF for Security tab
+        if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
@@ -78,7 +81,7 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
-          exit-code: "1"
+          exit-code: "0"
           ignore-unfixed: true
 
       - name: Upload Trivy results to GitHub Security tab
