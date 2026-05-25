@@ -13,7 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@asgardeo/react": "0.22.5",
+    "@asgardeo/react": "0.25.3",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@fortawesome/free-brands-svg-icons": "6.7.2",
