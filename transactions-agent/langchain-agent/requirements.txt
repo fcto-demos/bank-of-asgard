@@ -17,5 +17,4 @@ python-multipart==0.0.27
 starlette==1.1.0
 websockets==16.0
 asgardeo-ai==0.2.2
-amp-instrumentation==0.1.6
-opentelemetry-instrumentation-langchain==0.52.6
+amp-instrumentation==0.2.1
