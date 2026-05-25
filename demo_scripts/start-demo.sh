@@ -191,7 +191,7 @@ section "Starting $AGENT (port $PORT_AGENT)"
 
 UVICORN="$AGENT_DIR/$AGENT/venv/bin/uvicorn"
 if $USE_AMP; then
-    (cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
+    (set -a; source "$AGENT_ENV"; set +a; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
         --app-dir "$AGENT" --port "$PORT_AGENT" \
         > "$LOG_DIR/agent.log" 2>&1) &
 else
