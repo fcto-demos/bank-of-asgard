@@ -19,7 +19,7 @@ import yaml
 from fastapi.responses import HTMLResponse
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
@@ -135,7 +135,7 @@ def _load_llm_config() -> dict:
     """
     candidates = [
         Path(__file__).parent / "llm_config.yaml",               # Docker: /app/llm_config.yaml
-        Path(__file__).parent.parent.parent / "llm_config.yaml", # native: repo root
+        Path(__file__).parent.parent.parent / "llm_config.yaml",  # native: repo root
     ]
     for path in candidates:
         if path.exists():
@@ -385,8 +385,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: boo
             await websocket.send_json(
                 TextResponse(content=_user_friendly_error(e)).model_dump()
             )
-        except Exception:
-            pass
+        except Exception as send_err:
+            logger.debug("Failed to send error response to session %s: %s", session_id, send_err)
     finally:
         auth_managers.pop(session_id, None)
         websocket_connections.pop(session_id, None)
@@ -404,7 +404,7 @@ async def callback(code: str, state: str):
         raise HTTPException(status_code=400, detail="Invalid session.")
 
     try:
-        token = await auth_manager.process_callback(state, code)
+        await auth_manager.process_callback(state, code)
 
         # Notify the agent session that authorization is complete
         websocket = websocket_connections.get(session_id)

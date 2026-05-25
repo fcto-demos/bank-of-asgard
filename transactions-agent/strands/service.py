@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import time
@@ -50,8 +51,15 @@ load_dotenv()
 
 _ssl_verify = os.environ.get("SSL_VERIFY", "true").lower() != "false"
 
+
 # Traceloop / AMP tracing — imported lazily so the service starts even if the
 # packages are absent or AMP is not configured.
+def _noop_decorator(*_a, **_kw):
+    def _passthrough(f):
+        return f
+    return _passthrough
+
+
 try:
     from traceloop.sdk.decorators import agent as _agent_decorator
     from traceloop.sdk import Traceloop as _Traceloop
@@ -59,7 +67,7 @@ try:
 except ImportError:
     _HAS_TRACELOOP = False
     _Traceloop = None
-    _agent_decorator = lambda *a, **kw: (lambda f: f)  # no-op decorator
+    _agent_decorator = _noop_decorator
 
 
 class GatewayTokenManager:
@@ -136,7 +144,7 @@ def _load_llm_config() -> dict:
     """
     candidates = [
         Path(__file__).parent / "llm_config.yaml",               # Docker: /app/llm_config.yaml
-        Path(__file__).parent.parent.parent / "llm_config.yaml", # native: repo root
+        Path(__file__).parent.parent.parent / "llm_config.yaml",  # native: repo root
     ]
     for path in candidates:
         if path.exists():
@@ -149,7 +157,10 @@ def _load_llm_config() -> dict:
 _llm_cfg = _load_llm_config()
 llm_provider = _llm_cfg.get("provider", "openai").lower()
 llm_model = _llm_cfg.get("model")
-logger.info("LLM config: provider=%s model=%s gateway_enabled=%s", llm_provider, llm_model, _llm_cfg.get("gateway", {}).get("enabled", False))
+logger.info(
+    "LLM config: provider=%s model=%s gateway_enabled=%s",
+    llm_provider, llm_model, _llm_cfg.get("gateway", {}).get("enabled", False),
+)
 
 openai_api_key = os.environ.get('OPENAI_API_KEY')
 gemini_api_key = os.environ.get('GEMINI_API_KEY')
@@ -203,7 +214,10 @@ def _build_gateway_model(gw_url: str, token_manager: GatewayTokenManager):
         # Use BedrockModel with the Converse API format over the gateway.
         # SigV4 signing is disabled; the gateway OAuth bearer token is injected
         # via a botocore before-send event so it's always fresh at request time.
-        logger.info("Building Bedrock Converse gateway model (endpoint=%s, model=%s)", gw_url, llm_model or _default_models["bedrock"])
+        logger.info(
+            "Building Bedrock Converse gateway model (endpoint=%s, model=%s)",
+            gw_url, llm_model or _default_models["bedrock"],
+        )
 
         def _inject_bearer(request, **__):  # noqa: ANN003
             # _stream() runs in asyncio.to_thread — use run_coroutine_threadsafe
@@ -268,7 +282,10 @@ else:
                 model_id=llm_model or _default_models["bedrock"],
                 region_name=_bedrock_region,
             )
-            logger.info("Using AWS Bedrock Converse API directly (region=%s, model=%s)", _bedrock_region, llm_model or _default_models["bedrock"])
+            logger.info(
+                "Using AWS Bedrock Converse API directly (region=%s, model=%s)",
+                _bedrock_region, llm_model or _default_models["bedrock"],
+            )
         case 'gemini':
             model_client = OpenAIModel(
                 client_args={
@@ -338,53 +355,59 @@ def _describe_guardrail(msg: dict) -> str:
     return msg.get("actionReason") or "Your request was blocked by an AI guardrail policy."
 
 
+def _handle_httpx_error(cause: httpx.HTTPStatusError) -> str | None:
+    status = cause.response.status_code
+    if status == 446:
+        logger.warning("Guardrail triggered (446): %s", cause.response.text)
+        try:
+            data = cause.response.json()
+            msg = data.get("description") or data.get("message") or data.get("detail")
+            if isinstance(msg, dict):
+                msg = msg.get("actionReason") or msg.get("action") or str(msg)
+            return msg or cause.response.text or "Your request was blocked by an AI guardrail policy."
+        except Exception:
+            return cause.response.text or "Your request was blocked by an AI guardrail policy."
+    if status == 429:
+        logger.warning("Rate limit hit (429): %s", cause.response.text)
+        return "I'm currently busy — the AI service is at capacity. Please try again in a moment."
+    return None
+
+
+def _handle_botocore_error(cause: botocore.exceptions.ClientError) -> str | None:
+    status = cause.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    if status == 446:
+        logger.warning("Guardrail triggered (446) via Bedrock: %s", cause.response)
+        try:
+            error = cause.response.get("Error", {})
+            msg = error.get("Message") or error.get("message") or ""
+            if isinstance(msg, str):
+                try:
+                    msg = json.loads(msg)
+                except Exception:  # noqa: S110
+                    pass
+            if isinstance(msg, dict):
+                return _describe_guardrail(msg)
+            return msg or "Your request was blocked by an AI guardrail policy."
+        except Exception:
+            return "Your request was blocked by an AI guardrail policy."
+    if status == 429:
+        logger.warning("Rate limit hit (429) via Bedrock")
+        return "I'm currently busy — the AI service is at capacity. Please try again in a moment."
+    return None
+
+
 def _extract_gateway_error(e: Exception) -> str | None:
     """Walk the exception chain looking for known gateway HTTP errors and return a user-friendly message."""
     cause = e
     while cause is not None:
-        # ── httpx path (Anthropic / OpenAI providers via gateway) ────────────
         if isinstance(cause, httpx.HTTPStatusError):
-            status = cause.response.status_code
-            if status == 446:
-                logger.warning("Guardrail triggered (446): %s", cause.response.text)
-                try:
-                    data = cause.response.json()
-                    msg = data.get("description") or data.get("message") or data.get("detail")
-                    if isinstance(msg, dict):
-                        msg = msg.get("actionReason") or msg.get("action") or str(msg)
-                    return msg or cause.response.text or "Your request was blocked by an AI guardrail policy."
-                except Exception:
-                    return cause.response.text or "Your request was blocked by an AI guardrail policy."
-            if status == 429:
-                logger.warning("Rate limit hit (429): %s", cause.response.text)
-                return "I'm currently busy — the AI service is at capacity. Please try again in a moment."
-
-        # ── botocore path (Bedrock provider via gateway) ─────────────────────
+            if result := _handle_httpx_error(cause):
+                return result
         if isinstance(cause, botocore.exceptions.ClientError):
-            status = cause.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            if status == 446:
-                logger.warning("Guardrail triggered (446) via Bedrock: %s", cause.response)
-                try:
-                    error = cause.response.get("Error", {})
-                    msg = error.get("Message") or error.get("message") or ""
-                    if isinstance(msg, str):
-                        import json as _json
-                        try:
-                            msg = _json.loads(msg)
-                        except Exception:
-                            pass
-                    if isinstance(msg, dict):
-                        return _describe_guardrail(msg)
-                    return msg or "Your request was blocked by an AI guardrail policy."
-                except Exception:
-                    return "Your request was blocked by an AI guardrail policy."
-            if status == 429:
-                logger.warning("Rate limit hit (429) via Bedrock")
-                return "I'm currently busy — the AI service is at capacity. Please try again in a moment."
-
+            if result := _handle_botocore_error(cause):
+                return result
         cause = getattr(cause, "__cause__", None) or getattr(cause, "__context__", None)
 
-    # Fallback: check string representation in case the lib swallowed the original exception
     msg = str(e)
     if "446" in msg or "900514" in msg:
         return "Your request was blocked by an AI guardrail policy."
@@ -506,8 +529,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: boo
             await websocket.send_json(
                 TextResponse(content=_user_friendly_error(e)).model_dump()
             )
-        except Exception:
-            pass
+        except Exception as send_err:
+            logger.debug("Failed to send error response to session %s: %s", session_id, send_err)
     finally:
         auth_managers.pop(session_id, None)
         websocket_connections.pop(session_id, None)
@@ -525,7 +548,7 @@ async def callback(code: str, state: str):
         raise HTTPException(status_code=400, detail="Invalid session.")
 
     try:
-        token = await auth_manager.process_callback(state, code)
+        await auth_manager.process_callback(state, code)
 
         # Notify the agent session that authorization is complete
         websocket = websocket_connections.get(session_id)
