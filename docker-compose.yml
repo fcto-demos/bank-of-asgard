@@ -18,7 +18,7 @@ services:
     profiles: [autogen]
     build:
       context: ./transactions-agent
-      dockerfile: autogen/Dockerfile
+      dockerfile: autogen-agent/Dockerfile
     container_name: bank-transactions-agent
     ports:
       - "8011:8011"
@@ -34,7 +34,7 @@ services:
     profiles: [strands]
     build:
       context: ./transactions-agent
-      dockerfile: strands/Dockerfile
+      dockerfile: strands-agent/Dockerfile
     container_name: bank-transactions-agent
     ports:
       - "8011:8011"
@@ -50,7 +50,7 @@ services:
     profiles: [langchain]
     build:
       context: ./transactions-agent
-      dockerfile: langchain/Dockerfile
+      dockerfile: langchain-agent/Dockerfile
     container_name: bank-transactions-agent
     ports:
       - "8011:8011"
