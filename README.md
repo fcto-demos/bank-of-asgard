@@ -84,7 +84,7 @@ Following table summarizes the apps and credentials setup and where this informa
      * `Identifier First` - First Step
      * `Username and Password`, `Passkey` - Second Step
      * `TOTP` and `Email OTP` - Third Step
-5. Configure the conditional authentication script (replace the `<NODE_SERVER_BASE_PATH>` with the backend server URL) with the one found at [conditional-auth-script.js](./scripts/conditional-auth-script.js).
+5. Configure the conditional authentication script (replace the `<NODE_SERVER_BASE_PATH>` with the backend server URL) with the one found at [conditional-auth-script.js](./prod_deployment/conditional-auth-script.js).
 
 > [!IMPORTANT]	
 >
@@ -252,11 +252,18 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:3002
 
 Edit `llm_config.yaml` at the repo root to select the LLM provider:
 ```yaml
-# provider: openai | gemini | anthropic | bedrock
+# provider: openai | gemini | anthropic | bedrock | mistral
 provider: openai
 # model: gpt-4o-mini   # uncomment to override the default
 ```
-Default models: `openai → gpt-4o-mini`, `gemini → gemini-2.5-flash-lite`, `anthropic → claude-sonnet-4-5-20250929`, `bedrock → eu.anthropic.claude-sonnet-4-6-20250514-v1:0` (strands agent only).
+
+| Provider    | Default model                                    | Notes                        |
+|-------------|--------------------------------------------------|------------------------------|
+| `openai`    | `gpt-4o-mini`                                    |                              |
+| `gemini`    | `gemini-2.5-flash-lite`                          |                              |
+| `anthropic` | `claude-sonnet-4-5-20250929`                     |                              |
+| `bedrock`   | `eu.anthropic.claude-sonnet-4-6-20250514-v1:0`  | strands agent only           |
+| `mistral`   | `mistral-small-latest`                           | OpenAI-compatible API        |
 
 **Optional — WSO2 API Gateway:** to route LLM calls via a gateway instead of a direct API key:
 ```yaml
@@ -294,6 +301,7 @@ TRANSACTIONS_API_BASE_URL=http://transactions-api:8010   # use container name wh
 OPENAI_API_KEY=<OPENAI_API_KEY>
 # GEMINI_API_KEY=<GEMINI_API_KEY>
 # ANTHROPIC_API_KEY=<ANTHROPIC_API_KEY>
+# MISTRAL_API_KEY=<MISTRAL_API_KEY>
 
 # WSO2 API Gateway (only when gateway.enabled: true in llm_config.yaml)
 # GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
@@ -349,25 +357,58 @@ podman compose logs -f bank-transactions-agent
 podman compose down
 ```
 
+### Demo scripts (quickstart)
+
+The `demo_scripts/` directory provides three helper scripts for local development.
+
+> **Platform support:** macOS and Linux. Windows requires [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) (Windows Subsystem for Linux).
+
+
+
+| Script | Purpose |
+|--------|---------|
+| `demo_scripts/validate.sh` | Pre-flight check — verifies versions, config files, venvs, imports, and port availability |
+| `demo_scripts/start-demo.sh [langchain\|autogen\|strands]` | Starts the full stack in order, polls each health endpoint before moving on |
+| `demo_scripts/stop-demo.sh` | Gracefully stops everything started by `start-demo.sh` |
+
+```bash
+# Check everything is configured correctly
+./demo_scripts/validate.sh
+
+# Start the full stack (prompts for agent if not specified)
+./demo_scripts/start-demo.sh langchain
+
+# Stop when done
+./demo_scripts/stop-demo.sh
+```
+
+Logs are written to `.demo-logs/` and process IDs are tracked in `.demo.pids`.
+
+---
+
 ### Running Natively (development)
+
+Each agent implementation has its own virtual environment inside its subdirectory.
 
 1. From within the `transactions-api/` directory:
 
 ```bash
-python3 -m venv venv && source venv/bin/activate
+python3.11 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8010
 ```
 
-2. From within the `transactions-agent/` directory — pick an implementation:
+2. From within the `transactions-agent/` directory — create a venv per agent (one-time), then run:
 
 ```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r langchain/requirements.txt   # or autogen/ or strands/
+# One-time setup (repeat for each agent you want to use)
+python3.11 -m venv langchain-agent/venv && langchain-agent/venv/bin/pip install -r langchain-agent/requirements.txt
+python3.11 -m venv autogen-agent/venv   && autogen-agent/venv/bin/pip install   -r autogen-agent/requirements.txt
+python3.11 -m venv strands-agent/venv   && strands-agent/venv/bin/pip install   -r strands-agent/requirements.txt
 
-# PYTHONPATH must include both transactions-agent/ (for app/ and auth/)
-# and the chosen subfolder (for tool.py)
-PYTHONPATH=$(pwd):$(pwd)/langchain uvicorn langchain.service:app --reload --port 8011
-# For autogen:  PYTHONPATH=$(pwd):$(pwd)/autogen  uvicorn autogen.service:app  --reload --port 8011
-# For strands:  PYTHONPATH=$(pwd):$(pwd)/strands  uvicorn strands.service:app  --reload --port 8011
+# Activate the venv for the chosen agent, then start it
+source langchain-agent/venv/bin/activate
+PYTHONPATH=$(pwd) uvicorn service:app --app-dir langchain-agent --reload --port 8011
+# For autogen:  source autogen-agent/venv/bin/activate  && PYTHONPATH=$(pwd) uvicorn service:app --app-dir autogen-agent  --reload --port 8011
+# For strands:  source strands-agent/venv/bin/activate  && PYTHONPATH=$(pwd) uvicorn service:app --app-dir strands-agent  --reload --port 8011
 ```
