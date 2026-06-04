@@ -1,6 +1,6 @@
 [Unit]
 Description=Bank of Asgard Frontend App
-Documentation=https://github.com/asgardeo/bank-of-asgard
+Documentation=https://github.com/fcto-demos/bank-of-asgard
 After=network.target
 StartLimitIntervalSec=60
 StartLimitBurst=3
