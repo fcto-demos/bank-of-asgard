@@ -27,8 +27,8 @@ import CardBanking from "../assets/images/image9.jpg";
 import MobileBanking from "../assets/images/mobile-banking.jpg";
 import DigitalBanking from "../assets/images/digital-banking.jpg";
 import BusinessBanking from "../assets/images/image8.jpg";
-import EverydayBanking from "../assets/images/A_women_laying_on_a_soft_with_a_headset_and_holdin_028d291b-58ee-4de5-8c57-2a84033209ac.png";
-import GoGlobal from "../assets/images/A_business_women_in_a_city_walking_portrait_lookin_5e59fd5e-a8dd-43e0-b4ea-5a926d089913.png";
+import EverydayBanking from "../assets/images/A_women_laying_on_a_soft_with_a_headset_and_holdin_028d291b-58ee-4de5-8c57-2a84033209ac-D3JAkeLQ.jpg";
+import GoGlobal from "../assets/images/A_business_women_in_a_city_walking_portrait_lookin_5e59fd5e-a8dd-43e0-b4ea-5a926d089913-C9naFSuO.jpg";
 import { ACCOUNT_TYPES, SITE_SECTIONS, ROUTES, URL_QUERY_PARAMS } from "../constants/app-constants";
 import ChatComponent from "../components/transactions/ChatComponent";
 
