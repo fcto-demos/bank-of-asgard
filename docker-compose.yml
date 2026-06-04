@@ -3,6 +3,17 @@ networks:
     driver: bridge
 
 services:
+  agencies-mcp-server:
+    build:
+      context: ./agencies-mcp-server
+      dockerfile: Dockerfile
+    container_name: bank-agencies-mcp
+    ports:
+      - "8012:8012"
+    env_file: ./agencies-mcp-server/.env
+    networks:
+      - bank-network
+
   transactions-api:
     build:
       context: ./transactions-api
@@ -29,6 +40,7 @@ services:
       - bank-network
     depends_on:
       - transactions-api
+      - agencies-mcp-server
 
   transactions-agent-strands:
     profiles: [strands]
@@ -45,6 +57,7 @@ services:
       - bank-network
     depends_on:
       - transactions-api
+      - agencies-mcp-server
 
   transactions-agent-langchain:
     profiles: [langchain]
@@ -61,3 +74,4 @@ services:
       - bank-network
     depends_on:
       - transactions-api
+      - agencies-mcp-server

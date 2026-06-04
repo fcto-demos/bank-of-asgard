@@ -18,3 +18,4 @@ starlette==1.1.0
 websockets==16.0
 asgardeo-ai==0.2.2
 amp-instrumentation==0.2.1
+mcp>=1.9

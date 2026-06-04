@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useContext } from "react";
 import PropTypes from "prop-types";
 import { useAsgardeo, useUser } from "@asgardeo/react";
 import EditProfile from "../components/user-profile/edit-profile";
@@ -24,9 +24,7 @@ import ViewProfile from "../components/user-profile/view-profile";
 import { ACCOUNT_TYPES, SITE_SECTIONS } from "../constants/app-constants";
 import { environmentConfig } from "../util/environment-util";
 import IdentityVerificationStatus from "../components/identity-verification/identity-verification-status";
-import { useContext } from "react";
 import { IdentityVerificationContext } from "../context/identity-verification-provider";
-
 const UserProfilePage = ({ setSiteSection }) => {
   const { isSignedIn, signIn, http } = useAsgardeo();
   const { isIdentityVerificationEnabled, reloadIdentityVerificationStatus } = useContext(IdentityVerificationContext);
@@ -130,7 +128,8 @@ const UserProfilePage = ({ setSiteSection }) => {
          )}
         </div>
       </section>
-    </>
+
+</>
   );
 };
 

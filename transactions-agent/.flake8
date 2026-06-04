@@ -3,3 +3,5 @@ max-line-length = 120
 per-file-ignores =
     # Logging must be configured before asgardeo/traceloop imports — ordering is intentional
     */service.py:E402
+    # Long lines are unavoidable in prompt string literals
+    app/prompt.py:E501

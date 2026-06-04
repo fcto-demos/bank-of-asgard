@@ -20,14 +20,15 @@ from fastapi.responses import HTMLResponse
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import tool as lc_tool
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
 from pydantic import BaseModel, PrivateAttr
 from starlette.websockets import WebSocketDisconnect
 
-from app.prompt import agent_system_prompt
-from app.tools import get_my_transactions
+from app.prompt import agent_system_prompt, WELCOME_MESSAGE
+from app.tools import get_my_transactions, get_agencies as _get_agencies, set_agencies_token_provider
 from tool import SecureLangChainTool
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
 
@@ -49,10 +50,17 @@ _ssl_verify = os.environ.get("SSL_VERIFY", "true").lower() != "false"
 class GatewayTokenManager:
     """Fetches and caches an OAuth2 client-credentials token for the WSO2 API Gateway."""
 
-    def __init__(self, token_endpoint: str, client_id: str, client_secret: str):
+    def __init__(
+        self,
+        token_endpoint: str,
+        client_id: str,
+        client_secret: str,
+        scope: str | None = None,
+    ):
         self._token_endpoint = token_endpoint
         self._client_id = client_id
         self._client_secret = client_secret
+        self._scope = scope
         self._token: str | None = None
         self._expires_at: float = 0.0
         self._lock = asyncio.Lock()
@@ -61,17 +69,20 @@ class GatewayTokenManager:
         async with self._lock:
             if self._token and time.monotonic() < self._expires_at:
                 return self._token
+            data: dict = {"grant_type": "client_credentials"}
+            if self._scope:
+                data["scope"] = self._scope
             async with httpx.AsyncClient(verify=_ssl_verify) as client:
                 resp = await client.post(
                     self._token_endpoint,
-                    data={"grant_type": "client_credentials"},
+                    data=data,
                     auth=(self._client_id, self._client_secret),
                 )
                 resp.raise_for_status()
-                data = resp.json()
-            self._token = data["access_token"]
-            self._expires_at = time.monotonic() + data.get("expires_in", 3600) - 30
-            logger.info("Gateway access token refreshed (expires in %ss)", data.get("expires_in", 3600))
+                token_data = resp.json()
+            self._token = token_data["access_token"]
+            self._expires_at = time.monotonic() + token_data.get("expires_in", 3600) - 30
+            logger.info("Gateway access token refreshed (expires in %ss)", token_data.get("expires_in", 3600))
             return self._token
 
 
@@ -235,6 +246,33 @@ else:
             )
     llm_secured = llm
 
+# MCP token manager — uses the agent's own client credentials (AGENT_ID/AGENT_SECRET)
+# to obtain a bearer token for the agencies-mcp-server JWT check.
+# This is separate from the LLM gateway credentials.
+_mcp_token_manager: GatewayTokenManager | None = None
+if agent_id and agent_secret and base_url:
+    _mcp_token_manager = GatewayTokenManager(
+        token_endpoint=f"{base_url}/oauth2/token",
+        client_id=agent_id,
+        client_secret=agent_secret,
+        scope=os.environ.get("MCP_TOKEN_SCOPE"),
+    )
+    set_agencies_token_provider(_mcp_token_manager.get_token)
+    logger.info("MCP token manager initialised (scope=%s)", os.environ.get("MCP_TOKEN_SCOPE", "default"))
+else:
+    logger.warning("AGENT_ID/AGENT_SECRET/IDP_BASE_URL not set — GetAgencies tool will not authenticate to MCP server")
+
+
+@lc_tool("GetAgencies")
+async def get_agencies_tool(town: str) -> str:
+    """Find Bank of Asgard branches and agencies near a given town.
+
+    Args:
+        town: The name of the town or city to search near (e.g. "Paris", "London").
+    """
+    return await _get_agencies(town)
+
+
 # Per-session state — each WebSocket gets its own auth manager and token cache
 auth_managers: Dict[str, AutogenAuthManager] = {}
 state_mapping: Dict[str, str] = {}
@@ -358,7 +396,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: boo
 
     graph = create_agent(
         active_llm,
-        [get_transactions_tool],
+        [get_transactions_tool, get_agencies_tool],
         system_prompt=agent_system_prompt,
     )
 
@@ -367,14 +405,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: boo
     await websocket.accept()
 
     try:
-        await websocket.send_json(TextResponse(
-            content=(
-                "Welcome to Bank of Asgard! I'm your Transaction Assistant. "
-                "I can help you review your transaction history, analyse your spending, "
-                "and answer questions about your account activity. "
-                "What would you like to know?"
-            )
-        ).model_dump())
+        await websocket.send_json(TextResponse(content=WELCOME_MESSAGE).model_dump())
 
         await run_agent(graph, websocket, chat_history)
     except WebSocketDisconnect:

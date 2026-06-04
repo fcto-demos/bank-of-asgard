@@ -17,9 +17,11 @@
  */
 
 import { useAsgardeo } from "@asgardeo/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import PropTypes from "prop-types";
+import { Box, Chip, Container, FormControlLabel, Paper, Switch, Typography } from "@mui/material";
+import ShieldIcon from "@mui/icons-material/Shield";
 import { environmentConfig } from "../util/environment-util";
 import CardBanking from "../assets/images/image9.jpg";
 import MobileBanking from "../assets/images/mobile-banking.jpg";
@@ -28,10 +30,22 @@ import BusinessBanking from "../assets/images/image8.jpg";
 import EverydayBanking from "../assets/images/A_women_laying_on_a_soft_with_a_headset_and_holdin_028d291b-58ee-4de5-8c57-2a84033209ac.png";
 import GoGlobal from "../assets/images/A_business_women_in_a_city_walking_portrait_lookin_5e59fd5e-a8dd-43e0-b4ea-5a926d089913.png";
 import { ACCOUNT_TYPES, SITE_SECTIONS, ROUTES, URL_QUERY_PARAMS } from "../constants/app-constants";
+import ChatComponent from "../components/transactions/ChatComponent";
+
+const GOLD = "#997029";
 
 const PersonalBankingPage = ({ setSiteSection }) => {
 
   const { isSignedIn } = useAsgardeo();
+  const [secured, setSecured] = useState(false);
+  const [sessionId, setSessionId] = useState(
+    () => "session_" + Math.random().toString(36).substring(2, 15)
+  );
+
+  const handleSecuredToggle = (e) => {
+    setSecured(e.target.checked);
+    setSessionId("session_" + Math.random().toString(36).substring(2, 15));
+  };
 
   useEffect(() => {
     setSiteSection(SITE_SECTIONS.PERSONAL);
@@ -82,6 +96,99 @@ const PersonalBankingPage = ({ setSiteSection }) => {
         </div>
       </section>
 
+      <section className="layout_padding">
+        <Container maxWidth="xl">
+          <Box sx={{ mb: 3, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 1 }}>
+            <Box>
+              <Typography
+                variant="h5"
+                sx={{ color: GOLD, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", fontSize: "1.1rem", mb: 0.5 }}
+              >
+                How can we help you today?
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Ask about branches near you, our products, or your own account — all in one place.
+              </Typography>
+            </Box>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <ShieldIcon sx={{ color: secured ? GOLD : "#bbb", fontSize: 20 }} />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={secured}
+                    onChange={handleSecuredToggle}
+                    sx={{
+                      "& .MuiSwitch-switchBase.Mui-checked": { color: GOLD },
+                      "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { bgcolor: GOLD },
+                    }}
+                  />
+                }
+                label={
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }}>AI Guardrails</Typography>
+                    <Chip
+                      label={secured ? "ON" : "OFF"}
+                      size="small"
+                      sx={{
+                        height: 18,
+                        fontSize: "0.65rem",
+                        fontWeight: 700,
+                        bgcolor: secured ? "#e8f5e9" : "#f5f5f5",
+                        color: secured ? "#2e7d32" : "#999",
+                      }}
+                    />
+                  </Box>
+                }
+                sx={{ m: 0 }}
+              />
+            </Box>
+          </Box>
+          <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <Box sx={{ flex: "0 0 420px", minWidth: 300 }}>
+              <ChatComponent sessionId={sessionId} secured={secured} />
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 260 }}>
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 3,
+                  borderRadius: 0,
+                  border: "1px solid rgba(0,0,0,.07)",
+                  borderLeft: `3px solid ${GOLD}`,
+                  boxShadow: "0 1px 3px rgba(0,0,0,.05), 0 4px 20px rgba(0,0,0,.06)",
+                }}
+              >
+                <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
+                  What you can ask
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  The Asgard Assistant can help with general questions and your personal account:
+                </Typography>
+                <Box component="ul" sx={{ pl: 2, m: 0 }}>
+                  {[
+                    "Find branches near London",
+                    "What agencies are close to Paris?",
+                    "What services do you offer?",
+                    "Show me my last 5 transactions",
+                    "How much did I spend last month?",
+                    "Were there any transfers in the past 30 days?",
+                  ].map((example) => (
+                    <Box key={example} component="li" sx={{ mb: 0.5 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontStyle: "italic" }}>
+                        &ldquo;{example}&rdquo;
+                      </Typography>
+                    </Box>
+                  ))}
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>
+                  Branch and agency queries need no login. Account queries will prompt you to authorise access.
+                </Typography>
+              </Paper>
+            </Box>
+          </Box>
+        </Container>
+      </section>
+
       <section className="service_section layout_padding">
         <div className="container">
           <div className="heading_container heading_center">
@@ -127,7 +234,7 @@ const PersonalBankingPage = ({ setSiteSection }) => {
                     Business Banking
                   </h5>
                   <p>
-                    We&apos;re supporting smarter business by building future focused insights, 
+                    We&apos;re supporting smarter business by building future focused insights,
                     and easier to use products and services that facilitate new ways to grow
                   </p>
                   { isSignedIn ?

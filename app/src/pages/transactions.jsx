@@ -99,7 +99,12 @@ const TransactionsPage = () => {
         >
           {/* Left column — AI chat */}
           <Box sx={{ flex: "0 0 420px", minWidth: 300 }}>
-            <ChatComponent sessionId={sessionId} secured={secured} />
+            <ChatComponent
+              sessionId={sessionId}
+              secured={secured}
+              title="Transaction Assistant"
+              placeholder="Ask about your transactions..."
+            />
           </Box>
 
           {/* Right column — Info panel */}
