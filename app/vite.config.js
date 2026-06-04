@@ -8,6 +8,20 @@ export default defineConfig({
       svgr(),
       react()
   ],
+  build: {
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/onfido-sdk-ui')) return 'vendor-onfido';
+          if (id.includes('node_modules/@mui/x-data-grid')) return 'vendor-mui-datagrid';
+          if (id.includes('node_modules/@mui/icons-material')) return 'vendor-mui-icons';
+          if (id.includes('node_modules/@mui') || id.includes('node_modules/@emotion')) return 'vendor-mui';
+          if (id.includes('node_modules/@asgardeo')) return 'vendor-asgardeo';
+        },
+      },
+    },
+  },
   preview: {
     port: 5173,
     strictPort: true,
