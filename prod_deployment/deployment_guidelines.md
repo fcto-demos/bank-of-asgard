@@ -1,6 +1,8 @@
-# DigitalOcean Load Balancer forwarding rules for Bank of Asgard
+# Bank of Asgard — Deployment Guidelines
+
+## DigitalOcean Load Balancer Forwarding Rules
 #
-# Configure these two forwarding rules in:
+# Configure these forwarding rules in:
 #   DO Console → Networking → Load Balancers → Forwarding Rules
 #
 # ┌──────────────────────┬────────────────┬──────────────────────────────┐
@@ -27,3 +29,20 @@
 #   Frontend : https://boa.apis.coach:449
 #   Server   : https://boa.apis.coach:451
 #   Agent WS : wss://boa-agent.apis.coach:450
+
+## Frontend Build & Deploy (app/)
+
+# Vite preview.allowedHosts must list every hostname the app is served under.
+# Configured in app/vite.config.js:
+#
+#   preview: {
+#     allowedHosts: ['boa.apis.coach', 'localhost'],
+#   }
+#
+# Without this, Vite 6 rejects requests with "Invalid Host header" when
+# accessed via a hostname (e.g. through the DO load balancer).
+#
+# Steps on the VM after any code change:
+#   cd /home/boa/bank-of-asgard/app
+#   npm run build
+#   systemctl --user restart bank-of-asgard-app
