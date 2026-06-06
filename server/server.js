@@ -23,7 +23,7 @@ import pino from "pino";
 
 import { getAccessToken, requireBearer } from "./middleware/auth.js";
 import { addUserToAdminRole, addUserToRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getRoleIdByName, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
-import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, USER_STORE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
+import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, USER_STORE_NAME, TRANSACTIONS_ROLE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
 
 const corsOptions = {
   origin: [VITE_REACT_APP_CLIENT_BASE_URL],
@@ -87,7 +87,7 @@ async function createUser(userData) {
     scimUrl,
     {
       schemas: [],
-      userName: `${USER_STORE_NAME}/${username}`,
+      userName: `${USER_STORE_NAME}/${USER_STORE_NAME === "DEFAULT" ? email : username}`,
       password: password,
       emails: [
         {
@@ -135,7 +135,7 @@ app.post("/signup", async (req, res) => {
     const userId = response.data?.id;
     if (userId) {
       try {
-        const roleId = await getRoleIdByName("Read_Transactions");
+        const roleId = await getRoleIdByName(TRANSACTIONS_ROLE_NAME);
         await addUserToRole(roleId, userId);
         logger.info({ userId }, "POST /signup: user assigned to Read_Transactions role");
       } catch (roleError) {

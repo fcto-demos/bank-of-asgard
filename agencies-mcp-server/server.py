@@ -1,14 +1,13 @@
 import os
 import logging
-from functools import lru_cache
+import time
 
 import httpx
 import jwt as pyjwt
+import uvicorn
 from dotenv import load_dotenv
 from fastmcp import FastMCP
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.middleware import Middleware
 
 load_dotenv()
 
@@ -101,61 +100,122 @@ AGENCIES: dict[str, list[dict]] = {
 }
 
 
-@lru_cache(maxsize=1)
+_jwks_cache: dict | None = None
+_jwks_fetched_at: float = 0.0
+_JWKS_TTL = 3600  # 1 hour
+
+
 def _fetch_jwks() -> dict:
-    """Fetch JWKS from IDP — cached for process lifetime (demo usage)."""
-    url = f"{IDP_BASE_URL}/oauth2/jwks"
-    logger.info("Fetching JWKS from %s", url)
-    resp = httpx.get(url, verify=SSL_VERIFY, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
+    """Fetch JWKS from IDP with a 1-hour TTL cache."""
+    global _jwks_cache, _jwks_fetched_at
+    now = time.monotonic()
+    if _jwks_cache is None or (now - _jwks_fetched_at) > _JWKS_TTL:
+        url = f"{IDP_BASE_URL}/oauth2/jwks"
+        logger.info("Fetching JWKS from %s", url)
+        resp = httpx.get(url, verify=SSL_VERIFY, timeout=10)
+        resp.raise_for_status()
+        _jwks_cache = resp.json()
+        _jwks_fetched_at = now
+    return _jwks_cache
+
+
+def _invalidate_jwks_cache() -> None:
+    global _jwks_cache
+    _jwks_cache = None
 
 
 def _validate_token(token: str) -> None:
-    """Validate a JWT bearer token against the IDP's JWKS. Raises on failure."""
-    jwks = _fetch_jwks()
-    signing_keys = [k for k in jwks.get("keys", []) if k.get("use") == "sig"]
-    if not signing_keys:
-        signing_keys = jwks.get("keys", [])
-    if not signing_keys:
-        raise ValueError("No signing keys found in JWKS")
+    """Validate a JWT bearer token against the IDP's JWKS. Raises on failure.
+
+    Retries once with a fresh JWKS fetch if all cached keys fail, to handle
+    IDP key rotation without requiring a process restart.
+    """
+    try:
+        unverified = pyjwt.decode(token, options={"verify_signature": False})
+        logger.info(
+            "Token claims — aud=%r  sub=%r  iss=%r  exp=%r",
+            unverified.get("aud"),
+            unverified.get("sub"),
+            unverified.get("iss"),
+            unverified.get("exp"),
+        )
+    except Exception as peek_err:
+        logger.warning("Could not decode token for inspection: %s", peek_err)
+
+    logger.info("Expected audience: %r", EXPECTED_AUDIENCE)
 
     last_err: Exception | None = None
-    for key_data in signing_keys:
-        try:
-            public_key = pyjwt.algorithms.RSAAlgorithm.from_jwk(key_data)
-            pyjwt.decode(
-                token,
-                public_key,
-                algorithms=["RS256"],
-                audience=EXPECTED_AUDIENCE,
-            )
-            return
-        except Exception as e:
-            last_err = e
+    for attempt in range(2):
+        jwks = _fetch_jwks()
+        signing_keys = [k for k in jwks.get("keys", []) if k.get("use") == "sig"]
+        if not signing_keys:
+            signing_keys = jwks.get("keys", [])
+        if not signing_keys:
+            raise ValueError("No signing keys found in JWKS")
+
+        last_err = None
+        for key_data in signing_keys:
+            try:
+                public_key = pyjwt.algorithms.RSAAlgorithm.from_jwk(key_data)
+                pyjwt.decode(
+                    token,
+                    public_key,
+                    algorithms=["RS256"],
+                    audience=EXPECTED_AUDIENCE,
+                )
+                return
+            except Exception as e:
+                last_err = e
+
+        if attempt == 0:
+            logger.warning("All JWKS keys failed — invalidating cache and retrying once")
+            _invalidate_jwks_cache()
 
     raise last_err or ValueError("Token validation failed")
 
 
-class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """Validate the OAuth bearer token on every inbound request."""
+_UNAUTHORIZED = (
+    b'{"error":"Unauthorized"}',
+    [(b"content-type", b"application/json"), (b"content-length", b"23")],
+)
 
-    async def dispatch(self, request: Request, call_next):
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
-            logger.warning("Request rejected — missing or invalid Authorization header")
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        token = auth[len("Bearer "):]
-        try:
-            _validate_token(token)
-        except Exception as exc:
-            logger.warning("Request rejected — token validation failed: %s", exc)
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return await call_next(request)
+
+class BearerAuthMiddleware:
+    """Pure ASGI bearer-token middleware — compatible with SSE streaming responses.
+
+    BaseHTTPMiddleware buffers the response body and breaks SSE streams.
+    This implementation operates at the raw ASGI level so the SSE stream
+    passes through untouched once the token is validated.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http":
+            headers = {k.lower(): v for k, v in scope.get("headers", [])}
+            auth = headers.get(b"authorization", b"").decode()
+            if not auth.startswith("Bearer "):
+                logger.warning("Request rejected — missing or invalid Authorization header")
+                await self._send_401(send)
+                return
+            token = auth[len("Bearer "):]
+            try:
+                _validate_token(token)
+            except Exception as exc:
+                logger.warning("Request rejected — token validation failed: %s", exc)
+                await self._send_401(send)
+                return
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _send_401(send) -> None:
+        body, headers = _UNAUTHORIZED
+        await send({"type": "http.response.start", "status": 401, "headers": headers})
+        await send({"type": "http.response.body", "body": body})
 
 
 mcp = FastMCP("Bank of Asgard — Agencies")
-mcp.add_middleware(BearerAuthMiddleware)
 
 
 @mcp.tool()
@@ -175,4 +235,5 @@ def get_agencies(town: str) -> list[dict]:
 
 if __name__ == "__main__":
     logger.info("Starting Agencies MCP server on port 8012 (IDP: %s)", IDP_BASE_URL)
-    mcp.run(transport="sse", host="0.0.0.0", port=8012)  # noqa: S104
+    app = mcp.http_app(transport="sse", middleware=[Middleware(BearerAuthMiddleware)])
+    uvicorn.run(app, host="0.0.0.0", port=8012)  # noqa: S104

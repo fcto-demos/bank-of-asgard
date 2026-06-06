@@ -123,7 +123,7 @@ cp ~/bank-of-asgard/transactions-agent/.env.example \
 Edit `.env` and set the following values:
 
 ```dotenv
-IDP_CLIENT_ID=<your-client-id>
+AGENT_APP_ID=<your-client-id>
 IDP_BASE_URL=https://identity.dev.apis.coach:9445
 IDP_REDIRECT_URI=https://boa-agent.apis.coach:445/callback   # ← must match Asgardeo app settings
 
