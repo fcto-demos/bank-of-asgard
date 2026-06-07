@@ -13,6 +13,8 @@ dist-ssr
 *.local
 .env
 **/public/config.js
+**/public/config.is.js
+**/public/config.prod.js
 **/public/config.js-e
 package-lock.json
 
@@ -38,3 +40,9 @@ __pycache__/
 /.vite
 __pycache__
 docs/.$architecture.drawio.bkp
+.demo.context
+.env.is
+config.is*
+.claude/settings.json
+KNOWN_ISSUES.md
+config.js
