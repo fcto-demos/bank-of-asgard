@@ -221,7 +221,14 @@ section "Starting $AGENT (port $PORT_AGENT)"
 
 UVICORN="$AGENT_DIR/$AGENT/venv/bin/uvicorn"
 if $USE_AMP; then
-    (set +u; set -a; source "$AGENT_ENV"; set +a; set -u; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
+    # Export only the two AMP vars amp-instrument needs at startup.
+    # Do NOT source the whole .env — bash variable expansion would corrupt any
+    # value containing $ (silently truncating secrets). Everything else is loaded
+    # safely by Python's load_dotenv() after the process starts.
+    _amp_var() { grep -E "^$1=" "$AGENT_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"; }
+    AMP_OTEL_ENDPOINT=$(_amp_var AMP_OTEL_ENDPOINT)
+    AMP_AGENT_API_KEY=$(_amp_var AMP_AGENT_API_KEY)
+    (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
         --app-dir "$AGENT" --port "$PORT_AGENT" \
         > "$LOG_DIR/agent.log" 2>&1) &
 else

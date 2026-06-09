@@ -181,7 +181,10 @@ case "$SERVICE" in
         [[ -f "$AGENT_ENV" ]] || die "transactions-agent/.env not found"
         if [[ "$USE_AMP" == "true" ]]; then
             [[ -f "$AMP_INSTRUMENT" ]] || die "amp-instrument not found in $AGENT venv"
-            (set +u; set -a; source "$AGENT_ENV"; set +a; set -u; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" \
+            _amp_var() { grep -E "^$1=" "$AGENT_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"; }
+            AMP_OTEL_ENDPOINT=$(_amp_var AMP_OTEL_ENDPOINT)
+            AMP_AGENT_API_KEY=$(_amp_var AMP_AGENT_API_KEY)
+            (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" \
                 "$AMP_INSTRUMENT" "$UVICORN" service:app \
                 --app-dir "$AGENT" --port "$PORT_AGENT" \
                 > "$LOG_DIR/agent.log" 2>&1) &
