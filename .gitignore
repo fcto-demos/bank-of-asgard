@@ -46,3 +46,5 @@ config.is*
 .claude/settings.json
 KNOWN_ISSUES.md
 config.js
+config.argardeo.js
+.env.asgardeo
