@@ -73,17 +73,18 @@ const BusinessProfilePage = ({ setSiteSection }) => {
   };
 
   useEffect(() => {
-    if (!isSignedIn || !myOrganizations?.length || !flattenedProfile?.businessName) {
+    const businessName = flattenedProfile?.businessName || userInfo?.businessName;
+    if (!isSignedIn || !myOrganizations?.length || !businessName) {
         return;
     }
     const businessOrg = myOrganizations.find(
-      (org) => org.name === flattenedProfile?.businessName
+      (org) => org.name === businessName
     );
     if (!businessOrg) {
         return;
     }
     setOrganizationId(businessOrg.id);
-  }, [isSignedIn, myOrganizations, flattenedProfile]);
+  }, [isSignedIn, myOrganizations, flattenedProfile, userInfo]);
 
   const getUserInfo = () => {
     request({
