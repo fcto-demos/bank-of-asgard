@@ -52,4 +52,9 @@ config.argardeo.js
 config.is.js
 .claude/settings.json
 KNOWN_ISSUES.md
+config.js
+config.asgardeo.js
+.env.asgardeo
+app/public/config.asgardeo.js
+
 .demo.context

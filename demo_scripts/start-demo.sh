@@ -33,28 +33,33 @@ show_help() {
     echo -e "  ${BOLD}agent${NC}     langchain | autogen | strands  (prompted if omitted)"
     echo ""
     echo -e "${BOLD}Options:${NC}"
-    echo "  --amp     Enable WSO2 Agent Manager (AMP) instrumentation"
-    echo "            Supported by: langchain, strands (autogen lacks the required packages)"
-    echo "            Requires: amp-instrumentation installed in the agent venv"
-    echo "                      AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in transactions-agent/.env"
-    echo "  --help    Show this help and exit"
+    echo "  --env=is|asgardeo  Copy .env.<profile> → .env for all services before starting"
+    echo "                     (prompted if omitted)"
+    echo "  --amp              Enable WSO2 Agent Manager (AMP) instrumentation"
+    echo "                     Supported by: langchain, strands (autogen lacks the required packages)"
+    echo "                     Requires: amp-instrumentation installed in the agent venv"
+    echo "                               AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in transactions-agent/.env"
+    echo "  --help             Show this help and exit"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
     echo "  ./demo_scripts/start-demo.sh"
-    echo "  ./demo_scripts/start-demo.sh langchain"
-    echo "  ./demo_scripts/start-demo.sh strands --amp"
+    echo "  ./demo_scripts/start-demo.sh langchain --env=asgardeo"
+    echo "  ./demo_scripts/start-demo.sh strands --env=is --amp"
     echo ""
 }
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 USE_AMP=false
 AGENT_ARG=""
+ENV_PROFILE=""
 for arg in "$@"; do
     case "$arg" in
-        --amp)  USE_AMP=true ;;
-        --help) show_help; exit 0 ;;
-        -*)     die "Unknown option: $arg. Run --help for usage." ;;
-        *)      [[ -z "$AGENT_ARG" ]] && AGENT_ARG="$arg" || die "Unexpected argument: $arg. Run --help for usage." ;;
+        --amp)          USE_AMP=true ;;
+        --env=is)       ENV_PROFILE="is" ;;
+        --env=asgardeo) ENV_PROFILE="asgardeo" ;;
+        --help)         show_help; exit 0 ;;
+        -*)             die "Unknown option: $arg. Run --help for usage." ;;
+        *)              [[ -z "$AGENT_ARG" ]] && AGENT_ARG="$arg" || die "Unexpected argument: $arg. Run --help for usage." ;;
     esac
 done
 
@@ -129,7 +134,7 @@ if [[ -z "$LLM_MODEL" ]]; then
     case "$LLM_PROVIDER" in
         openai)    LLM_MODEL="gpt-4o-mini" ;;
         gemini)    LLM_MODEL="gemini-2.5-flash-lite" ;;
-        anthropic) LLM_MODEL="claude-sonnet-4-5-20250929" ;;
+        anthropic) LLM_MODEL="claude-sonnet-4-6" ;;
         bedrock)   LLM_MODEL="eu.anthropic.claude-sonnet-4-6-20250514-v1:0" ;;
         mistral)   LLM_MODEL="mistral-small-latest" ;;
         *)         LLM_MODEL="unknown" ;;
@@ -152,6 +157,48 @@ fi
 
 ok "Using agent: ${AGENT_ARG}"
 
+# ── IDP environment selection ─────────────────────────────────────────────────
+section "IDP environment"
+
+if [[ -z "$ENV_PROFILE" ]]; then
+    echo ""
+    echo "  Which identity provider environment?"
+    echo "  1) asgardeo"
+    echo "  2) is  (WSO2 Identity Server)"
+    echo ""
+    read -rp "  Enter choice [1-2]: " env_choice
+    case "$env_choice" in
+        1) ENV_PROFILE="asgardeo" ;;
+        2) ENV_PROFILE="is" ;;
+        *) die "Invalid choice." ;;
+    esac
+fi
+
+ENV_DIRS=(
+    "$ROOT/agencies-mcp-server"
+    "$ROOT/server"
+    "$ROOT/transactions-agent"
+    "$ROOT/transactions-api"
+)
+for dir in "${ENV_DIRS[@]}"; do
+    src="$dir/.env.$ENV_PROFILE"
+    if [[ -f "$src" ]]; then
+        cp "$src" "$dir/.env"
+        ok "$(basename "$dir")/.env  ← .env.$ENV_PROFILE"
+    else
+        warn "$(basename "$dir")/.env.$ENV_PROFILE not found — existing .env unchanged"
+    fi
+done
+
+CONFIG_SRC="$ROOT/app/public/config.$ENV_PROFILE.js"
+CONFIG_DST="$ROOT/app/public/config.js"
+if [[ -f "$CONFIG_SRC" ]]; then
+    cp "$CONFIG_SRC" "$CONFIG_DST"
+    ok "app/public/config.js  ← config.$ENV_PROFILE.js"
+else
+    warn "app/public/config.$ENV_PROFILE.js not found — existing config.js unchanged"
+fi
+
 # ── Setup ─────────────────────────────────────────────────────────────────────
 mkdir -p "$LOG_DIR"
 : > "$PID_FILE"
@@ -161,6 +208,10 @@ cat > "$ROOT/.demo.context" <<EOF
 AGENT=$AGENT
 AGENT_ARG=$AGENT_ARG
 USE_AMP=$USE_AMP
+<<<<<<< HEAD
+=======
+ENV_PROFILE=$ENV_PROFILE
+>>>>>>> 9fb4f1b (Switch to sonnet 4.6)
 EOF
 
 # Cleanup on unexpected exit during startup
@@ -291,6 +342,7 @@ echo -e "  ${BOLD}Transactions API${NC}     http://localhost:$PORT_API"
 echo -e "  ${BOLD}Agent ($AGENT_ARG)${NC}           ws://localhost:$PORT_AGENT"
 echo -e "  ${BOLD}Agencies MCP${NC}         sse://localhost:$PORT_MCP"
 echo -e "  ${BOLD}LLM${NC}                  $LLM_PROVIDER / $LLM_MODEL${LLM_VIA}"
+echo -e "  ${BOLD}IDP environment${NC}      $ENV_PROFILE"
 [[ "$AGENT" == "strands-agent" ]] && echo -e "  ${BOLD}AWS branding${NC}         enabled" || echo -e "  ${BOLD}AWS branding${NC}         disabled"
 $USE_AMP && echo -e "  ${BOLD}AMP instrumentation${NC}  enabled" || true
 echo ""

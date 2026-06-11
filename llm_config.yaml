@@ -16,7 +16,7 @@
 #              Only supported by the strands agent implementation.
 
 provider: anthropic
-# model: claude-sonnet-4-5-20250929
+model: claude-sonnet-4-6
 
 # WSO2 API Gateway — optional, disabled by default.
 # When enabled, LLM calls are routed via the gateway using OAuth2 client credentials

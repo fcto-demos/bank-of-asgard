@@ -121,7 +121,7 @@ _use_gateway = _gateway_cfg.get("enabled", False)
 
 _default_models = {
     "gemini": "gemini-2.5-flash-lite",
-    "anthropic": "claude-sonnet-4-5-20250929",
+    "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o-mini",
     "mistral": "mistral-small-latest",
 }
@@ -136,6 +136,13 @@ def _build_gateway_model_client(base_url: str, token_manager: GatewayTokenManage
             base_url=base_url,
             api_key="unused",
             http_client=http_client,
+            model_info=ModelInfo(
+                vision=True,
+                function_calling=True,
+                json_output=True,
+                structured_output=True,
+                family=ModelFamily.UNKNOWN,
+            ),
         )
     else:
         return OpenAIChatCompletionClient(
@@ -184,6 +191,13 @@ else:
             model_client = AnthropicChatCompletionClient(
                 model=llm_model or _default_models["anthropic"],
                 api_key=anthropic_api_key,
+                model_info=ModelInfo(
+                    vision=True,
+                    function_calling=True,
+                    json_output=True,
+                    structured_output=True,
+                    family=ModelFamily.UNKNOWN,
+                ),
             )
         case 'mistral':
             model_client = OpenAIChatCompletionClient(

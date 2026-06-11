@@ -140,7 +140,7 @@ _use_gateway = _gateway_cfg.get("enabled", False)
 
 _default_models = {
     "gemini": "gemini-2.5-flash-lite",
-    "anthropic": "claude-sonnet-4-5-20250929",
+    "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o-mini",
     "mistral": "mistral-small-latest",
 }
