@@ -1,5 +1,6 @@
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import Literal, Dict
 
@@ -303,8 +304,9 @@ async def run_agent(assistant: AssistantAgent, websocket: WebSocket):
 
 
 @app.websocket("/chat")
-async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: bool = False):
+async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     """WebSocket endpoint for the Transaction Assistant chat."""
+    session_id = str(uuid.uuid4())
 
     async def message_handler(message: AuthRequestMessage):
         """Send OBO auth request to the frontend over this session's WebSocket."""
@@ -454,4 +456,4 @@ async def callback(code: str, state: str):
         """)
     except Exception as e:
         logger.error(f"Callback error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Authorization failed. Please try again.")
