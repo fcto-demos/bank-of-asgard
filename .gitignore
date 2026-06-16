@@ -21,6 +21,8 @@ package-lock.json
 # Demo launcher artefacts
 .demo.pids
 .demo-logs/
+.env.bak
+**/config.js.bak
 
 # Python virtual environments
 venv/
@@ -58,3 +60,6 @@ config.asgardeo.js
 app/public/config.asgardeo.js
 
 .demo.context
+.claude/agent-memory/python-security-reviewer/project_transactions_agent_security.md
+.claude/agent-memory/python-security-reviewer/MEMORY.md
+agencies-mcp-server/server_poisoned.py
