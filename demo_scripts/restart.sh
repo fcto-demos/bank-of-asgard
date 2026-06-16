@@ -48,12 +48,8 @@ show_help() {
 # shellcheck source=/dev/null
 source "$CONTEXT_FILE"
 
-<<<<<<< HEAD
-echo -e "\n${BOLD}Bank of Asgard — restart $SERVICE${NC}"
-=======
 ENV_PROFILE="${ENV_PROFILE:-unknown}"
 echo -e "\n${BOLD}Bank of Asgard — restart $SERVICE${NC}  ${YELLOW}[env: $ENV_PROFILE]${NC}"
->>>>>>> 9fb4f1b (Switch to sonnet 4.6)
 echo    "────────────────────────────────────────"
 
 # ── Stop a named service by its PID file entry ────────────────────────────────

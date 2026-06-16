@@ -208,10 +208,7 @@ cat > "$ROOT/.demo.context" <<EOF
 AGENT=$AGENT
 AGENT_ARG=$AGENT_ARG
 USE_AMP=$USE_AMP
-<<<<<<< HEAD
-=======
 ENV_PROFILE=$ENV_PROFILE
->>>>>>> 9fb4f1b (Switch to sonnet 4.6)
 EOF
 
 # Cleanup on unexpected exit during startup
@@ -220,6 +217,20 @@ cleanup_on_error() {
     "$SCRIPT_DIR/stop-demo.sh" --quiet 2>/dev/null || true
 }
 trap cleanup_on_error ERR INT TERM
+
+# ── Crash detection: verify a background process is still alive after 2s ─────
+check_launched() {
+    local pid="$1" service="$2" log="$3"
+    sleep 2
+    if ! kill -0 "$pid" 2>/dev/null; then
+        fail "$service exited immediately — last lines of log:"
+        echo ""
+        tail -20 "$log" 2>/dev/null | sed 's/^/    /'
+        echo ""
+        "$SCRIPT_DIR/stop-demo.sh" --quiet 2>/dev/null || true
+        exit 1
+    fi
+}
 
 # ── Health check helpers ──────────────────────────────────────────────────────
 wait_for_port() {
@@ -283,11 +294,13 @@ if $USE_AMP; then
         --app-dir "$AGENT" --port "$PORT_AGENT" \
         > "$LOG_DIR/agent.log" 2>&1) &
 else
+    info "Agent command: cd $AGENT_DIR && PYTHONPATH=$AGENT_DIR $UVICORN service:app --app-dir $AGENT --port $PORT_AGENT"
     (cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$UVICORN" service:app \
         --app-dir "$AGENT" --port "$PORT_AGENT" \
         > "$LOG_DIR/agent.log" 2>&1) &
 fi
 echo "agent:$!" >> "$PID_FILE"
+check_launched "$!" "$AGENT" "$LOG_DIR/agent.log"
 
 wait_for_http "http://localhost:$PORT_AGENT/openapi.json" "$AGENT"
 
