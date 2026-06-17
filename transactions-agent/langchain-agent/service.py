@@ -18,7 +18,7 @@ import yaml
 from fastapi.responses import HTMLResponse
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
@@ -141,7 +141,7 @@ _use_gateway = _gateway_cfg.get("enabled", False)
 
 _default_models = {
     "gemini": "gemini-2.5-flash-lite",
-    "anthropic": "claude-sonnet-4-6",
+    "anthropic": "claude-haiku-4-5",
     "openai": "gpt-4o-mini",
     "mistral": "mistral-small-latest",
 }
@@ -253,7 +253,32 @@ def _user_friendly_error(e: Exception) -> str:
     return "An unexpected error occurred. Please try again."
 
 
-async def run_agent(graph: Any, websocket: WebSocket, chat_history: List):
+def _log_token_usage(new_messages: list, session_id: str) -> None:
+    """Sum token usage across all LLM calls in one agent turn and log a single line.
+
+    Handles both OpenAI (token_usage.prompt_tokens/completion_tokens) and
+    Anthropic (usage.input_tokens/output_tokens) response_metadata shapes.
+    """
+    total_input = total_output = calls = 0
+    for msg in new_messages:
+        if not isinstance(msg, AIMessage):
+            continue
+        meta = msg.response_metadata or {}
+        usage = meta.get("token_usage") or meta.get("usage") or {}
+        inp = usage.get("input_tokens") or usage.get("prompt_tokens") or 0
+        out = usage.get("output_tokens") or usage.get("completion_tokens") or 0
+        if inp or out:
+            calls += 1
+            total_input += inp
+            total_output += out
+    if calls:
+        logger.info(
+            "[tokens] session=%s llm_calls=%d input=%d output=%d total=%d",
+            session_id, calls, total_input, total_output, total_input + total_output,
+        )
+
+
+async def run_agent(graph: Any, websocket: WebSocket, chat_history: List, session_id: str = ""):
     """Run the chat loop — receive user messages and return agent responses."""
     while True:
         user_input = await websocket.receive_text()
@@ -269,10 +294,13 @@ async def run_agent(graph: Any, websocket: WebSocket, chat_history: List):
             # The last message in the result is the AI's final response
             output = result["messages"][-1].content
 
-            # Update history with new messages from this turn
-            chat_history.extend(result["messages"][len(messages):])
+            new_messages = result["messages"][len(messages):]
+            _log_token_usage(new_messages, session_id)
 
-            for msg in result["messages"][len(messages):-1]:
+            # Update history with new messages from this turn
+            chat_history.extend(new_messages)
+
+            for msg in new_messages[:-1]:
                 logger.debug(f"[Agent Step] {msg}")
 
             await websocket.send_json(
@@ -365,7 +393,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     try:
         await websocket.send_json(TextResponse(content=WELCOME_MESSAGE).model_dump())
 
-        await run_agent(graph, websocket, chat_history)
+        await run_agent(graph, websocket, chat_history, session_id)
     except WebSocketDisconnect:
         logger.info(f"Session {session_id} disconnected")
     except Exception as e:

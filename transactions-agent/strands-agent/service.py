@@ -165,7 +165,7 @@ _use_gateway = _gateway_cfg.get("enabled", False)
 
 _default_models = {
     "gemini": "gemini-2.5-flash-lite",
-    "anthropic": "claude-sonnet-4-6",
+    "anthropic": "claude-haiku-4-5",
     "bedrock": "eu.anthropic.claude-sonnet-4-6",
     "openai": "gpt-4o-mini",
     "mistral": "mistral-small-latest",
