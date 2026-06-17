@@ -4,12 +4,12 @@ Run pip-audit across all Python services and npm audit across all Node packages.
 
 ## Steps
 
-1. **Run all pip-audits in parallel:**
-   - `transactions-agent/langchain-agent/requirements.txt`
-   - `transactions-agent/autogen-agent/requirements.txt`
-   - `transactions-agent/strands-agent/requirements.txt`
-   - `transactions-api/requirements.txt`
-   - `agencies-mcp-server/requirements.txt`
+1. **Run all pip-audits in parallel.** Each agent has its own `venv/` — activate it before running `pip-audit` so the correct binary and environment are used:
+   - `source transactions-agent/langchain-agent/venv/bin/activate && pip-audit -r transactions-agent/langchain-agent/requirements.txt`
+   - `source transactions-agent/autogen-agent/venv/bin/activate && pip-audit -r transactions-agent/autogen-agent/requirements.txt`
+   - `source transactions-agent/strands-agent/venv/bin/activate && pip-audit -r transactions-agent/strands-agent/requirements.txt`
+   - `source transactions-api/venv/bin/activate && pip-audit -r transactions-api/requirements.txt`
+   - `source agencies-mcp-server/venv/bin/activate && pip-audit -r agencies-mcp-server/requirements.txt`
 
 2. **Run npm audits in parallel:**
    - `app/` — `npm audit`
