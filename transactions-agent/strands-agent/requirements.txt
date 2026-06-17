@@ -19,3 +19,5 @@ asgardeo-ai==0.2.2
 amp-instrumentation==0.2.1
 boto3==1.42.88
 botocore==1.42.88
+aiohttp>=3.14.1
+cryptography>=48.0.1
