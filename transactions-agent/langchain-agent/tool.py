@@ -74,7 +74,7 @@ class SecureLangChainTool(BaseTool):
 
     async def _arun(self, *args: Any, run_manager=None, **kwargs: Any) -> Any:
         if not self._auth:
-            kwargs[TOKEN_FIELD] = OAuthToken(access_token="")
+            kwargs[TOKEN_FIELD] = ""
             return await self._func(**kwargs)
 
         token = await self._auth.manager.get_oauth_token(self._auth.config)
