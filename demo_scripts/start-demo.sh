@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # start-demo.sh — Bank of Asgard full-stack demo launcher
-# Starts: transactions-api → selected agent → server → frontend
+# Starts: transactions-api → selected agent → agencies-mcp-server → server → frontend
 # Logs go to .demo-logs/  PIDs tracked in .demo.pids
 
 set -euo pipefail
@@ -15,6 +15,7 @@ PORT_FRONTEND=5173
 PORT_SERVER=3002
 PORT_API=8010
 PORT_AGENT=8011
+PORT_MCP=8012
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -32,28 +33,33 @@ show_help() {
     echo -e "  ${BOLD}agent${NC}     langchain | autogen | strands  (prompted if omitted)"
     echo ""
     echo -e "${BOLD}Options:${NC}"
-    echo "  --amp     Enable WSO2 Agent Manager (AMP) instrumentation"
-    echo "            Supported by: langchain, strands (autogen lacks the required packages)"
-    echo "            Requires: amp-instrumentation installed in the agent venv"
-    echo "                      AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in transactions-agent/.env"
-    echo "  --help    Show this help and exit"
+    echo "  --env=is|asgardeo  Back up existing .env files then switch to this profile"
+    echo "                     (omit to keep your existing .env files unchanged)"
+    echo "  --amp              Enable WSO2 Agent Manager (AMP) instrumentation"
+    echo "                     Supported by: langchain, strands (autogen lacks the required packages)"
+    echo "                     Requires: amp-instrumentation installed in the agent venv"
+    echo "                               AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in transactions-agent/.env"
+    echo "  --help             Show this help and exit"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
-    echo "  ./demo_scripts/start-demo.sh"
-    echo "  ./demo_scripts/start-demo.sh langchain"
-    echo "  ./demo_scripts/start-demo.sh strands --amp"
+    echo "  ./demo_scripts/start-demo.sh langchain              # uses existing .env files"
+    echo "  ./demo_scripts/start-demo.sh langchain --env=asgardeo  # backs up then switches profile"
+    echo "  ./demo_scripts/start-demo.sh strands --env=is --amp"
     echo ""
 }
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 USE_AMP=false
 AGENT_ARG=""
+ENV_PROFILE=""
 for arg in "$@"; do
     case "$arg" in
-        --amp)  USE_AMP=true ;;
-        --help) show_help; exit 0 ;;
-        -*)     die "Unknown option: $arg. Run --help for usage." ;;
-        *)      [[ -z "$AGENT_ARG" ]] && AGENT_ARG="$arg" || die "Unexpected argument: $arg. Run --help for usage." ;;
+        --amp)          USE_AMP=true ;;
+        --env=is)       ENV_PROFILE="is" ;;
+        --env=asgardeo) ENV_PROFILE="asgardeo" ;;
+        --help)         show_help; exit 0 ;;
+        -*)             die "Unknown option: $arg. Run --help for usage." ;;
+        *)              [[ -z "$AGENT_ARG" ]] && AGENT_ARG="$arg" || die "Unexpected argument: $arg. Run --help for usage." ;;
     esac
 done
 
@@ -111,6 +117,11 @@ elif $AMP_SUPPORTED && ! $USE_AMP; then
     [[ "$amp_choice" =~ ^[Yy]$ ]] && USE_AMP=true || true
 fi
 
+# ── MCP server paths ──────────────────────────────────────────────────────────
+MCP_PY="$ROOT/agencies-mcp-server/venv/bin/python"
+MCP_ENV="$ROOT/agencies-mcp-server/.env"
+[[ -f "$MCP_PY" ]]  || die "agencies-mcp-server venv not found. Run: cd agencies-mcp-server && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt"
+[[ -f "$MCP_ENV" ]] || die "agencies-mcp-server/.env not found — copy from agencies-mcp-server/.env.example"
 
 # ── Read LLM config ───────────────────────────────────────────────────────────
 LLM_CONFIG="$ROOT/llm_config.yaml"
@@ -123,7 +134,7 @@ if [[ -z "$LLM_MODEL" ]]; then
     case "$LLM_PROVIDER" in
         openai)    LLM_MODEL="gpt-4o-mini" ;;
         gemini)    LLM_MODEL="gemini-2.5-flash-lite" ;;
-        anthropic) LLM_MODEL="claude-sonnet-4-5-20250929" ;;
+        anthropic) LLM_MODEL="claude-sonnet-4-6" ;;
         bedrock)   LLM_MODEL="eu.anthropic.claude-sonnet-4-6-20250514-v1:0" ;;
         mistral)   LLM_MODEL="mistral-small-latest" ;;
         *)         LLM_MODEL="unknown" ;;
@@ -146,9 +157,52 @@ fi
 
 ok "Using agent: ${AGENT_ARG}"
 
+# ── IDP environment selection ─────────────────────────────────────────────────
+section "IDP environment"
+
+ENV_DIRS=(
+    "$ROOT/agencies-mcp-server"
+    "$ROOT/server"
+    "$ROOT/transactions-agent"
+    "$ROOT/transactions-api"
+)
+
+if [[ -z "$ENV_PROFILE" ]]; then
+    ok "Using existing .env files"
+else
+    for dir in "${ENV_DIRS[@]}"; do
+        [[ -f "$dir/.env" ]] && cp "$dir/.env" "$dir/.env.bak"
+        src="$dir/.env.$ENV_PROFILE"
+        if [[ -f "$src" ]]; then
+            cp "$src" "$dir/.env"
+            ok "$(basename "$dir")/.env  ← .env.$ENV_PROFILE"
+        else
+            warn "$(basename "$dir")/.env.$ENV_PROFILE not found — existing .env unchanged"
+        fi
+    done
+
+    CONFIG_SRC="$ROOT/app/public/config.$ENV_PROFILE.js"
+    CONFIG_DST="$ROOT/app/public/config.js"
+    [[ -f "$CONFIG_DST" ]] && cp "$CONFIG_DST" "$ROOT/app/public/config.js.bak"
+    if [[ -f "$CONFIG_SRC" ]]; then
+        cp "$CONFIG_SRC" "$CONFIG_DST"
+        ok "app/public/config.js  ← config.$ENV_PROFILE.js"
+    else
+        warn "app/public/config.$ENV_PROFILE.js not found — existing config.js unchanged"
+    fi
+fi
+
 # ── Setup ─────────────────────────────────────────────────────────────────────
 mkdir -p "$LOG_DIR"
 : > "$PID_FILE"
+
+# Persist startup context so restart.sh can relaunch services identically
+cat > "$ROOT/.demo.context" <<EOF
+AGENT=$AGENT
+AGENT_ARG=$AGENT_ARG
+USE_AMP=$USE_AMP
+ENV_PROFILE=$ENV_PROFILE
+EOF
 
 # Cleanup on unexpected exit during startup
 cleanup_on_error() {
@@ -157,7 +211,38 @@ cleanup_on_error() {
 }
 trap cleanup_on_error ERR INT TERM
 
-# ── Health check helper ───────────────────────────────────────────────────────
+# ── Crash detection: verify a background process is still alive after 2s ─────
+check_launched() {
+    local pid="$1" service="$2" log="$3"
+    sleep 2
+    if ! kill -0 "$pid" 2>/dev/null; then
+        fail "$service exited immediately — last lines of log:"
+        echo ""
+        tail -20 "$log" 2>/dev/null | sed 's/^/    /'
+        echo ""
+        "$SCRIPT_DIR/stop-demo.sh" --quiet 2>/dev/null || true
+        exit 1
+    fi
+}
+
+# ── Health check helpers ──────────────────────────────────────────────────────
+wait_for_port() {
+    local port="$1" service="$2" timeout="${3:-60}"
+    local elapsed=0
+    info "Waiting for $service..."
+    while [[ $elapsed -lt $timeout ]]; do
+        if (echo >/dev/tcp/localhost/$port) 2>/dev/null; then
+            ok "$service is up"
+            return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    fail "$service did not start within ${timeout}s — check $LOG_DIR/mcp.log"
+    "$SCRIPT_DIR/stop-demo.sh" --quiet 2>/dev/null || true
+    exit 1
+}
+
 wait_for_http() {
     local url="$1" service="$2" timeout="${3:-60}"
     local elapsed=0
@@ -191,17 +276,35 @@ section "Starting $AGENT (port $PORT_AGENT)"
 
 UVICORN="$AGENT_DIR/$AGENT/venv/bin/uvicorn"
 if $USE_AMP; then
-    (set -a; source "$AGENT_ENV"; set +a; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
+    # Export only the two AMP vars amp-instrument needs at startup.
+    # Do NOT source the whole .env — bash variable expansion would corrupt any
+    # value containing $ (silently truncating secrets). Everything else is loaded
+    # safely by Python's load_dotenv() after the process starts.
+    _amp_var() { grep -E "^$1=" "$AGENT_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"; }
+    AMP_OTEL_ENDPOINT=$(_amp_var AMP_OTEL_ENDPOINT)
+    AMP_AGENT_API_KEY=$(_amp_var AMP_AGENT_API_KEY)
+    (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
         --app-dir "$AGENT" --port "$PORT_AGENT" \
         > "$LOG_DIR/agent.log" 2>&1) &
 else
+    info "Agent command: cd $AGENT_DIR && PYTHONPATH=$AGENT_DIR $UVICORN service:app --app-dir $AGENT --port $PORT_AGENT"
     (cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$UVICORN" service:app \
         --app-dir "$AGENT" --port "$PORT_AGENT" \
         > "$LOG_DIR/agent.log" 2>&1) &
 fi
 echo "agent:$!" >> "$PID_FILE"
+check_launched "$!" "$AGENT" "$LOG_DIR/agent.log"
 
 wait_for_http "http://localhost:$PORT_AGENT/openapi.json" "$AGENT"
+
+# ── Start agencies-mcp-server ─────────────────────────────────────────────────
+section "Starting agencies-mcp-server (port $PORT_MCP)"
+
+(set +u; set -a; source "$MCP_ENV"; set +a; set -u; cd "$ROOT/agencies-mcp-server" && "$MCP_PY" server.py \
+    > "$LOG_DIR/mcp.log" 2>&1) &
+echo "mcp:$!" >> "$PID_FILE"
+
+wait_for_port $PORT_MCP "agencies-mcp-server"
 
 # ── Start server (Express) ────────────────────────────────────────────────────
 section "Starting server (port $PORT_SERVER)"
@@ -225,7 +328,7 @@ else
     ok "AWS branding disabled ($AGENT_ARG)"
 fi
 
-(cd "$ROOT/app" && npm run start \
+(cd "$ROOT/app" && npm run preview \
     > "$LOG_DIR/frontend.log" 2>&1) &
 echo "frontend:$!" >> "$PID_FILE"
 
@@ -243,13 +346,16 @@ echo -e "  ${BOLD}Frontend${NC}             http://localhost:$PORT_FRONTEND"
 echo -e "  ${BOLD}Server API${NC}           http://localhost:$PORT_SERVER"
 echo -e "  ${BOLD}Transactions API${NC}     http://localhost:$PORT_API"
 echo -e "  ${BOLD}Agent ($AGENT_ARG)${NC}           ws://localhost:$PORT_AGENT"
+echo -e "  ${BOLD}Agencies MCP${NC}         sse://localhost:$PORT_MCP"
 echo -e "  ${BOLD}LLM${NC}                  $LLM_PROVIDER / $LLM_MODEL${LLM_VIA}"
+echo -e "  ${BOLD}IDP environment${NC}      ${ENV_PROFILE:-existing}"
 [[ "$AGENT" == "strands-agent" ]] && echo -e "  ${BOLD}AWS branding${NC}         enabled" || echo -e "  ${BOLD}AWS branding${NC}         disabled"
 $USE_AMP && echo -e "  ${BOLD}AMP instrumentation${NC}  enabled" || true
 echo ""
 echo -e "  Logs:"
 echo -e "    ${BLUE}$LOG_DIR/transactions-api.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/agent.log${NC}          ($AGENT_ARG)"
+echo -e "    ${BLUE}$LOG_DIR/mcp.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/server.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/frontend.log${NC}"
 echo -e "  To stop: ${BLUE}./demo_scripts/stop-demo.sh${NC}"

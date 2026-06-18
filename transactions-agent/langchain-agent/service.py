@@ -1,8 +1,7 @@
 import anthropic as _anthropic_sdk
-import asyncio
 import logging
 import os
-import time
+import uuid
 from functools import cached_property
 from pathlib import Path
 from typing import Literal, Dict, List, Any
@@ -19,15 +18,16 @@ import yaml
 from fastapi.responses import HTMLResponse
 from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
 from pydantic import BaseModel, PrivateAttr
 from starlette.websockets import WebSocketDisconnect
 
-from app.prompt import agent_system_prompt
-from app.tools import get_my_transactions
+from app.gateway import GatewayTokenManager, GatewayBearerAuth
+from app.prompt import agent_system_prompt, WELCOME_MESSAGE
+from app.tools import get_my_transactions, get_agencies as _get_agencies
 from tool import SecureLangChainTool
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
 
@@ -44,47 +44,6 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 load_dotenv()
 
 _ssl_verify = os.environ.get("SSL_VERIFY", "true").lower() != "false"
-
-
-class GatewayTokenManager:
-    """Fetches and caches an OAuth2 client-credentials token for the WSO2 API Gateway."""
-
-    def __init__(self, token_endpoint: str, client_id: str, client_secret: str):
-        self._token_endpoint = token_endpoint
-        self._client_id = client_id
-        self._client_secret = client_secret
-        self._token: str | None = None
-        self._expires_at: float = 0.0
-        self._lock = asyncio.Lock()
-
-    async def get_token(self) -> str:
-        async with self._lock:
-            if self._token and time.monotonic() < self._expires_at:
-                return self._token
-            async with httpx.AsyncClient(verify=_ssl_verify) as client:
-                resp = await client.post(
-                    self._token_endpoint,
-                    data={"grant_type": "client_credentials"},
-                    auth=(self._client_id, self._client_secret),
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            self._token = data["access_token"]
-            self._expires_at = time.monotonic() + data.get("expires_in", 3600) - 30
-            logger.info("Gateway access token refreshed (expires in %ss)", data.get("expires_in", 3600))
-            return self._token
-
-
-class GatewayBearerAuth(httpx.Auth):
-    """httpx auth handler that injects a fresh gateway token on every LLM request."""
-
-    def __init__(self, token_manager: GatewayTokenManager):
-        self._manager = token_manager
-
-    async def async_auth_flow(self, request):
-        token = await self._manager.get_token()
-        request.headers["Authorization"] = f"Bearer {token}"
-        yield request
 
 
 class GatewayChatAnthropic(ChatAnthropic):
@@ -108,7 +67,7 @@ class GatewayChatAnthropic(ChatAnthropic):
 
 
 # IDP configuration
-client_id = os.environ.get('IDP_CLIENT_ID')
+client_id = os.environ.get('AGENT_APP_ID')
 base_url = os.environ.get('IDP_BASE_URL')
 redirect_uri = os.environ.get('IDP_REDIRECT_URI', 'http://localhost:8011/callback')
 
@@ -116,11 +75,22 @@ redirect_uri = os.environ.get('IDP_REDIRECT_URI', 'http://localhost:8011/callbac
 agent_id = os.environ.get('AGENT_ID')
 agent_secret = os.environ.get('AGENT_SECRET')
 
+# Dedicated OAuth2 app for MCP access (separate from the public app used for user auth)
+mcp_client_id = os.environ.get('MCP_CLIENT_ID')
+if not mcp_client_id:
+    logger.warning("MCP_CLIENT_ID not set — GetAgencies tool will not be available")
+
 asgardeo_config = AsgardeoConfig(
     base_url=base_url,
     client_id=client_id,
     redirect_uri=redirect_uri
 )
+
+mcp_asgardeo_config = AsgardeoConfig(
+    base_url=base_url,
+    client_id=mcp_client_id,
+    redirect_uri=redirect_uri
+) if mcp_client_id else None
 
 agent_config = AgentConfig(
     agent_id=agent_id,
@@ -171,7 +141,7 @@ _use_gateway = _gateway_cfg.get("enabled", False)
 
 _default_models = {
     "gemini": "gemini-2.5-flash-lite",
-    "anthropic": "claude-sonnet-4-5-20250929",
+    "anthropic": "claude-haiku-4-5",
     "openai": "gpt-4o-mini",
     "mistral": "mistral-small-latest",
 }
@@ -202,6 +172,7 @@ if _use_gateway:
         token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
         client_id=os.environ["GATEWAY_CLIENT_ID"],
         client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
+        ssl_verify=_ssl_verify,
     )
     llm = _build_gateway_llm(os.environ["GATEWAY_BASE_URL"], _gw_token_manager)
     llm_secured = _build_gateway_llm(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_token_manager)
@@ -234,6 +205,7 @@ else:
                 max_tokens=2000,
             )
     llm_secured = llm
+
 
 # Per-session state — each WebSocket gets its own auth manager and token cache
 auth_managers: Dict[str, AutogenAuthManager] = {}
@@ -281,7 +253,32 @@ def _user_friendly_error(e: Exception) -> str:
     return "An unexpected error occurred. Please try again."
 
 
-async def run_agent(graph: Any, websocket: WebSocket, chat_history: List):
+def _log_token_usage(new_messages: list, session_id: str) -> None:
+    """Sum token usage across all LLM calls in one agent turn and log a single line.
+
+    Handles both OpenAI (token_usage.prompt_tokens/completion_tokens) and
+    Anthropic (usage.input_tokens/output_tokens) response_metadata shapes.
+    """
+    total_input = total_output = calls = 0
+    for msg in new_messages:
+        if not isinstance(msg, AIMessage):
+            continue
+        meta = msg.response_metadata or {}
+        usage = meta.get("token_usage") or meta.get("usage") or {}
+        inp = usage.get("input_tokens") or usage.get("prompt_tokens") or 0
+        out = usage.get("output_tokens") or usage.get("completion_tokens") or 0
+        if inp or out:
+            calls += 1
+            total_input += inp
+            total_output += out
+    if calls:
+        logger.info(
+            "[tokens] session=%s llm_calls=%d input=%d output=%d total=%d",
+            session_id, calls, total_input, total_output, total_input + total_output,
+        )
+
+
+async def run_agent(graph: Any, websocket: WebSocket, chat_history: List, session_id: str = ""):
     """Run the chat loop — receive user messages and return agent responses."""
     while True:
         user_input = await websocket.receive_text()
@@ -297,10 +294,13 @@ async def run_agent(graph: Any, websocket: WebSocket, chat_history: List):
             # The last message in the result is the AI's final response
             output = result["messages"][-1].content
 
-            # Update history with new messages from this turn
-            chat_history.extend(result["messages"][len(messages):])
+            new_messages = result["messages"][len(messages):]
+            _log_token_usage(new_messages, session_id)
 
-            for msg in result["messages"][len(messages):-1]:
+            # Update history with new messages from this turn
+            chat_history.extend(new_messages)
+
+            for msg in new_messages[:-1]:
                 logger.debug(f"[Agent Step] {msg}")
 
             await websocket.send_json(
@@ -318,8 +318,9 @@ async def run_agent(graph: Any, websocket: WebSocket, chat_history: List):
 
 
 @app.websocket("/chat")
-async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: bool = False):
+async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     """WebSocket endpoint for the Transaction Assistant chat."""
+    session_id = str(uuid.uuid4())
 
     async def message_handler(message: AuthRequestMessage):
         """Send OBO auth request to the frontend over this session's WebSocket."""
@@ -353,12 +354,35 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: boo
         ))
     )
 
+    # Wire the agencies MCP tool — uses a dedicated OAuth2 app (MCP_CLIENT_ID) so the
+    # token audience matches the MCP server's EXPECTED_AUDIENCE. No message_handler
+    # needed: AGENT_TOKEN goes through native auth, no user redirect involved.
+    mcp_auth_manager = AutogenAuthManager(
+        config=mcp_asgardeo_config,
+        agent_config=agent_config,
+    ) if mcp_asgardeo_config else None
+
+    get_agencies_tool = SecureLangChainTool(
+        _get_agencies,
+        description=(
+            "Find Bank of Asgard branches and agencies near a given town. "
+            "Call this when the user asks about branch locations, opening hours, "
+            "phone numbers, or available services near a city."
+        ),
+        name="GetAgencies",
+        auth=AuthSchema(mcp_auth_manager, AuthConfig(
+            scopes=[],
+            token_type=OAuthTokenType.AGENT_TOKEN,
+            resource="agencies_mcp"
+        )) if mcp_auth_manager else None
+    )
+
     active_llm = llm_secured if secured else llm
     logger.info("Session %s using %s gateway", session_id, "secured" if secured else "base")
 
     graph = create_agent(
         active_llm,
-        [get_transactions_tool],
+        [get_transactions_tool, get_agencies_tool],
         system_prompt=agent_system_prompt,
     )
 
@@ -367,16 +391,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, secured: boo
     await websocket.accept()
 
     try:
-        await websocket.send_json(TextResponse(
-            content=(
-                "Welcome to Bank of Asgard! I'm your Transaction Assistant. "
-                "I can help you review your transaction history, analyse your spending, "
-                "and answer questions about your account activity. "
-                "What would you like to know?"
-            )
-        ).model_dump())
+        await websocket.send_json(TextResponse(content=WELCOME_MESSAGE).model_dump())
 
-        await run_agent(graph, websocket, chat_history)
+        await run_agent(graph, websocket, chat_history, session_id)
     except WebSocketDisconnect:
         logger.info(f"Session {session_id} disconnected")
     except Exception as e:
@@ -452,4 +469,4 @@ async def callback(code: str, state: str):
         """)
     except Exception as e:
         logger.error(f"Callback error: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Authorization failed. Please try again.")

@@ -20,7 +20,12 @@ import { environmentConfig } from "../../util/environment-util";
 const GOLD = "#997029";
 const AGENT_WS_URL = environmentConfig.TRANSACTIONS_AGENT_URL || "ws://localhost:8011";
 
-const ChatComponent = ({ sessionId, secured = false }) => {
+const ChatComponent = ({
+  sessionId,
+  secured = false,
+  title = "Asgard Assistant",
+  placeholder = "Ask about branches, products, or your account...",
+}) => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [isConnected, setIsConnected] = useState(false);
@@ -28,16 +33,19 @@ const ChatComponent = ({ sessionId, secured = false }) => {
   const [pendingAuth, setPendingAuth] = useState(null);
 
   const wsRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const authWindowRef = useRef(null);
   const authCheckIntervalRef = useRef(null);
 
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = messagesContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
+    if (messages.length > 0) {
+      scrollToBottom();
+    }
   }, [messages, scrollToBottom]);
 
   // Handle postMessage from OAuth popup
@@ -162,7 +170,7 @@ const ChatComponent = ({ sessionId, secured = false }) => {
         }}
       >
         <Typography variant="subtitle1" sx={{ color: "#fff", fontWeight: 600 }}>
-          Transaction Assistant
+          {title}
         </Typography>
         <Chip
           size="small"
@@ -178,6 +186,7 @@ const ChatComponent = ({ sessionId, secured = false }) => {
 
       {/* Messages area */}
       <Box
+        ref={messagesContainerRef}
         sx={{
           flex: 1,
           overflowY: "auto",
@@ -250,7 +259,6 @@ const ChatComponent = ({ sessionId, secured = false }) => {
           </Box>
         )}
 
-        <div ref={messagesEndRef} />
       </Box>
 
       {/* OBO Authorisation Request */}
@@ -306,11 +314,7 @@ const ChatComponent = ({ sessionId, secured = false }) => {
           multiline
           maxRows={3}
           size="small"
-          placeholder={
-            isConnected
-              ? "Ask about your transactions..."
-              : "Connecting..."
-          }
+          placeholder={isConnected ? placeholder : "Connecting..."}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -343,6 +347,8 @@ const ChatComponent = ({ sessionId, secured = false }) => {
 ChatComponent.propTypes = {
   sessionId: PropTypes.string.isRequired,
   secured: PropTypes.bool,
+  title: PropTypes.string,
+  placeholder: PropTypes.string,
 };
 
 export default ChatComponent;

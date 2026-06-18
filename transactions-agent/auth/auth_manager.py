@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import inspect
+import json
 import logging
 import secrets
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple, get_type_hints
@@ -14,8 +16,20 @@ from asgardeo_ai import AgentConfig
 
 logger = logging.getLogger(__name__)
 
+
+def _jwt_claims(access_token: str) -> dict:
+    """Decode JWT payload without signature verification — for logging only."""
+    try:
+        payload = access_token.split('.')[1]
+        payload += '=' * (4 - len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
 # Configuration constants
 DEFAULT_AUTHORIZATION_TIMEOUT = 300  # 5 minutes in seconds
+
 
 class AutogenAuthManager:
     """Main authentication manager for handling OAuth flows and token management.
@@ -79,10 +93,19 @@ class AutogenAuthManager:
         token = self._token_manager.get_token(config)
 
         if token:
+            claims = _jwt_claims(token.access_token)
+            logger.info(
+                "[TOKEN CACHE HIT] type=%s resource=%s aud=%r sub=%r exp=%s",
+                config.token_type.name, config.resource,
+                claims.get("aud"), claims.get("sub"), claims.get("exp"),
+            )
             return token
 
         # Fetch new token
-        logger.debug("Fetching new %s for scopes %s", config.token_type.name, config.scopes)
+        logger.info(
+            "[TOKEN FETCH] type=%s resource=%s scopes=%s",
+            config.token_type.name, config.resource, config.scopes,
+        )
 
         if config.token_type == OAuthTokenType.OBO_TOKEN:
             token = await self._fetch_obo_token(config)
@@ -93,6 +116,12 @@ class AutogenAuthManager:
 
         # Cache the token
         if token:
+            claims = _jwt_claims(token.access_token)
+            logger.info(
+                "[TOKEN FRESH] type=%s resource=%s aud=%r sub=%r exp=%s",
+                config.token_type.name, config.resource,
+                claims.get("aud"), claims.get("sub"), claims.get("exp"),
+            )
             self._token_manager.add_token(config, token)
 
         return token
@@ -276,7 +305,7 @@ class AutogenAuthManager:
 
         except Exception as e:
             logger.error(f"Error initiating OBO token flow: {e}")
-            return None
+            raise
 
     def _cleanup_pending_auth(self, state: str) -> None:
         """Clean up a pending authorization request.

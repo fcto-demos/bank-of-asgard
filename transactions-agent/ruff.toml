@@ -5,6 +5,8 @@ ignore = ["E501"]
 [lint.per-file-ignores]
 # Logging must be configured before asgardeo/traceloop imports — ordering is intentional
 "**/service.py" = ["E402"]
+# Enum string values (OAuth grant type names) trigger S105 false positives
+"auth/models.py" = ["S105"]
 
 [lint.mccabe]
 max-complexity = 10

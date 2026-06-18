@@ -1,5 +1,5 @@
 [Unit]
-Description=Bank of Asgard Frontend App
+Description=Bank of Asgard Agencies MCP Server (FastMCP/SSE)
 Documentation=https://github.com/fcto-demos/bank-of-asgard
 After=network.target
 StartLimitIntervalSec=60
@@ -9,18 +9,16 @@ StartLimitBurst=3
 Type=simple
 User=boa
 Group=boa
-WorkingDirectory=/home/boa/bank-of-asgard/app
-
-# Use a login shell so nvm/node paths from ~/.profile are available
-ExecStart=/bin/bash -lc 'npm run preview'
+WorkingDirectory=/home/boa/bank-of-asgard/agencies-mcp-server
+EnvironmentFile=/home/boa/bank-of-asgard/agencies-mcp-server/.env
+ExecStart=/bin/bash -lc 'python server.py'
 
 Restart=on-failure
 RestartSec=5
 
-
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=bank-of-asgard-app
+SyslogIdentifier=bank-of-asgard-agencies-mcp
 
 # Security settings
 NoNewPrivileges=true

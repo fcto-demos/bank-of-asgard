@@ -13,6 +13,7 @@ PORT_FRONTEND=5173
 PORT_SERVER=3002
 PORT_API=8010
 PORT_AGENT=8011
+PORT_MCP=8012
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -61,6 +62,7 @@ check_file "$ROOT/transactions-api/.env"     "transactions-api/.env"     "copy f
 check_file "$ROOT/transactions-agent/.env"   "transactions-agent/.env"   "copy from transactions-agent/.env.example"
 check_file "$ROOT/app/public/config.js"      "app/public/config.js"      "copy from app/public/config.example.js"
 check_file "$ROOT/server/.env"               "server/.env"               "copy from server/.env.example"
+check_file "$ROOT/agencies-mcp-server/.env" "agencies-mcp-server/.env"  "copy from agencies-mcp-server/.env.example"
 
 # ── Node dependencies ─────────────────────────────────────────────────────────
 section "Node dependencies"
@@ -108,6 +110,10 @@ for agent in langchain-agent autogen-agent strands-agent; do
         "python3.11 -m venv transactions-agent/$agent/venv && transactions-agent/$agent/venv/bin/pip install -r transactions-agent/$agent/requirements.txt"
 done
 
+check_venv "$ROOT/agencies-mcp-server/venv/bin/python" \
+    "agencies-mcp-server" \
+    "cd agencies-mcp-server && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt"
+
 # ── Service import dry-run ────────────────────────────────────────────────────
 section "Service import check (dry run)"
 
@@ -139,6 +145,22 @@ else
     warn "transactions-api — skipped (no venv)"
 fi
 
+MCP_PY="$ROOT/agencies-mcp-server/venv/bin/python"
+if [[ ! -f "$MCP_PY" ]]; then
+    warn "agencies-mcp-server — skipped (no venv)"
+elif [[ ! -f "$ROOT/agencies-mcp-server/.env" ]]; then
+    warn "agencies-mcp-server — skipped (no .env)"
+else
+    err=$(cd "$ROOT/agencies-mcp-server" && "$MCP_PY" - <<'EOF' 2>&1
+import importlib.util
+spec = importlib.util.spec_from_file_location("server", "server.py")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+EOF
+    ) && pass "agencies-mcp-server imports OK" \
+      || fail "agencies-mcp-server import failed — $(echo "$err" | grep -v '^$' | tail -2 | tr '\n' ' ')"
+fi
+
 # ── Port availability ─────────────────────────────────────────────────────────
 section "Port availability"
 
@@ -162,6 +184,7 @@ check_port $PORT_FRONTEND "frontend"
 check_port $PORT_SERVER   "server"
 check_port $PORT_API      "transactions-api"
 check_port $PORT_AGENT    "transactions-agent"
+check_port $PORT_MCP      "agencies-mcp-server"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""

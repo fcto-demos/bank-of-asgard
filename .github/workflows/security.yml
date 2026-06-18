@@ -11,13 +11,23 @@ on:
 
 jobs:
   python-audit:
-    name: Python — pip-audit (${{ matrix.agent }})
+    name: Python — pip-audit (${{ matrix.name }})
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        agent: [langchain-agent, strands-agent, autogen-agent]
+        include:
+          - name: langchain-agent
+            path: transactions-agent/langchain-agent
+          - name: autogen-agent
+            path: transactions-agent/autogen-agent
+          - name: strands-agent
+            path: transactions-agent/strands-agent
+          - name: transactions-api
+            path: transactions-api
+          - name: agencies-mcp-server
+            path: agencies-mcp-server
 
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +40,7 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit Python dependencies
-        working-directory: transactions-agent/${{ matrix.agent }}
+        working-directory: ${{ matrix.path }}
         run: pip-audit -r requirements.txt --progress-spinner off
 
   frontend-audit:

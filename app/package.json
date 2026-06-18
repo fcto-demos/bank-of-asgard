@@ -33,13 +33,16 @@
     "react-bootstrap": "2.10.10",
     "react-dom": "19.2.5",
     "react-markdown": "10.1.0",
-    "react-router": "7.14.1",
+    "react-router": "7.17.0",
     "remark-gfm": "4.0.1",
     "vite": "6.4.2",
     "vite-plugin-svgr": "4.5.0"
   },
   "overrides": {
-    "dompurify": ">=3.4.0"
+    "@babel/core": ">=7.29.1",
+    "dompurify": ">=3.4.9",
+    "form-data": ">=4.0.6",
+    "js-yaml": ">=4.2.0"
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",

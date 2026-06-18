@@ -11,6 +11,7 @@ PORT_FRONTEND=5173
 PORT_SERVER=3002
 PORT_API=8010
 PORT_AGENT=8011
+PORT_MCP=8012
 
 QUIET=false
 [[ "${1:-}" == "--quiet" ]] && QUIET=true
@@ -52,10 +53,10 @@ while IFS=: read -r name pid; do
     stop_process "$name" "$pid"
 done < "$PID_FILE"
 
-rm -f "$PID_FILE"
+rm -f "$PID_FILE" "$ROOT/.demo.context"
 
 # ── Port sweep — catch any orphaned children the PID kill missed ──────────────
-for port in $PORT_API $PORT_AGENT $PORT_SERVER $PORT_FRONTEND; do
+for port in $PORT_API $PORT_AGENT $PORT_MCP $PORT_SERVER $PORT_FRONTEND; do
     pid=$(lsof -ti ":$port" 2>/dev/null || true)
     if [[ -n "$pid" ]]; then
         kill -KILL $pid 2>/dev/null || true

@@ -6,6 +6,7 @@ import httpx
 from dotenv import load_dotenv
 
 from asgardeo.models import OAuthToken
+from app.mcp_agencies import call_agencies_mcp
 
 load_dotenv()
 
@@ -13,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 TRANSACTIONS_API_BASE_URL = os.environ.get("TRANSACTIONS_API_BASE_URL", "http://localhost:8010")
 _ssl_verify = os.environ.get("SSL_VERIFY", "true").lower() != "false"
+
+# MCP endpoint — gateway URL when enabled, direct URL otherwise.
+_use_mcp_gateway = os.environ.get("MCP_GATEWAY_ENABLED", "").lower() == "true"
+MCP_GATEWAY_URL = os.environ.get("MCP_GATEWAY_URL", "")
+AGENCIES_MCP_URL = os.environ.get("AGENCIES_MCP_URL", "http://agencies-mcp-server:8012/sse")
 
 
 async def get_my_transactions(
@@ -57,3 +63,25 @@ async def get_my_transactions(
         response = await client.get(url, headers=headers, params=params, timeout=15.0)
         response.raise_for_status()
         return response.json()
+
+
+async def get_agencies(town: str, token: OAuthToken) -> str:
+    """Find Bank of Asgard branches and agencies near a given town.
+
+    Calls the agencies MCP server via the WSO2 AI Gateway when gateway is enabled,
+    or directly otherwise. The agent token is injected transparently by the secure
+    tool wrapper and is never exposed to the LLM.
+
+    Args:
+        town: The name of the town or city to search near (e.g. "Paris", "London").
+        token: Agent OAuth token (injected transparently — not visible to LLM).
+
+    Returns:
+        JSON string — a list of agency objects with name, address, phone,
+        opening_hours, and services fields.
+    """
+    if _use_mcp_gateway and not MCP_GATEWAY_URL:
+        logger.warning("MCP_GATEWAY_ENABLED=true but MCP_GATEWAY_URL is not set — falling back to direct endpoint")
+    endpoint_url = MCP_GATEWAY_URL if (_use_mcp_gateway and MCP_GATEWAY_URL) else AGENCIES_MCP_URL
+    logger.info("get_agencies routing to %s (gateway=%s)", endpoint_url, _use_mcp_gateway)
+    return await call_agencies_mcp(town, endpoint_url, token.access_token)

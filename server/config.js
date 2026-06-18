@@ -26,12 +26,13 @@ export const HOST = process.env.HOST || "localhost";
 export const IDP_BASE_URL = process.env.IDP_BASE_URL;
 export const CLIENT_ID = process.env.SERVER_APP_CLIENT_ID;
 export const CLIENT_SECRET = process.env.SERVER_APP_CLIENT_SECRET;
-export const TOKEN_ENDPOINT = process.env.IDP_TOKEN_ENDPOINT;
+export const TOKEN_ENDPOINT = process.env.IDP_TOKEN_ENDPOINT || `${process.env.IDP_BASE_URL}/oauth2/token`;
 export const GEO_API_KEY = process.env.GEO_API_KEY;
 export const IDP_BASE_URL_SCIM2 = IDP_BASE_URL + "/scim2";
 export const VITE_REACT_APP_CLIENT_BASE_URL =
   process.env.VITE_REACT_APP_CLIENT_BASE_URL;
 export const USER_STORE_NAME = process.env.USER_STORE_NAME || "PRIMARY";
+export const TRANSACTIONS_ROLE_NAME = process.env.TRANSACTIONS_ROLE_NAME || "Read_Transactions";
 export const TRANSACTIONS_API_URL = process.env.TRANSACTIONS_API_URL || "http://localhost:8010";
 
 // Added to compress self signed cert validation

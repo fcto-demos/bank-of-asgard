@@ -41,6 +41,27 @@ Do **not** use `uvicorn langchain.service:app` — that shadows the installed `l
 Supported providers in `llm_config.yaml`: `openai`, `gemini`, `anthropic`, `bedrock`, `mistral`.
 When adding a new provider, update all three service files **and** `README.md`.
 
+## Security audits
+
+Run the following audits before every commit and fix any findings before considering the change complete.
+
+**Python** — run from each agent directory that has a `requirements.txt`:
+```bash
+pip-audit -r transactions-agent/langchain-agent/requirements.txt
+pip-audit -r transactions-agent/autogen-agent/requirements.txt
+pip-audit -r transactions-agent/strands-agent/requirements.txt
+pip-audit -r transactions-api/requirements.txt
+pip-audit -r agencies-mcp-server/requirements.txt
+```
+
+**Node** — run from each directory that has a `package.json`:
+```bash
+cd app    && npm audit
+cd server && npm audit
+```
+
+For npm findings that require `--force` (breaking changes), document them explicitly and confirm with the user before applying.
+
 ## Git
 
 Never run `git add` or `git commit` — the user handles all staging and commits.
