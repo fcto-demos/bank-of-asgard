@@ -199,7 +199,7 @@ const App = () => {
           isSignedIn ? (
             !profile ? (
               <CircularProgress />
-            ) : profile?.["urn:scim:schemas:extension:custom:User"]?.accountType === ACCOUNT_TYPES.BUSINESS ? (
+            ) : (profile?.["urn:scim:schemas:extension:custom:User"]?.accountType || profile?.accountType) === ACCOUNT_TYPES.BUSINESS ? (
               <BusinessProfilePage setSiteSection={ setSiteSection } />
             ) : (
               <UserProfilePage setSiteSection={ setSiteSection } />

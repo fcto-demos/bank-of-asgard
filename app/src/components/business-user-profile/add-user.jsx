@@ -26,6 +26,7 @@ import PasswordField from "../common/password-field";
 import { useHttpSwitch } from "../../sdk/httpSwitch";
 import { useUser } from "@asgardeo/react";
 
+const AddUser = ({ onCancel , organizationId}) => {
 /**
  * @param {object} props
  * @param {() => void} props.onCancel
@@ -37,7 +38,7 @@ const AddUser = ({ onCancel }) => {
   const [ isNewPasswordValid, setIsNewPasswordValid ] = useState(false);
   const [ passwordOption, setPasswordOption ] = useState("invite");
   const { profile } = useUser();
-  const businessName = profile?.["urn:scim:schemas:extension:custom:User"].businessName;
+  const businessName = profile?.["urn:scim:schemas:extension:custom:User"]?.businessName || profile?.businessName || "";
 
   const [ formData, setFormData ] = useState({
     username: "",
@@ -104,7 +105,8 @@ const AddUser = ({ onCancel }) => {
       if (formData.familyName.trim() !== "") valuePayload.name.familyName = formData.familyName;
 
       if (formData.username.trim() !== "") {
-        valuePayload.userName = `DEFAULT/${formData.username}@${businessName}.com`;
+        const orgHandle = businessName.replace(/\s+/g, "_");
+        valuePayload.userName = `DEFAULT/${formData.username}@${orgHandle}.com`;
       }
 
       if (formData.email.trim() !== "") {
@@ -140,24 +142,11 @@ const AddUser = ({ onCancel }) => {
       });
 
       if (response.status === 201) {
-        const newRoleId = await getRoleIdByName("Member");
         await httpSwitch.request({
-            method: "PATCH",
-            url: `${environmentConfig.IDP_BASE_URL}/o/scim2/v2/Roles/${newRoleId}`,
-            headers: {
-              Accept: "application/scim+json",
-              "Content-Type": "application/scim+json",
-            },
-            data: {
-              schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-              Operations: [
-                {
-                  op: "add",
-                  path: "users",
-                  value: [{ value: response.data.id }]
-                }
-              ]
-            }
+            method: "POST",
+            url: `${environmentConfig.API_SERVICE_URL}/assign-org-role`,
+            headers: { "Content-Type": "application/json" },
+            data: { organizationId, userId: response.data.id, roleName: "Member" },
           });
         enqueueSnackbar("User created successfully", { variant: "success" });
       }
@@ -180,7 +169,7 @@ const AddUser = ({ onCancel }) => {
                   <input type="text" name="username" placeholder="Username" value={formData.username} onChange={(e) => setFormData({ ...formData, username: e.target.value })} required />
                 </div>
                 <div className="col-md-6 business-suffix d-flex align-items-center" >
-                  <span className="business-suffix">@{businessName}.com</span>
+                  <span className="business-suffix">@{businessName.replace(/\s+/g, "_")}.com</span>
                 </div>
               </div>
             </li>
@@ -262,7 +251,8 @@ const AddUser = ({ onCancel }) => {
 }
 
 AddUser.propTypes = {
-  onCancel: PropTypes.func.isRequired
+  onCancel: PropTypes.func.isRequired,
+  organizationId: PropTypes.string.isRequired,
 };
 
 export default AddUser;

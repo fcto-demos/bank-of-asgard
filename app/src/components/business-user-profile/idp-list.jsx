@@ -267,19 +267,6 @@ const IDPList = () => {
     fetchMFA();
   }, []);
 
-  useEffect(() => {
-    if (!isSignedIn) {
-        return;
-    }
-    const businessOrg = myOrganizations.find(
-      (org) => org.name === flattenedProfile?.businessName
-    );
-    if (!businessOrg) {
-        return;
-    }
-    setOrganizationId(businessOrg.id);
-  }, []);
-
   return (
     <>
     <div className="mfa-settings box-zone">

@@ -17,11 +17,12 @@
  */
 
 import { useState } from "react";
+import PropTypes from "prop-types";
 import AddUser from "./add-user";
 import { Button, Dialog, DialogActions, DialogContent } from "@mui/material";
 import ListUsers from "./list-users";
 
-const ManageUsers = () => {
+const ManageUsers = ({ organizationId }) => {
 
   const [openForm, setOpenForm] = useState(false);
   const [openView, setOpenView] = useState(false);
@@ -56,7 +57,7 @@ const ManageUsers = () => {
       </div>
       <Dialog open={openView} onClose={() => setOpenView(false)} maxWidth="xl" fullWidth>
           <DialogContent>
-            <ListUsers />
+            <ListUsers organizationId={organizationId} />
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setOpenView(false)}>Close</Button>
@@ -64,11 +65,15 @@ const ManageUsers = () => {
         </Dialog>
       <Dialog open={openForm} onClose={() => setOpenForm(false)} maxWidth="sm" fullWidth>
           <DialogContent className="about_section">
-            <AddUser onCancel={handleCancelEdit}/>
+            <AddUser organizationId={organizationId} onCancel={handleCancelEdit}/>
           </DialogContent>
         </Dialog>
     </>
   );
+};
+
+ManageUsers.propTypes = {
+  organizationId: PropTypes.string.isRequired,
 };
 
 export default ManageUsers;

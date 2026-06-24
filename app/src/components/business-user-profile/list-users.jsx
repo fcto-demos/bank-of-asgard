@@ -20,6 +20,7 @@ import * as React from 'react';
 import { DataGrid } from '@mui/x-data-grid';
 import Paper from '@mui/material/Paper';
 import { useEffect } from 'react';
+import PropTypes from 'prop-types';
 import { environmentConfig } from '../../util/environment-util';
 import { useUser } from '@asgardeo/react';
 import { useHttpSwitch } from '../../sdk/httpSwitch';
@@ -220,7 +221,7 @@ const ListUsers = () => {
         givenName: updatedUser.givenName,
         familyName: updatedUser.familyName,
       },
-      emails: [updatedUser.email],
+      emails: [{ value: updatedUser.email, primary: true }],
       "urn:scim:wso2:schema": {
         dateOfBirth: updatedUser.dateOfBirth,
         country: updatedUser.country,
@@ -286,21 +287,15 @@ const ListUsers = () => {
 
     if (currentRoleId) {
       await httpSwitch.request({
-        method: "PATCH",
-        url: `${environmentConfig.IDP_BASE_URL}/o/scim2/v2/Roles/${currentRoleId}`,
-        headers: {
-          Accept: "application/scim+json",
-          "Content-Type": "application/scim+json",
-        },
+        method: "POST",
+        url: `${environmentConfig.API_SERVICE_URL}/change-org-role`,
+        headers: { "Content-Type": "application/json" },
         data: {
-          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-          Operations: [
-            {
-              op: "remove",
-              path: `users[value eq "${selectedUser.id}"]`
-            }
-          ]
-        }
+          organizationId,
+          userId: selectedUser.id,
+          oldRoleName: selectedUser.role || null,
+          newRoleName,
+        },
       });
     }
 
@@ -346,6 +341,8 @@ const ListUsers = () => {
     } catch (error) {
       console.error("Error fetching role ID:", error);
       return null;
+    } finally {
+      setAssigningRoleUserId(null);
     }
   };
 
@@ -455,5 +452,9 @@ const ListUsers = () => {
     </Paper>
   );
 }
+
+ListUsers.propTypes = {
+  organizationId: PropTypes.string.isRequired,
+};
 
 export default ListUsers;

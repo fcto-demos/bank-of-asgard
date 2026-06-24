@@ -56,7 +56,7 @@ export const getAccessToken = async () => {
   try {
     const response = await axios.post(
       TOKEN_ENDPOINT,
-      "grant_type=client_credentials&scope=internal_user_mgt_create internal_user_mgt_delete internal_user_mgt_update internal_user_mgt_view internal_organization_create internal_organization_view internal_organization_update internal_organization_delete internal_org_role_mgt_view internal_org_role_mgt_update internal_role_mgt_users_update internal_role_mgt_view admin_provision",
+      "grant_type=client_credentials&scope=internal_user_mgt_create internal_user_mgt_delete internal_user_mgt_update internal_user_mgt_view internal_organization_create internal_organization_view internal_organization_update internal_organization_delete internal_org_role_mgt_view internal_org_role_mgt_update internal_role_mgt_users_update internal_role_mgt_view admin_provision internal_org_application_mgt_view internal_org_application_mgt_update internal_org_idp_view internal_org_idp_create internal_org_idp_update internal_org_idp_delete",
       {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -120,7 +120,7 @@ export const getOrganizationToken = async (switchingOrganizationId) => {
     params.append("switching_organization", switchingOrganizationId);
     params.append(
       "scope",
-      "internal_org_role_mgt_view internal_org_role_mgt_update internal_org_user_mgt_create internal_org_user_mgt_list internal_org_user_mgt_view"
+      "internal_org_role_mgt_view internal_org_role_mgt_update internal_org_user_mgt_create internal_org_user_mgt_list internal_org_user_mgt_view internal_org_application_mgt_view internal_org_application_mgt_update internal_org_application_mgt_create internal_org_idp_view internal_org_idp_create internal_org_idp_update internal_org_idp_delete"
     );
 
     const response = await axios.post(

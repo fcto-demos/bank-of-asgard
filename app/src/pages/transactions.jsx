@@ -1,13 +1,12 @@
 import { useState } from "react";
-import { environmentConfig } from "../util/environment-util";
 import { useNavigate } from "react-router";
 import {
   Box,
   Container,
+  Divider,
   Typography,
   Paper,
   Button,
-  Divider,
   Switch,
   FormControlLabel,
   Chip,
@@ -18,9 +17,75 @@ import LockIcon from "@mui/icons-material/Lock";
 import ShieldIcon from "@mui/icons-material/Shield";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ChatComponent from "../components/transactions/ChatComponent";
+import { environmentConfig } from "../util/environment-util";
 import { ROUTES } from "../constants/app-constants";
 
 const GOLD = "#997029";
+
+const PAPER_SX = {
+  p: 3,
+  borderRadius: 0,
+  border: "1px solid rgba(0,0,0,.07)",
+  borderLeft: `3px solid ${GOLD}`,
+  boxShadow: "0 1px 3px rgba(0,0,0,.05), 0 4px 20px rgba(0,0,0,.06)",
+};
+
+export const TransactionInfoPanel = () => (
+  <Box sx={{ flex: 1, minWidth: 260 }}>
+    <Paper elevation={0} sx={{ ...PAPER_SX, mb: 2 }}>
+      <Typography variant="h6" sx={{ mb: 1, fontWeight: 600 }}>
+        How it works
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+        The Transaction Assistant uses AI to help you understand your
+        financial activity. Ask questions in plain language:
+      </Typography>
+      <Box component="ul" sx={{ pl: 2, m: 0 }}>
+        {[
+          "Show me my last 10 transactions",
+          "How much did I spend on dining last month?",
+          "What were my largest purchases in January?",
+          "Summarise my spending by category",
+          "Were there any transfers in the past 30 days?",
+        ].map((example) => (
+          <Box key={example} component="li" sx={{ mb: 0.5 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: "italic" }}>
+              &ldquo;{example}&rdquo;
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+    </Paper>
+    <Paper elevation={0} sx={PAPER_SX}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
+        <LockIcon sx={{ color: GOLD, fontSize: 20 }} />
+        <Typography variant="h6" sx={{ fontWeight: 600 }}>
+          Your data stays private
+        </Typography>
+      </Box>
+      <Divider sx={{ mb: 1.5 }} />
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        The assistant accesses your transactions using a secure
+        <strong> On-Behalf-Of (OBO)</strong> token — a short-lived,
+        scoped credential that allows the AI to act on your behalf
+        without ever seeing your password.
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        When you first ask about your transactions, you&apos;ll be prompted
+        to approve access via WSO2 Identity Platform. The AI agent only receives your
+        transaction data — nothing else.
+      </Typography>
+      <Typography variant="caption" color="text.secondary">
+        Powered by WSO2 Identity Platform &bull; OAuth 2.0 On-Behalf-Of flow
+      </Typography>
+      {environmentConfig.AWS_BRANDING && (
+        <Box sx={{ mt: 1.5 }}>
+          <img src="/images/powered-by-aws.png" alt="Powered by AWS" style={{ height: "140px" }} />
+        </Box>
+      )}
+    </Paper>
+  </Box>
+);
 
 const TransactionsPage = () => {
   const navigate = useNavigate();
@@ -110,6 +175,7 @@ const TransactionsPage = () => {
           </Box>
 
           {/* Right column — Info panel */}
+          <TransactionInfoPanel />
           <Box sx={{ flex: 1, minWidth: 260 }}>
             <Paper
               elevation={0}

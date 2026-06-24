@@ -24,8 +24,8 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { getAccessToken, requireBearer } from "./middleware/auth.js";
-import { addUserToAdminRole, addUserToRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getRoleIdByName, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
+import { getAccessToken, getOrganizationToken, requireBearer } from "./middleware/auth.js";
+import { addUserToAdminRole, addUserToRole, assignUserToOrgRole, changeUserOrgRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getRoleIdByName, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
 import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, USER_STORE_NAME, TRANSACTIONS_ROLE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -83,7 +83,7 @@ async function createUser(userData) {
     dateOfBirth,
     mobile,
   } = userData;
-  logger.info({ username, accountType, email }, "createUser: starting");
+  logger.info({ username, accountType, email, businessName  }, "createUser: starting");
 
   const token = await getAccessToken();
   logger.debug("createUser: access token acquired");
@@ -183,10 +183,14 @@ app.post("/business-signup", async (req, res) => {
     const { businessName, username } = req.body;
     logger.info({ businessName, username }, "POST /business-signup: started");
 
-    const available = await isBusinessNameAvailable(businessName);
-    if (!available) {
-      logger.warn({ businessName }, "POST /business-signup: business name already taken");
-      return res.status(400).json({ error: "Business name is already taken" });
+    try {
+      const available = await isBusinessNameAvailable(businessName);
+      if (!available) {
+        logger.warn({ businessName }, "POST /business-signup: business name already taken");
+        return res.status(400).json({ error: "Business name is already taken" });
+      }
+    } catch (nameCheckError) {
+      logger.warn({ businessName, error: nameCheckError.message }, "POST /business-signup: name check failed, proceeding anyway");
     }
 
     const userResponse = await createUser(req.body);
@@ -198,6 +202,20 @@ app.post("/business-signup", async (req, res) => {
 
     const creatorId = userResponse.data.id;
     logger.debug({ creatorId, businessName }, "POST /business-signup: creating organization");
+    
+    try {
+      const roleId = await getRoleIdByName("Read_Transactions");
+      await addUserToRole(roleId, creatorId);
+      logger.info({ creatorId }, "POST /business-signup: user assigned to Read_Transactions role");
+    } catch (roleError) {
+      logger.error({
+        creatorId,
+        message: roleError.message,
+        status: roleError.response?.status,
+        detail: roleError.response?.data,
+      }, "POST /business-signup: failed to assign Read_Transactions role");
+    }
+    
     const orgResponse = await createOrganization(businessName, creatorId, username);
     const organizationId = orgResponse.data.id;
     logger.debug({ organizationId }, "POST /business-signup: organization created");
@@ -216,7 +234,9 @@ app.post("/business-signup", async (req, res) => {
       message: error.message,
       stack: error.stack,
     }, "POST /business-signup failed");
-    res.status(error.response?.status || 400).json({ error: asgardeoError || error.message || "Business signup failed" });
+    if (!res.headersSent) {
+      res.status(error.response?.status || 400).json({ error: asgardeoError || error.message || "Business signup failed" });
+    }
   }
 });
 
@@ -317,6 +337,70 @@ app.delete("/close-business-account", requireBearer, async (req, res) => {
   }
 });
 
+app.post("/org-server-api", requireBearer, async (req, res) => {
+  try {
+    const { organizationId, method, path, data, params } = req.body;
+    if (!organizationId || !method || !path) {
+      return res.status(400).json({ error: "organizationId, method, and path are required" });
+    }
+    const token = await getOrganizationToken(organizationId);
+    const response = await axios({
+      method,
+      url: `${IDP_BASE_URL}/o/${path}`,
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+      data,
+      params,
+      httpsAgent: agent,
+    });
+    if (response.status === 204 || response.data === undefined || response.data === "") {
+      return res.sendStatus(response.status);
+    }
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 500;
+    res.status(status).json(error.response?.data || { error: error.message });
+  }
+});
+
+app.post("/change-org-role", requireBearer, async (req, res) => {
+  try {
+    const { organizationId, userId, oldRoleName, newRoleName } = req.body;
+    if (!organizationId || !userId || !newRoleName) {
+      return res.status(400).json({ error: "organizationId, userId, and newRoleName are required" });
+    }
+    await changeUserOrgRole(organizationId, userId, oldRoleName || null, newRoleName);
+    res.json({ message: "Role updated successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to change role" });
+  }
+});
+
+app.post("/assign-org-role", requireBearer, async (req, res) => {
+  try {
+    const { organizationId, userId, roleName } = req.body;
+    if (!organizationId || !userId || !roleName) {
+      return res.status(400).json({ error: "organizationId, userId, and roleName are required" });
+    }
+    await assignUserToOrgRole(organizationId, userId, roleName);
+    res.json({ message: "Role assigned successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Failed to assign role" });
+  }
+});
+
+app.get("/organization-id", requireBearer, async (req, res) => {
+  try {
+    const { businessName } = req.query;
+    if (!businessName) {
+      return res.status(400).json({ error: "businessName is required" });
+    }
+    const organizationId = await getOrganizationId(businessName);
+    res.json({ organizationId });
+  } catch (error) {
+    res.status(404).json({ error: error.message || "Organization not found" });
+  }
+});
+
 app.get("/business", async (req, res) => {
   
   try {
@@ -333,7 +417,7 @@ app.get("/business", async (req, res) => {
     }
   );
 
-  const businessRegistrationAttribute = response.data.attributes.find(attr => attr.key === "business-registration-number");
+  const businessRegistrationAttribute = (response.data.attributes || []).find(attr => attr.key === "business-registration-number");
   const businessRegNumber = businessRegistrationAttribute ? businessRegistrationAttribute.value : null;
 
   if (response.status === 200) {

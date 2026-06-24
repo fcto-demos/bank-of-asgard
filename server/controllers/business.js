@@ -167,6 +167,67 @@ export async function getRoleIdByName(roleName) {
   return resources[0].id;
 }
 
+export async function assignUserToOrgRole(organizationId, userId, roleName) {
+
+  const token = await getOrganizationToken(organizationId);
+  const rolesResponse = await axios.get(
+    `${IDP_BASE_URL}/o/scim2/v2/Roles`,
+    {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      params: { filter: `displayName eq ${roleName}` },
+      httpsAgent: agent,
+    }
+  );
+  const resources = rolesResponse.data.Resources || [];
+  if (resources.length === 0) throw new Error(`Role '${roleName}' not found in organization`);
+  const roleId = resources[0].id;
+
+  await axios.patch(
+    `${IDP_BASE_URL}/o/scim2/v2/Roles/${roleId}`,
+    { Operations: [{ op: "add", path: "users", value: [{ value: userId }] }] },
+    {
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      httpsAgent: agent,
+    }
+  );
+}
+
+export async function changeUserOrgRole(organizationId, userId, oldRoleName, newRoleName) {
+
+  const token = await getOrganizationToken(organizationId);
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" };
+
+  const getRoleId = async (roleName) => {
+    const res = await axios.get(`${IDP_BASE_URL}/o/scim2/v2/Roles`, {
+      headers,
+      params: { filter: `displayName eq ${roleName}` },
+      httpsAgent: agent,
+    });
+    return (res.data.Resources || [])[0]?.id || null;
+  };
+
+  const [oldRoleId, newRoleId] = await Promise.all([
+    oldRoleName ? getRoleId(oldRoleName) : Promise.resolve(null),
+    getRoleId(newRoleName),
+  ]);
+
+  if (!newRoleId) throw new Error(`Role '${newRoleName}' not found in organization`);
+
+  if (oldRoleId) {
+    await axios.patch(
+      `${IDP_BASE_URL}/o/scim2/v2/Roles/${oldRoleId}`,
+      { Operations: [{ op: "remove", path: `users[value eq "${userId}"]` }] },
+      { headers, httpsAgent: agent }
+    );
+  }
+
+  await axios.patch(
+    `${IDP_BASE_URL}/o/scim2/v2/Roles/${newRoleId}`,
+    { Operations: [{ op: "add", path: "users", value: [{ value: userId }] }] },
+    { headers, httpsAgent: agent }
+  );
+}
+
 export async function addUserToRole(roleId, userId) {
 
   const token = await getAccessToken();
