@@ -66,25 +66,6 @@ const AddUser = ({ onCancel, organizationId }) => {
       });
   }, []);
 
-  const getRoleIdByName = async (/** @type {string} */ roleName) => {
-    const requestConfig = {
-      method: "GET",
-      url: `${environmentConfig.IDP_BASE_URL}/o/scim2/v2/Roles?filter=displayName eq ${encodeURIComponent(roleName)}`,
-      headers: {
-        Accept: "application/scim+json",
-      },
-    };
-
-    try {
-      const response = await httpSwitch.request(requestConfig);
-      const resources = response.data?.Resources || [];
-      return resources.length > 0 ? resources[0].id : null;
-    } catch (error) {
-      console.error("Error fetching role ID:", error);
-      return null;
-    }
-  };
-
   const handleSubmit = async (/** @type {React.FormEvent} */ e) => {
 
     e.preventDefault();
