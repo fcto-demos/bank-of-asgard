@@ -20,8 +20,9 @@ import { useAsgardeo } from "@asgardeo/react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import PropTypes from "prop-types";
-import { Box, Chip, Container, FormControlLabel, Paper, Switch, Typography } from "@mui/material";
+import { Box, Chip, Container, FormControlLabel, IconButton, Paper, Switch, Typography } from "@mui/material";
 import ShieldIcon from "@mui/icons-material/Shield";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { environmentConfig } from "../util/environment-util";
 import CardBanking from "../assets/images/image9.jpg";
 import MobileBanking from "../assets/images/mobile-banking.jpg";
@@ -34,6 +35,10 @@ import ChatComponent from "../components/transactions/ChatComponent";
 
 const GOLD = "#997029";
 
+/**
+ * @param {object} props
+ * @param {(section: string) => void} props.setSiteSection
+ */
 const PersonalBankingPage = ({ setSiteSection }) => {
 
   const { isSignedIn } = useAsgardeo();
@@ -42,7 +47,7 @@ const PersonalBankingPage = ({ setSiteSection }) => {
     () => "session_" + Math.random().toString(36).substring(2, 15)
   );
 
-  const handleSecuredToggle = (e) => {
+  const handleSecuredToggle = (/** @type {React.ChangeEvent<HTMLInputElement>} */ e) => {
     setSecured(e.target.checked);
     setSessionId("session_" + Math.random().toString(36).substring(2, 15));
   };
@@ -91,7 +96,7 @@ const PersonalBankingPage = ({ setSiteSection }) => {
                   </div>
                 </div>
               </div>
-            </div> 
+            </div>
           </div>
         </div>
       </section>
@@ -168,15 +173,29 @@ const PersonalBankingPage = ({ setSiteSection }) => {
                   {[
                     "Find branches near London",
                     "What agencies are close to Paris?",
-                    "What services do you offer?",
                     "Show me my last 5 transactions",
                     "How much did I spend last month?",
                     "Were there any transfers in the past 30 days?",
+                    "Can you do a financial check-up for me?",
+                    "Suggest a savings goal based on my spending",
+                    "How could I save $10000 in the coming year?"
                   ].map((example) => (
-                    <Box key={example} component="li" sx={{ mb: 0.5 }}>
+                    <Box
+                      key={example}
+                      component="li"
+                      sx={{ mb: 0.5, display: "flex", alignItems: "center", gap: 0.5 }}
+                    >
                       <Typography variant="body2" color="text.secondary" sx={{ fontStyle: "italic" }}>
                         &ldquo;{example}&rdquo;
                       </Typography>
+                      <IconButton
+                        size="small"
+                        onClick={() => navigator.clipboard.writeText(example)}
+                        sx={{ p: 0.25 }}
+                        aria-label="Copy prompt"
+                      >
+                        <ContentCopyIcon sx={{ fontSize: "0.9rem" }} />
+                      </IconButton>
                     </Box>
                   ))}
                 </Box>
@@ -428,7 +447,7 @@ const PersonalBankingPage = ({ setSiteSection }) => {
 }
 
 PersonalBankingPage.propTypes = {
-  setSiteSection: PropTypes.object.isRequired,
+  setSiteSection: PropTypes.func.isRequired,
 };
 
 export default PersonalBankingPage;

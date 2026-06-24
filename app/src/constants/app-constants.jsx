@@ -27,7 +27,8 @@ export const ROUTES = {
   FUND_TRANSFER_VERIFY: "/fund-transfer/verify",
   NOT_FOUND: "/404",
   IDENTITY_VERIFICATION: "/identity-verification",
-  TRANSACTIONS: "/transactions"
+  TRANSACTIONS: "/transactions",
+  TOKEN_FLOW: "/tokenflow"
 };
 
 export const SITE_SECTIONS = {

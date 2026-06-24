@@ -26,6 +26,10 @@ import PasswordField from "../common/password-field";
 import { useHttpSwitch } from "../../sdk/httpSwitch";
 import { useUser } from "@asgardeo/react";
 
+/**
+ * @param {object} props
+ * @param {() => void} props.onCancel
+ */
 const AddUser = ({ onCancel }) => {
   const { enqueueSnackbar } = useSnackbar();
   const httpSwitch = useHttpSwitch();
@@ -33,7 +37,7 @@ const AddUser = ({ onCancel }) => {
   const [ isNewPasswordValid, setIsNewPasswordValid ] = useState(false);
   const [ passwordOption, setPasswordOption ] = useState("invite");
   const { profile } = useUser();
-  const businessName = profile["urn:scim:schemas:extension:custom:User"].businessName;
+  const businessName = profile?.["urn:scim:schemas:extension:custom:User"].businessName;
 
   const [ formData, setFormData ] = useState({
     username: "",
@@ -46,7 +50,7 @@ const AddUser = ({ onCancel }) => {
     password: ""
   });
 
-  const request = requestConfig =>
+  const request = (/** @type {object} */ requestConfig) =>
     httpSwitch.request(requestConfig)
       .then(response => response)
       .catch(error => error);
@@ -61,7 +65,7 @@ const AddUser = ({ onCancel }) => {
       });
   }, []);
 
-  const getRoleIdByName = async (roleName) => {
+  const getRoleIdByName = async (/** @type {string} */ roleName) => {
     const requestConfig = {
       method: "GET",
       url: `${environmentConfig.IDP_BASE_URL}/o/scim2/v2/Roles?filter=displayName eq ${encodeURIComponent(roleName)}`,
@@ -80,11 +84,11 @@ const AddUser = ({ onCancel }) => {
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (/** @type {React.FormEvent} */ e) => {
 
     e.preventDefault();
     try {
-      const valuePayload = {
+      const valuePayload = /** @type {any} */ ({
         schemas: [],
         name: {},
         userName: "",
@@ -94,7 +98,7 @@ const AddUser = ({ onCancel }) => {
         "urn:scim:schemas:extension:custom:User": {
           accountType: "Business"
         },
-      };
+      });
 
       if (formData.givenName.trim() !== "") valuePayload.name.givenName = formData.givenName;
       if (formData.familyName.trim() !== "") valuePayload.name.familyName = formData.familyName;
@@ -204,7 +208,7 @@ const AddUser = ({ onCancel }) => {
               <label>Country</label>
               <CountrySelect
                 value={formData.country}
-                onChange={(value) => setFormData({ ...formData, country: value.label })} />
+                onChange={(/** @type {{code: string, label: string, phone: string} | ""} */ value) => setFormData({ ...formData, country: value ? value.label : "" })} />
             </li>
             <li>
               <label>Mobile Number:</label>
@@ -232,12 +236,12 @@ const AddUser = ({ onCancel }) => {
                   name="password"
                   placeholder="Password"
                   value={formData.password}
-                  onChange={(value) =>
+                  onChange={(/** @type {string} */ value) =>
                     setFormData({ ...formData, password: value })
                   }
                   showPasswordValidation={true}
                   passwordValidationRules={passwordValidationRules}
-                  onPasswordValidate={(isValid) => {
+                  onPasswordValidate={(/** @type {boolean} */ isValid) => {
                     setIsNewPasswordValid(isValid);
                   }}
                   inputProps={{

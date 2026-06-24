@@ -19,6 +19,10 @@
 import PropTypes from "prop-types";
 import SignUpForm from "./sign-up-form";
 
+/**
+ * @param {object} props
+ * @param {string} props.accountType
+ */
 const BusinessSignUpForm = ({ accountType } )  => {
   return (
     <>

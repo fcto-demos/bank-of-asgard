@@ -18,21 +18,25 @@
 
 import { useEffect, useState, useContext } from "react";
 import PropTypes from "prop-types";
-import { useAsgardeo, useUser } from "@asgardeo/react";
+import { useAsgardeo } from "@asgardeo/react";
 import EditProfile from "../components/user-profile/edit-profile";
 import ViewProfile from "../components/user-profile/view-profile";
 import { ACCOUNT_TYPES, SITE_SECTIONS } from "../constants/app-constants";
 import { environmentConfig } from "../util/environment-util";
 import IdentityVerificationStatus from "../components/identity-verification/identity-verification-status";
 import { IdentityVerificationContext } from "../context/identity-verification-provider";
+/**
+ * @param {object} props
+ * @param {(section: string) => void} props.setSiteSection
+ */
 const UserProfilePage = ({ setSiteSection }) => {
   const { isSignedIn, signIn, http } = useAsgardeo();
   const { isIdentityVerificationEnabled, reloadIdentityVerificationStatus } = useContext(IdentityVerificationContext);
 
-  const [userInfo, setUserInfo] = useState(null);
+  const [userInfo, setUserInfo] = useState(/** @type {any} */ (null));
   const [showEditForm, setShowEditForm] = useState(false);
 
-  const request = (requestConfig) =>
+  const request = (/** @type {object} */ requestConfig) =>
     http.request(requestConfig)
       .then((response) => ({
         ...response,

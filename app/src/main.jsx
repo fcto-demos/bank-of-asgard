@@ -21,7 +21,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { environmentConfig } from "./util/environment-util";
 
-createRoot(document.getElementById('root')).render(
+createRoot(/** @type {HTMLElement} */ (document.getElementById('root'))).render(
     <AsgardeoProvider
       clientId={`${environmentConfig.APP_CLIENT_ID}`}
       baseUrl={`${environmentConfig.IDP_BASE_URL}`}

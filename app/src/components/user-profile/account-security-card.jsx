@@ -23,6 +23,11 @@ import TotpSetup from "../totp/totp-setup";
 import { ACCOUNT_TYPES } from "../../constants/app-constants";
 import ResetPasswordForm from "./reset-password-form";
 
+/**
+ * @param {object} props
+ * @param {string} props.username
+ * @param {string} props.accountType
+ */
 const AccountSecurityCard = ({ username, accountType }) => {
   const [isPasswordFormOpen, setIsPasswordFormOpen] = useState(false);
 

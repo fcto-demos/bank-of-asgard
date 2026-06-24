@@ -23,6 +23,10 @@ import { useSnackbar } from "notistack";
 import Modal from "../common/modal";
 import { closeBusinessAccount } from "../../api/profile";
 
+/**
+ * @param {object} props
+ * @param {string} props.businessName
+ */
 const CloseBusinessAccountCard = ({ businessName }) => {
   const { signOut, getAccessToken } = useAsgardeo();
   const { enqueueSnackbar } = useSnackbar();

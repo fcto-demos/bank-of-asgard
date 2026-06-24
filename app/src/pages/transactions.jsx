@@ -11,10 +11,12 @@ import {
   Switch,
   FormControlLabel,
   Chip,
+  IconButton,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import LockIcon from "@mui/icons-material/Lock";
 import ShieldIcon from "@mui/icons-material/Shield";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ChatComponent from "../components/transactions/ChatComponent";
 import { ROUTES } from "../constants/app-constants";
 
@@ -27,7 +29,7 @@ const TransactionsPage = () => {
     () => "session_" + Math.random().toString(36).substring(2, 15)
   );
 
-  const handleSecuredToggle = (e) => {
+  const handleSecuredToggle = (/** @type {React.ChangeEvent<HTMLInputElement>} */ e) => {
     setSecured(e.target.checked);
     // New session so the agent reconnects with the updated secured param
     setSessionId("session_" + Math.random().toString(36).substring(2, 15));
@@ -53,7 +55,7 @@ const TransactionsPage = () => {
             variant="h5"
             sx={{ color: GOLD, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", fontSize: "1.1rem" }}
           >
-            Transaction Assistant
+            Asgard Assistant
           </Typography>
           <Box sx={{ ml: "auto", display: "flex", alignItems: "center", gap: 1 }}>
             <ShieldIcon sx={{ color: secured ? GOLD : "#bbb", fontSize: 20 }} />
@@ -102,7 +104,7 @@ const TransactionsPage = () => {
             <ChatComponent
               sessionId={sessionId}
               secured={secured}
-              title="Transaction Assistant"
+              title="Asgard Assistant"
               placeholder="Ask about your transactions..."
             />
           </Box>
@@ -124,7 +126,7 @@ const TransactionsPage = () => {
                 How it works
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                The Transaction Assistant uses AI to help you understand your
+                The Asgard Assistant uses AI to help you understand your
                 financial activity. Ask questions in plain language:
               </Typography>
               <Box component="ul" sx={{ pl: 2, m: 0 }}>
@@ -133,12 +135,14 @@ const TransactionsPage = () => {
                   "How much did I spend on dining last month?",
                   "What were my largest purchases in January?",
                   "Summarise my spending by category",
-                  "Were there any transfers in the past 30 days?",
+                  "Can you do a financial check-up for me?",
+                  "Am I paying for any forgotten subscriptions?",
+                  "Help me find money I could be saving",
                 ].map((example) => (
                   <Box
                     key={example}
                     component="li"
-                    sx={{ mb: 0.5 }}
+                    sx={{ mb: 0.5, display: "flex", alignItems: "center", gap: 0.5 }}
                   >
                     <Typography
                       variant="body2"
@@ -147,6 +151,14 @@ const TransactionsPage = () => {
                     >
                       &ldquo;{example}&rdquo;
                     </Typography>
+                    <IconButton
+                      size="small"
+                      onClick={() => navigator.clipboard.writeText(example)}
+                      sx={{ p: 0.25 }}
+                      aria-label="Copy prompt"
+                    >
+                      <ContentCopyIcon sx={{ fontSize: "0.9rem" }} />
+                    </IconButton>
                   </Box>
                 ))}
               </Box>

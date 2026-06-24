@@ -8,8 +8,12 @@ import { getVerificationStatus } from "../api/identity-verification";
 import { useMemo } from "react";
 import { IDENTITY_VERIFICATION_STATUS } from "../constants/app-constants";
 
-const IdentityVerificationContext = createContext(null);
+const IdentityVerificationContext = createContext(/** @type {any} */ (null));
 
+/**
+ * @param {object} props
+ * @param {import('react').ReactNode} props.children
+ */
 const IdentityVerificationProvider = ({ children }) => {
   const isIdentityVerificationEnabled = isFeatureEnabled(
     FEATURE_MAP.IDENTITY_VERIFICATION
@@ -17,11 +21,11 @@ const IdentityVerificationProvider = ({ children }) => {
 
   const verifiableClaims = environmentConfig.IDENTITY_VERIFICATION_CLAIMS || [];
 
-  const { isSignedIn, http } = useAsgardeo();
+  const { isSignedIn } = useAsgardeo();
   const { enqueueSnackbar } = useSnackbar();
 
   const [isIdVStatusLoading, setIsIdVStatusLoading] = useState(true);
-  const [idvClaims, setIdvClaims] = useState([]);
+  const [idvClaims, setIdvClaims] = useState(/** @type {any[]} */ ([]));
 
   const fetchIdentityVerificationStatus = async () => {
     setIsIdVStatusLoading(true);

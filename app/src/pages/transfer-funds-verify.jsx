@@ -36,8 +36,8 @@ const TransferFundsVerifyPage = () => {
   const [isTransferInprogress, setIsTransferInprogress] = useState(true);
 
   const query = new URLSearchParams(search);
-  const stateParam = JSON.parse(query.get("state"));
-  const failureParam = JSON.parse(query.get("failure"));
+  const stateParam = JSON.parse(query.get("state") || "null");
+  const failureParam = JSON.parse(query.get("failure") || "null");
   const { amount, receiver, description } = stateParam || {};
 
   useEffect(() => {

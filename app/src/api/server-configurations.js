@@ -27,7 +27,7 @@ export const getPasswordPolicy = () => {
 
   return http.request(requestConfig)
     .then((response) => {
-      const data = response.data;
+      const data = response?.data;
 
       return transformValidationRules(data);
     })

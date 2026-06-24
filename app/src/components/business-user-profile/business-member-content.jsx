@@ -20,6 +20,11 @@ import { useEffect } from "react";
 import PropTypes from "prop-types";
 import { SITE_SECTIONS } from "../../constants/app-constants";
 
+/**
+ * @param {object} props
+ * @param {(section: string) => void} props.setSiteSection
+ * @param {string} props.role
+ */
 const BusinessMemberContent = ({ setSiteSection, role }) => {
 
   useEffect(() => {

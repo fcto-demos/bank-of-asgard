@@ -29,7 +29,7 @@ export const getVerificationStatus = async () => {
 
   return http.request(requestConfig)
       .then((response) => {
-          return response.data;
+          return response?.data;
       })
       .catch((error) => {
           throw error;
@@ -48,7 +48,7 @@ export const reinitiateVerification = async () => {
   return updateVerificationStatus("REINITIATED");
 }
 
-const updateVerificationStatus = async (status) => {
+const updateVerificationStatus = async (/** @type {string} */ status) => {
   const requestConfig = {
       url: `${environmentConfig.IDP_BASE_URL}/api/users/v1/me/idv/verify`,
       method: "POST",
@@ -70,7 +70,7 @@ const updateVerificationStatus = async (status) => {
 
   return http.request(requestConfig)
       .then((response) => {
-          return response.data;
+          return response?.data;
       })
       .catch((error) => {
           throw error;

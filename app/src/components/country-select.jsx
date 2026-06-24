@@ -448,15 +448,21 @@ const countries = [
     { code: 'ZW', label: 'Zimbabwe', phone: '263' },
 ];
 
+/**
+ * @param {object} props
+ * @param {string} [props.value]
+ * @param {(value: {code: string, label: string, phone: string} | "") => void} props.onChange
+ * @param {string} [props.label]
+ */
 const CountrySelect = ({ value, onChange, label = "" }) => {
-    const [ selectedCountry, setSelectedCountry ] = useState(null);
+    const [ selectedCountry, setSelectedCountry ] = useState(/** @type {any} */ (null));
 
     useEffect(() => {
         if (!value) {
           setSelectedCountry(null);
           return;
         }
-    
+
         const defaultCountry = countries.find((country) => country.label === value) || null;
         setSelectedCountry(defaultCountry);
     }, [value]);
@@ -514,7 +520,7 @@ const CountrySelect = ({ value, onChange, label = "" }) => {
 
 CountrySelect.propTypes = {
     onChange: PropTypes.object.isRequired,
-    value: PropTypes.object.isOptional,
+    value: PropTypes.string,
     key: PropTypes.object.isRequired,
     label: PropTypes.string
 };

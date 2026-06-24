@@ -1,8 +1,12 @@
 import PropTypes from "prop-types";
 import { createContext, useState } from "react";
 
-const BankAccountContext = createContext(null);
+const BankAccountContext = createContext(/** @type {any} */ (null));
 
+/**
+ * @param {object} props
+ * @param {import('react').ReactNode} props.children
+ */
 const BankAccountProvider = ({ children }) => {
   const initialAccountState = {
     accountNumber: "083434342982340",
@@ -11,7 +15,7 @@ const BankAccountProvider = ({ children }) => {
 
   const [ bankAccountData, setBankAccountData ] = useState(initialAccountState);
 
-  const updateBalance = (newBalance) => {
+  const updateBalance = (/** @type {number} */ newBalance) => {
     setBankAccountData((prevValue) => ({
       ...prevValue,
       balance: newBalance,

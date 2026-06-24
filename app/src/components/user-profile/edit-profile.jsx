@@ -23,10 +23,16 @@ import { useSnackbar } from "notistack";
 import CountrySelect from "../country-select";
 import { environmentConfig } from "../../util/environment-util";
 
+/**
+ * @param {object} props
+ * @param {any} props.userInfo
+ * @param {() => void} props.onUpdateSuccess
+ * @param {() => void} props.onCancel
+ */
 const EditProfile = ({ userInfo, onUpdateSuccess, onCancel }) => {
   const { enqueueSnackbar } = useSnackbar();
 
-  const { isSignedIn, http } = useAsgardeo();
+  const { http } = useAsgardeo();
 
   const [ formData, setFormData ] = useState({
     givenName: "",
@@ -37,7 +43,7 @@ const EditProfile = ({ userInfo, onUpdateSuccess, onCancel }) => {
     country: ""
   });
 
-  const request = requestConfig =>
+  const request = (/** @type {object} */ requestConfig) =>
     http.request(requestConfig)
       .then(response => ({
         ...response,
@@ -58,14 +64,14 @@ const EditProfile = ({ userInfo, onUpdateSuccess, onCancel }) => {
     }
   }, [ userInfo ]);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (/** @type {React.FormEvent} */ e) => {
 
     e.preventDefault();
 
     try {
       const operations = [];
       // Add updated values to the PATCH request only if they are modified
-      const valuePayload = {};
+      const valuePayload = /** @type {any} */ ({});
 
       if (formData.givenName.trim() !== "" || formData.familyName.trim() !== "") {
           valuePayload.name = {};
@@ -81,7 +87,7 @@ const EditProfile = ({ userInfo, onUpdateSuccess, onCancel }) => {
         valuePayload.phoneNumbers = [{ type: "mobile", value: formData.mobile }];
       }
 
-      const scimWso2Schema = {};
+      const scimWso2Schema = /** @type {any} */ ({});
       if (formData.dob.trim() !== "") {
         scimWso2Schema.dateOfBirth = formData.dob;
       }
@@ -168,7 +174,7 @@ const EditProfile = ({ userInfo, onUpdateSuccess, onCancel }) => {
                         <label>Country</label>
                         <CountrySelect
                           value={formData.country}
-                          onChange={(value) => setFormData({ ...formData, country: value.label })} />
+                          onChange={(/** @type {{code: string, label: string, phone: string} | ""} */ value) => setFormData({ ...formData, country: value ? value.label : "" })} />
                       </li>
                     </ul>
 

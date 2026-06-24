@@ -6,6 +6,11 @@ import { getPasswordPolicy } from "../../api/server-configurations";
 import PasswordField from "../common/password-field";
 import { resetPassword } from "../../api/profile";
 
+/**
+ * @param {object} props
+ * @param {string} props.username
+ * @param {() => void} props.onFormClosed
+ */
 const ResetPasswordForm = ({ username, onFormClosed }) => {
   const { enqueueSnackbar } = useSnackbar();
   const { signOut } = useAsgardeo();
@@ -19,7 +24,7 @@ const ResetPasswordForm = ({ username, onFormClosed }) => {
   const [passwordValidationRules, setPasswordValidationRules] = useState({});
   const [isNewPasswordValid, setIsNewPasswordValid] = useState(false);
 
-  const inputRef = useRef(null);
+  const inputRef = useRef(/** @type {HTMLInputElement | null} */ (null));
 
   const isFormValid = useMemo(() => {
     if (
@@ -53,7 +58,7 @@ const ResetPasswordForm = ({ username, onFormClosed }) => {
   }, []);
 
   useEffect(() => {
-    inputRef.current.focus();
+    inputRef.current?.focus();
   }, []);
 
   const handleCancel = () => {
@@ -61,7 +66,7 @@ const ResetPasswordForm = ({ username, onFormClosed }) => {
     onFormClosed();
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (/** @type {React.FormEvent} */ e) => {
     e.preventDefault();
 
     if (isFormValid) {

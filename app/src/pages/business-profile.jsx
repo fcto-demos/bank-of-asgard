@@ -32,17 +32,21 @@ import IDPList from "../components/business-user-profile/idp-list";
 import ManageUsers from "../components/business-user-profile/manage-users";
 import BusinessProfileCard from "../components/business-user-profile/business-profile-card";
 
+/**
+ * @param {object} props
+ * @param {(section: string) => void} props.setSiteSection
+ */
 const BusinessProfilePage = ({ setSiteSection }) => {
   const { isSignedIn, signIn, http } = useAsgardeo();
   const { isIdentityVerificationEnabled, reloadIdentityVerificationStatus } = useContext(IdentityVerificationContext);
 
-  const [userInfo, setUserInfo] = useState(null);
+  const [userInfo, setUserInfo] = useState(/** @type {any} */ (null));
   const [showEditForm, setShowEditForm] = useState(false);
   const { myOrganizations } = useOrganization();
   const { flattenedProfile } = useUser();
   const [ organizationId, setOrganizationId ] = useState("");
   const scopes = "openid profile internal_login internal_org_application_mgt_update internal_org_application_mgt_delete internal_org_application_mgt_create internal_org_application_mgt_view internal_org_user_mgt_update internal_org_user_mgt_delete internal_org_user_mgt_list internal_org_user_mgt_create internal_org_user_mgt_view internal_org_idp_view internal_org_idp_delete internal_org_idp_update internal_org_idp_create internal_org_role_mgt_delete internal_org_role_mgt_create internal_org_role_mgt_update internal_org_role_mgt_view";
-  const request = (requestConfig) =>
+  const request = (/** @type {object} */ requestConfig) =>
     http.request(requestConfig)
       .then((response) => ({
         ...response,

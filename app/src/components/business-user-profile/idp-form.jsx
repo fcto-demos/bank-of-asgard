@@ -23,6 +23,14 @@ import { environmentConfig } from "../../util/environment-util";
 import { enqueueSnackbar } from "notistack";
 import { useHttpSwitch } from "../../sdk/httpSwitch";
 
+/**
+ * @param {object} props
+ * @param {string} props.organizationId
+ * @param {() => void} props.onIdpAdded
+ * @param {() => Promise<any>} props.fetchAppConfig
+ * @param {() => Promise<string | null | undefined>} props.getAppId
+ * @param {() => void} props.onCancel
+ */
 const IDPForm = ({ organizationId, onIdpAdded, fetchAppConfig, getAppId, onCancel }) => {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -31,24 +39,24 @@ const IDPForm = ({ organizationId, onIdpAdded, fetchAppConfig, getAppId, onCance
   const [provider, setProvider] = useState("microsoft");
   const [loading, setLoading] = useState(false);
   const httpSwitch = useHttpSwitch();
-  const request = (requestConfig) =>
+  const request = (/** @type {object} */ requestConfig) =>
     httpSwitch.request(requestConfig)
       .then((response) => response)
       .catch((error) => error);
 
-  const addAuthenticatorToStep1 = (sequence, providerName) => {
-    const authenticatorMap = {
+  const addAuthenticatorToStep1 = (/** @type {{steps: any[]}} */ sequence, /** @type {string} */ providerName) => {
+    const authenticatorMap = /** @type {Record<string, {authenticator: string, idp: string}>} */ ({
       microsoft: { authenticator: "OpenIDConnectAuthenticator", idp: "Microsoft" },
       google: { authenticator: "GoogleOIDCAuthenticator", idp: "Google" },
       oidc: { authenticator: "OpenIDConnectAuthenticator", idp: "MyOIDCConnection" },
-    };
+    });
 
     const newOption = authenticatorMap[providerName];
-    const updatedSteps = sequence.steps.map((step) => {
+    const updatedSteps = sequence.steps.map((/** @type {any} */ step) => {
       if (step.id === 1) {
         const options = step.options || [];
         const alreadyExists = options.some(
-          (opt) => opt.idp === newOption.idp && opt.authenticator === newOption.authenticator
+          (/** @type {any} */ opt) => opt.idp === newOption.idp && opt.authenticator === newOption.authenticator
         );
         if (!alreadyExists) {
           options.push(newOption);
@@ -60,7 +68,7 @@ const IDPForm = ({ organizationId, onIdpAdded, fetchAppConfig, getAppId, onCance
     return { ...sequence, steps: updatedSteps };
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (/** @type {React.FormEvent} */ e) => {
     e.preventDefault();
     setLoading(true);
 

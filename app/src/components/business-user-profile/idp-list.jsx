@@ -37,25 +37,32 @@ import PropTypes from "prop-types";
 import { enqueueSnackbar } from "notistack";
 import { useHttpSwitch } from "../../sdk/httpSwitch";
 
+/**
+ * @typedef {object} Idp
+ * @property {string} id
+ * @property {string} name
+ * @property {string} [description]
+ */
+
 const IDPList = () => {
 
-  const [ idps, setIdps ] = useState([]);
+  const [ idps, setIdps ] = useState(/** @type {Idp[]} */ ([]));
   const [ loading, setLoading ] = useState(true);
   const [ openForm, setOpenForm ] = useState(false);
   const { isSignedIn } = useAsgardeo();
   const { myOrganizations } = useOrganization();
   const { flattenedProfile } = useUser();
   const [ organizationId, setOrganizationId ] = useState("");
-  const [ deletingIdpId, setDeletingIdpId ] = useState(null);
+  const [ deletingIdpId, setDeletingIdpId ] = useState(/** @type {string | null} */ (null));
   const [ mfaOptions, setMfaOptions ] = useState({
     totp: false,
     emailOTP: false,
   });
   const [loadingMFA, setLoadingMFA] = useState(false);
   const httpSwitch = useHttpSwitch();
-  const cache = { applicationId: null };
+  const cache = { applicationId: /** @type {string | null} */ (null) };
 
-  const request = (requestConfig) =>
+  const request = (/** @type {object} */ requestConfig) =>
     httpSwitch.request(requestConfig)
       .then((response) => response)
       .catch((error) => error);
@@ -110,12 +117,15 @@ const IDPList = () => {
     return response.data;
   };
 
-  const removeAuthenticatorFromStep1 = (sequence, idpName) => {
-    const updatedSteps = sequence.steps.map((step) => {
+  const removeAuthenticatorFromStep1 = (
+    /** @type {{steps: any[]}} */ sequence,
+    /** @type {string} */ idpName
+  ) => {
+    const updatedSteps = sequence.steps.map((/** @type {any} */ step) => {
       if (step.id === 1) {
         return {
           ...step,
-          options: (step.options || []).filter((opt) => opt.idp !== idpName),
+          options: (step.options || []).filter((/** @type {any} */ opt) => opt.idp !== idpName),
         };
       }
       return step;
@@ -123,7 +133,7 @@ const IDPList = () => {
     return { ...sequence, steps: updatedSteps };
   };
 
-  const deleteIdp = async (id, name) => {
+  const deleteIdp = async (/** @type {string} */ id, /** @type {string} */ name) => {
     setDeletingIdpId(id);
     try {
     const appData = await fetchAppConfig();
@@ -157,7 +167,7 @@ const IDPList = () => {
     }
   };
 
-  const handleOptionChange = (e) => {
+  const handleOptionChange = (/** @type {React.ChangeEvent<HTMLInputElement>} */ e) => {
     const { name, checked } = e.target;
     setMfaOptions({ ...mfaOptions, [name]: checked });
   };
@@ -174,14 +184,14 @@ const IDPList = () => {
         },
       });
       const steps = response.data || [];
-      const step2 = steps.find((step) => step.stepId === 2);
+      const step2 = steps.find((/** @type {any} */ step) => step.stepId === 2);
       const options = { totp: false, emailOTP: false };
       if (step2) {
         const localAuths = step2.localAuthenticators || [];
-        if (localAuths.some((auth) => auth.type === "totp")) {
+        if (localAuths.some((/** @type {any} */ auth) => auth.type === "totp")) {
           options.totp = true;
         }
-        if (localAuths.some((auth) => auth.type === "email-otp-authenticator")) {
+        if (localAuths.some((/** @type {any} */ auth) => auth.type === "email-otp-authenticator")) {
           options.emailOTP = true;
         }
       }
@@ -203,7 +213,7 @@ const IDPList = () => {
       const applicationId = await getAppId();
       const existingSteps = appData.authenticationSequence.steps || [];
 
-      const step1 = existingSteps.find(step => step.id === 1) || {
+      const step1 = existingSteps.find((/** @type {any} */ step) => step.id === 1) || {
         id: 1,
         options: []
       };

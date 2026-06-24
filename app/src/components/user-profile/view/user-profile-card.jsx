@@ -22,6 +22,11 @@ import PropTypes from "prop-types";
 import { useContext } from "react";
 import { IDENTITY_VERIFICATION_STATUS } from "../../../constants/app-constants";
 
+/**
+ * @param {object} props
+ * @param {any} props.userInfo
+ * @param {(value: boolean) => void} props.setShowEditForm
+ */
 const UserProfileCard = ({ userInfo, setShowEditForm }) => {
   const {
     isIdVStatusLoading,

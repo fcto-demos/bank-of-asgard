@@ -5,13 +5,20 @@ import { useAsgardeo } from '@asgardeo/react';
 import { SwitchTokenContext } from './SwitchTokenContext';
 
 
+/**
+ * @param {object} props
+ * @param {string} props.organizationId
+ * @param {import('react').ReactNode} props.children
+ * @param {import('react').ReactNode} [props.fallback]
+ * @param {string} [props.scopes]
+ */
 const ContextSwitch = ({ organizationId, children, fallback = null, scopes = "openid profile internal_login" }) => {
 
   const asgardeo = useAsgardeo();
   const { isSignedIn, getAccessToken, exchangeToken } = asgardeo;
   const [ switchToken, setSwitchToken ] = useState("");
-  const [ refreshToken, setRefreshToken ] = useState(null);
-  const [ expiresIn, setExpiresIn ] = useState(null);
+  const [ refreshToken, setRefreshToken ] = useState(/** @type {string | null} */ (null));
+  const [ expiresIn, setExpiresIn ] = useState(/** @type {number | null} */ (null));
 
   useEffect(() => {
     if (!isSignedIn || !organizationId) return;
@@ -57,7 +64,7 @@ const ContextSwitch = ({ organizationId, children, fallback = null, scopes = "op
     if ("refresh_token" in tokenResponse && typeof tokenResponse.refresh_token === "string") {
       setRefreshToken(tokenResponse.refresh_token);
     }
-    if ("expires_in" in tokenResponse) {
+    if ("expires_in" in tokenResponse && typeof tokenResponse.expires_in === "number") {
       setExpiresIn(tokenResponse.expires_in); // in seconds
     }
   };
@@ -83,7 +90,7 @@ const ContextSwitch = ({ organizationId, children, fallback = null, scopes = "op
     if ("refresh_token" in tokenResponse && typeof tokenResponse.refresh_token === "string") {
       setRefreshToken(tokenResponse.refresh_token);
     }
-    if ("expires_in" in tokenResponse && typeof tokenResponse.expires_in === "string") {
+    if ("expires_in" in tokenResponse && typeof tokenResponse.expires_in === "number") {
       setExpiresIn(tokenResponse.expires_in); // in seconds
     }
   };

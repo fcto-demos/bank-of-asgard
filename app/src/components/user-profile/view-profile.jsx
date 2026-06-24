@@ -24,6 +24,11 @@ import CloseAccountCard from "./close-account-card";
 import CloseBusinessAccountCard from "../business-user-profile/close-business-account-card";
 import { ACCOUNT_TYPES } from "../../constants/app-constants";
 
+/**
+ * @param {object} props
+ * @param {any} props.userInfo
+ * @param {(value: boolean) => void} props.setShowEditForm
+ */
 const ViewProfile = ({ userInfo, setShowEditForm }) => {
   return (
     <>
@@ -35,7 +40,7 @@ const ViewProfile = ({ userInfo, setShowEditForm }) => {
 
       <div className="row" style={{ marginTop: "25px" }}>
         <div className="col-md-7">
-          <BankAccountCard userInfo={userInfo} />
+          <BankAccountCard />
         </div>
         <div
           className="col-md-5"

@@ -19,19 +19,23 @@
 import { environmentConfig } from "../util/environment-util";
 import { axiosClient } from "./axios-client";
 
-export const closeAccount = (token) => {
+export const closeAccount = (/** @type {string} */ token) => {
   return axiosClient.delete(`/close-account`, {
     headers: { Authorization: `Bearer ${token}` }
   })
 };
 
-export const closeBusinessAccount = (businessName, token) => {
+export const closeBusinessAccount = (/** @type {string} */ businessName, /** @type {string} */ token) => {
   return axiosClient.delete(`/close-business-account?businessName=${businessName}`, {
     headers: { Authorization: `Bearer ${token}` }
   });
 };
 
-export const resetPassword = (username, currentPassword, newPassword) => {
+export const resetPassword = (
+  /** @type {string} */ username,
+  /** @type {string} */ currentPassword,
+  /** @type {string} */ newPassword
+) => {
   // In case the password contains non-ascii characters, converting to valid ascii format.
   const encoder = new TextEncoder();
   const encodedPassword = String.fromCharCode(

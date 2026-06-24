@@ -22,9 +22,14 @@ import { environmentConfig } from "../../util/environment-util";
 import { enqueueSnackbar } from "notistack";
 import axios from "axios";
 
+/**
+ * @param {object} props
+ * @param {any} props.userInfo
+ * @param {string} props.organizationId
+ */
 const BusinessProfileCard = ({ userInfo, organizationId }) => {
 
-  const [metadata, setMetadata] = useState(null);
+  const [metadata, setMetadata] = useState(/** @type {any} */ (null));
   const [isEditing, setIsEditing] = useState(false);
   const [businessRegNo, setBusinessRegNo] = useState("");
 
@@ -60,7 +65,7 @@ const BusinessProfileCard = ({ userInfo, organizationId }) => {
 
       if (response.status === 200) {
         enqueueSnackbar("Business registration number updated successfully", { variant: "success" });
-        setMetadata((prev) => ({
+        setMetadata((/** @type {any} */ prev) => ({
           ...prev,
           businessRegistrationNumber: businessRegNo,
         }));

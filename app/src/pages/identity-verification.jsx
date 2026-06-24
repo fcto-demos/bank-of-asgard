@@ -17,7 +17,6 @@
  */
 
 import { useLocation } from "react-router";
-import { useAsgardeo } from "@asgardeo/react";
 import {
   completeVerification,
   initiateVerification,
@@ -33,7 +32,6 @@ import { useContext } from "react";
 import { IdentityVerificationContext } from "../context/identity-verification-provider";
 
 const IdentityVerificationPage = () => {
-  const { http } = useAsgardeo();
   const { enqueueSnackbar } = useSnackbar();
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,7 +39,7 @@ const IdentityVerificationPage = () => {
 
   const { reloadIdentityVerificationStatus } = useContext(IdentityVerificationContext);
 
-  const [onfidoInstance, setOnfidoInstance] = useState(null);
+  const [onfidoInstance, setOnfidoInstance] = useState(/** @type {any} */ (null));
   const [isLoading, setIsLoading] = useState(true);
 
   const initIdentityVerification = async () => {
@@ -99,7 +97,7 @@ const IdentityVerificationPage = () => {
         workflowRunId,
       });
       setOnfidoInstance(instance);
-    } catch (error) {
+    } catch (/** @type {any} */ error) {
       console.error(error);
       if (
         error.response?.status === 400 &&

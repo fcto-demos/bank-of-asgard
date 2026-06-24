@@ -16,7 +16,6 @@
  * under the License.
  */
 
-import PropTypes from "prop-types";
 import { formatCurrency } from "../../../util/string-util";
 import { useNavigate } from "react-router";
 import { ROUTES } from "../../../constants/app-constants";
@@ -25,7 +24,7 @@ import { BankAccountContext } from "../../../context/bank-account-provider";
 import { useAsgardeo } from "@asgardeo/react";
 import { environmentConfig } from "../../../util/environment-util";
 
-const BankAccountCard = ({ userInfo }) => {
+const BankAccountCard = () => {
   const initialCreditCardState = {
     cardNumber: "4574-3434-2984-2365",
     balance: -45600.67,
@@ -34,7 +33,7 @@ const BankAccountCard = ({ userInfo }) => {
   const navigate = useNavigate();
   const { bankAccountData } = useContext(BankAccountContext);
   const { getAccessToken } = useAsgardeo();
-  const [txnSummary, setTxnSummary] = useState(null);
+  const [txnSummary, setTxnSummary] = useState(/** @type {any} */ (null));
   const [provisioning, setProvisioning] = useState(false);
 
   const loadSummary = () =>
@@ -154,7 +153,7 @@ const BankAccountCard = ({ userInfo }) => {
                 {txnSummary.total} transactions on file
               </p>
               <ul className="accounts-list" style={{ marginBottom: "10px" }}>
-                {txnSummary.recent.map((t) => (
+                {txnSummary.recent.map((/** @type {any} */ t) => (
                   <li key={t.id}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
@@ -172,23 +171,19 @@ const BankAccountCard = ({ userInfo }) => {
           )}
 
           <hr />
-          <h5>Transaction Assistant</h5>
+          <h5>Asgard Assistant</h5>
           <p style={{ fontSize: "14px", color: "#666", marginBottom: "10px" }}>
             Review your transaction history and get AI-powered spending insights.
           </p>
           <div className="form-buttons">
             <button className="edit-button" onClick={() => navigate(ROUTES.TRANSACTIONS)}>
-              Open Transaction Assistant
+              Open Asgard Assistant
             </button>
           </div>
         </div>
       </div>
     </div>
   );
-};
-
-BankAccountCard.propTypes = {
-  userInfo: PropTypes.object.isRequired,
 };
 
 export default BankAccountCard;

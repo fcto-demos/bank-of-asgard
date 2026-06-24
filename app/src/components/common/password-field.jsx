@@ -20,6 +20,17 @@ import { useState } from "react";
 import propTypes from "prop-types";
 import PasswordPolicyIndicator from "./password-policy-indicator";
 
+/**
+ * @param {object} props
+ * @param {string} props.name
+ * @param {string} props.placeholder
+ * @param {string} props.value
+ * @param {(value: string) => void} props.onChange
+ * @param {boolean} [props.showPasswordValidation]
+ * @param {object} [props.passwordValidationRules]
+ * @param {(isValid: boolean) => void} [props.onPasswordValidate]
+ * @param {object} [props.inputProps]
+ */
 const PasswordField = ({
   name,
   placeholder,
@@ -27,7 +38,7 @@ const PasswordField = ({
   onChange,
   showPasswordValidation = true,
   passwordValidationRules = {},
-  onPasswordValidate = () => {},
+  onPasswordValidate = (/** @type {boolean} */ _isValid) => {},
   inputProps = {},
 }) => {
   const [passwordVisible, setPasswordVisible] = useState(false);

@@ -19,7 +19,7 @@
 import PropTypes from "prop-types";
 import { useEffect, useState } from "react";
 
-const PasswordPolicyIndicator = (props) => {
+const PasswordPolicyIndicator = (/** @type {any} */ props) => {
   const {
     minLength = 8,
     maxLength = 64,
@@ -33,7 +33,7 @@ const PasswordPolicyIndicator = (props) => {
     onPasswordValidate,
   } = props;
 
-  const [validationStatus] = useState(undefined);
+  const [validationStatus] = useState(/** @type {any} */ ({}));
   const lowerCaseLetters = /[a-z]/g;
   const upperCaseLetters = /[A-Z]/g;
   const numbers = /[0-9]/g;
@@ -54,8 +54,8 @@ const PasswordPolicyIndicator = (props) => {
     validate(password);
   }, [password]);
 
-  const validate = (password) => {
-    let _validationStatus = { ...validationStatus };
+  const validate = (/** @type {string} */ password) => {
+    let _validationStatus = /** @type {any} */ ({ ...validationStatus });
 
     if (password === EMPTY_STRING) {
       _validationStatus = { ..._validationStatus, empty: true };
@@ -66,25 +66,27 @@ const PasswordPolicyIndicator = (props) => {
     if (password.length >= minLength && password.length <= maxLength) {
       _validationStatus.length = true;
     }
+    const upperCaseMatches = password.match(upperCaseLetters);
+    const lowerCaseMatches = password.match(lowerCaseLetters);
     if (
       (minUpperCase <= 0 ||
-        (password.match(upperCaseLetters) &&
-          password.match(upperCaseLetters).length >= minUpperCase)) &&
+        (upperCaseMatches && upperCaseMatches.length >= minUpperCase)) &&
       (minLowerCase <= 0 ||
-        (password.match(lowerCaseLetters) &&
-          password.match(lowerCaseLetters).length >= minLowerCase))
+        (lowerCaseMatches && lowerCaseMatches.length >= minLowerCase))
     ) {
       _validationStatus.case = true;
     }
+    const numberMatches = password.match(numbers);
     if (
       minNumbers <= 0 ||
-      (password.match(numbers) && password.match(numbers).length >= minNumbers)
+      (numberMatches && numberMatches.length >= minNumbers)
     ) {
       _validationStatus.numbers = true;
     }
+    const charsMatches = password.match(chars);
     if (
       minSpecialChr <= 0 ||
-      (password.match(chars) && password.match(chars).length >= minSpecialChr)
+      (charsMatches && charsMatches.length >= minSpecialChr)
     ) {
       _validationStatus.specialChr = true;
     }
@@ -97,10 +99,10 @@ const PasswordPolicyIndicator = (props) => {
     }
 
     let _consValid = true;
-    if (password.match(consecutive) && password.match(consecutive).length > 0) {
-      const largest = password
-        .match(consecutive)
-        .sort((a, b) => b.length - a.length)[0];
+    const consecutiveMatches = password.match(consecutive);
+    if (consecutiveMatches && consecutiveMatches.length > 0) {
+      const largest = consecutiveMatches
+        .sort((/** @type {string} */ a, /** @type {string} */ b) => b.length - a.length)[0];
       if (maxConsecutiveChr >= 1 && largest.length > maxConsecutiveChr) {
         _consValid = false;
       }
@@ -121,7 +123,7 @@ const PasswordPolicyIndicator = (props) => {
     onPasswordValidate(isValid, _validationStatus);
   };
 
-  const getIconProps = (id) => {
+  const getIconProps = (/** @type {string} */ id) => {
     const DEFAULT = { iconCssClassName: "fa-times", textCssClassName: "" };
     const POSITIVE = {
       iconCssClassName: "fa-check",

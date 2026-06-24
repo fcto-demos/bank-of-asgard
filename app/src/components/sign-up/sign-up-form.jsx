@@ -26,15 +26,21 @@ import { getPasswordPolicy } from "../../api/server-configurations";
 import PasswordField from "../common/password-field";
 import { useSnackbar } from "notistack";
 
+/**
+ * @param {object} props
+ * @param {any} props.accountType
+ * @param {Array<{name: string, label?: string, placeholder?: string, type?: string, required?: boolean, className?: string}>} [props.extraFields]
+ * @param {string} [props.endpoint]
+ */
 const SignUpForm = ({ accountType, extraFields = [], endpoint = "signup" }) => {
-  const { isSignedIn, signIn, http } = useAsgardeo();
+  const { signIn } = useAsgardeo();
   const { enqueueSnackbar } = useSnackbar();
 
   const [signupData, setSignupData] = useState(() => {
     const presetKey = endpoint === "business-signup" ? "business" : "personal";
-    const preset = environmentConfig.DEMO_USERS?.[presetKey] || {};
+    const preset = /** @type {any} */ (environmentConfig.DEMO_USERS?.[presetKey] || {});
 
-    const initial = {
+    const initial = /** @type {any} */ ({
       firstName: preset.firstName || "",
       lastName: preset.lastName || "",
       dateOfBirth: preset.dateOfBirth || "",
@@ -44,7 +50,7 @@ const SignUpForm = ({ accountType, extraFields = [], endpoint = "signup" }) => {
       email: preset.email || "",
       mobile: preset.mobile || "",
       accountType: accountType,
-    };
+    });
 
     extraFields.forEach(field => {
       initial[field.name] = preset[field.name] || "";
@@ -69,7 +75,7 @@ const SignUpForm = ({ accountType, extraFields = [], endpoint = "signup" }) => {
       });
   }, []);
 
-  const handleSignup = async (e) => {
+  const handleSignup = async (/** @type {React.FormEvent} */ e) => {
     e.preventDefault();
     try {
       const response = await axios.post(
@@ -117,12 +123,12 @@ const SignUpForm = ({ accountType, extraFields = [], endpoint = "signup" }) => {
         name="password"
         placeholder="Enter a password"
         value={signupData.password}
-        onChange={(value) =>
+        onChange={(/** @type {string} */ value) =>
           setSignupData({ ...signupData, password: value })
         }
         showPasswordValidation={true}
         passwordValidationRules={passwordValidationRules}
-        onPasswordValidate={(isValid) => {
+        onPasswordValidate={(/** @type {boolean} */ isValid) => {
           setIsNewPasswordValid(isValid);
         }}
         inputProps={{
@@ -171,8 +177,8 @@ const SignUpForm = ({ accountType, extraFields = [], endpoint = "signup" }) => {
       <label htmlFor="country">Country</label>
       <CountrySelect
         value={signupData.country}
-        onChange={(value) =>
-          setSignupData({ ...signupData, country: value?.label || "" })
+        onChange={(/** @type {{code: string, label: string, phone: string} | ""} */ value) =>
+          setSignupData({ ...signupData, country: value ? value.label : "" })
         }
       />
 

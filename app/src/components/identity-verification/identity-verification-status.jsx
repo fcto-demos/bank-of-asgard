@@ -32,7 +32,7 @@ const IdentityVerificationStatus = () => {
     identityVerificationStatus,
   } = useContext(IdentityVerificationContext);
 
-  const handleStartIdentityVerification = (e) => {
+  const handleStartIdentityVerification = (/** @type {React.MouseEvent} */ e) => {
     e.preventDefault();
 
     const reInitiate = startIdentityVerification();
@@ -46,8 +46,6 @@ const IdentityVerificationStatus = () => {
   ) {
     return null;
   }
-
-  console.log(identityVerificationStatus);
 
   return (
     <div className="identity-verification-message">

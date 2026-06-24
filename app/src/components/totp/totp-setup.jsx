@@ -22,16 +22,16 @@ import { QRCodeCanvas } from "qrcode.react";
 import { environmentConfig } from "../../util/environment-util";
 
 const TotpSetup = () => {
-    const { isSignedIn, http } = useAsgardeo();
-    const [qrCodeUrl, setQrCodeUrl] = useState(null);
-    const [decodedQrCodeUrl, setDecodedQrCodeUrl] = useState(null);
-    const [error, setError] = useState(null);
+    const { http } = useAsgardeo();
+    const [qrCodeUrl, setQrCodeUrl] = useState(/** @type {string | null} */ (null));
+    const [decodedQrCodeUrl, setDecodedQrCodeUrl] = useState(/** @type {string | null} */ (null));
+    const [error, setError] = useState(/** @type {string | null} */ (null));
     const [otpCode, setOtpCode] = useState("");
     const [isValidating, setIsValidating] = useState(false);
     const [setupComplete, setSetupComplete] = useState(false);
     const [totpEnabled, setTotpEnabled] = useState(false);
 
-    const request = requestConfig =>
+    const request = (/** @type {object} */ requestConfig) =>
         http.request(requestConfig)
             .then(response => ({
                 ...response,
@@ -50,22 +50,20 @@ const TotpSetup = () => {
                 url: `${environmentConfig.IDP_BASE_URL}/scim2/Me`,
                 headers: { "Content-Type": "application/json" },
             });
-            console.log(response.data);
-
             if (response.data["urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"]?.totpEnabled
             && response.data["urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"]?.totpEnabled == "true"
             ) {
                 setTotpEnabled(true);
                 fetchQrCode(); // If already enabled, show QR code
-            } else if(response.data["urn:scim:wso2:schema"]?.totpEnabled && 
+            } else if(response.data["urn:scim:wso2:schema"]?.totpEnabled &&
                 response.data["urn:scim:wso2:schema"]?.totpEnabled == "true") {
                 setTotpEnabled(true);
                 fetchQrCode(); // If already enabled, show QR code
-                
+
             } else {
                 setTotpEnabled(false);
             }
-        } catch (err) {
+        } catch (/** @type {any} */ err) {
             setError("Error checking TOTP status: " + (err.response?.data?.detail || err.message));
         }
     };
@@ -81,14 +79,13 @@ const TotpSetup = () => {
             });
 
             if (response.data.qrCodeUrl) {
-                console.log(response.data.qrCodeUrl);
                 setQrCodeUrl(response.data.qrCodeUrl);
                 setDecodedQrCodeUrl(decodeBase64(response.data.qrCodeUrl));
 
             } else {
                 setError("Failed to register TOTP.");
             }
-        } catch (err) {
+        } catch (/** @type {any} */ err) {
             setError("Error setting up TOTP: " + (err.response?.data?.detail || err.message));
         }
     };
@@ -101,14 +98,13 @@ const TotpSetup = () => {
                 headers: { "Content-Type": "application/json" },
                 data: { action: "VIEW" },
             });
-            console.log(response.data);
             if (response.data?.qrCodeUrl) {
                 setQrCodeUrl(response.data.qrCodeUrl);
                 setDecodedQrCodeUrl(decodeBase64(response.data.qrCodeUrl));
             } else {
                 setError("Failed to retrieve QR code.");
             }
-        } catch (err) {
+        } catch (/** @type {any} */ err) {
             setError("Error fetching QR code: " + (err.response?.data?.detail || err.message));
         }
     };
@@ -133,14 +129,14 @@ const TotpSetup = () => {
             } else {
                 setError("Invalid OTP. Please try again.");
             }
-        } catch (err) {
+        } catch (/** @type {any} */ err) {
             setError("Error validating OTP: " + (err.response?.data?.detail || err.message));
         } finally {
             setIsValidating(false);
         }
     };
 
-    const decodeBase64 = (encodedString) => {
+    const decodeBase64 = (/** @type {string} */ encodedString) => {
         try {
           return atob(encodedString);
         } catch (e) {
@@ -160,9 +156,9 @@ const TotpSetup = () => {
                     { totpEnabled ? (
                         <>
                             <p>Scan this QR code to reconfigure your authenticator app:</p>
-                            { qrCodeUrl && 
+                            { qrCodeUrl &&
                                 <div style={{ padding: "10px", display: "inline-block" }}>
-                                    <QRCodeCanvas value={decodedQrCodeUrl}/>
+                                    <QRCodeCanvas value={decodedQrCodeUrl || ""}/>
                                 </div>
                             }
                         </>
@@ -175,7 +171,7 @@ const TotpSetup = () => {
                                     <p>Scan this QR code with your authenticator app:</p>
                                     <div style={{ padding: "10px", display: "inline-block" }}>
 
-                                        <QRCodeCanvas value={decodedQrCodeUrl}/>
+                                        <QRCodeCanvas value={decodedQrCodeUrl || ""}/>
                                     </div>
                                     <hr />
                                     <p>Enter the 6-digit OTP code generated by your app:</p>

@@ -59,7 +59,7 @@ const TransferFundsPage = () => {
     );
   }, [formData]);
 
-  const handleTransfer = async (e) => {
+  const handleTransfer = async (/** @type {React.FormEvent} */ e) => {
     e.preventDefault();
 
     if (isFormValid) {
@@ -110,7 +110,7 @@ const TransferFundsPage = () => {
 
           for (let i = sessionStorage.length - 1; i >= 0; i--) {
             const key = sessionStorage.key(i);
-            if (key.startsWith("session_data-")) {
+            if (key?.startsWith("session_data-")) {
               sessionStorage.removeItem(key);
             }
           }

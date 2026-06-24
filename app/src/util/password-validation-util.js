@@ -16,7 +16,7 @@
  * under the License.
  */
 
-export const transformValidationRules = (rulesData) => {
+export const transformValidationRules = (/** @type {any[]} */ rulesData) => {
   const passwordDefaults = {
     minLength: 8,
     maxLength: 64,
@@ -28,7 +28,7 @@ export const transformValidationRules = (rulesData) => {
     maxConsecutiveChr: undefined,
   };
 
-  const mapping = {
+  const mapping = /** @type {Record<string, Record<string, string>>} */ ({
     LengthValidator: {
       "min.length": "minLength",
       "max.length": "maxLength",
@@ -45,16 +45,16 @@ export const transformValidationRules = (rulesData) => {
     SpecialCharacterValidator: {
       "min.length": "minSpecialChr",
     },
-  };
+  });
 
   const passwordRules = rulesData.find((rule) => rule.field === "password");
   if (!passwordRules) return passwordDefaults;
 
-  let transformedRules = { ...passwordDefaults };
+  const transformedRules = /** @type {any} */ ({ ...passwordDefaults });
 
-  passwordRules.rules.forEach(({ validator, properties }) => {
+  passwordRules.rules.forEach((/** @type {any} */ { validator, properties }) => {
     if (mapping[validator]) {
-      properties.forEach(({ key, value }) => {
+      properties.forEach((/** @type {any} */ { key, value }) => {
         const mappedKey = mapping[validator][key];
         if (mappedKey) {
           transformedRules[mappedKey] = parseInt(value, 10);

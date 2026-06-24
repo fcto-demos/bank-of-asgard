@@ -21,11 +21,11 @@ import { useAsgardeo } from "@asgardeo/react";
 import { environmentConfig } from "../../util/environment-util";
 
 const PasskeySetup = () => {
-    const { isSignedIn, http } = useAsgardeo();
-    const [passkeys, setPasskeys] = useState([]);
-    const [error, setError] = useState(null);
+    const { http } = useAsgardeo();
+    const [passkeys, setPasskeys] = useState(/** @type {any[]} */ ([]));
+    const [error, setError] = useState(/** @type {string | null} */ (null));
 
-    const request = requestConfig =>
+    const request = (/** @type {object} */ requestConfig) =>
         http.request(requestConfig)
             .then(response => ({
                 ...response,
@@ -46,20 +46,20 @@ const PasskeySetup = () => {
             .then((response) => {
                 setPasskeys(response.data || []);
             })
-            .catch((err) => {
+            .catch((/** @type {any} */ err) => {
                 setError("Error fetching passkeys: " + (err.response?.data?.detail || err.message));
             });
     };
 
 
-    const formatFormURLEncoded = (data) => {
+    const formatFormURLEncoded = (/** @type {Record<string, any>} */ data) => {
         return Object.keys(data)
             .map((key) => encodeURIComponent(key) + "=" + encodeURIComponent(data[key]))
             .join("&");
     };
 
     // convert to buffer
-    const getDecodedBuffer = (value) => {
+    const getDecodedBuffer = (/** @type {string} */ value) => {
         try {
             if (value != null) {
                 const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -74,14 +74,15 @@ const PasskeySetup = () => {
         return value;
     };
 
-    const arrayBufferToBase64Url = (buffer) => {
-        const binary = String.fromCharCode.apply(null, new Uint8Array(buffer));
+    const arrayBufferToBase64Url = (/** @type {ArrayBufferLike} */ buffer) => {
+        const binary = String.fromCharCode.apply(null, /** @type {any} */ (new Uint8Array(buffer)));
         const base64 = btoa(binary);
         return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); // Convert to Base64URL format
       };
 
 
-    const publicKeyCredentialToJSON = (pubKeyCred) => {
+    /** @returns {any} */
+    const publicKeyCredentialToJSON = (/** @type {any} */ pubKeyCred) => {
         if (pubKeyCred instanceof Array) {
             let arr = [];
             for (let i of pubKeyCred)
@@ -94,7 +95,7 @@ const PasskeySetup = () => {
         }
 
         if (pubKeyCred instanceof Object) {
-            let obj = {};
+            const obj = /** @type {any} */ ({});
 
             for (let key in pubKeyCred) {
                 obj[key] = publicKeyCredentialToJSON(pubKeyCred[key])
@@ -131,7 +132,7 @@ const PasskeySetup = () => {
 
                 // Decode `excludeCredentials.id` if exists
                 if (options.excludeCredentials) {
-                    options.excludeCredentials = options.excludeCredentials.map((cred) => ({
+                    options.excludeCredentials = options.excludeCredentials.map((/** @type {any} */ cred) => ({
                         ...cred,
                         id: getDecodedBuffer(cred.id),
                     }));
@@ -192,7 +193,7 @@ const PasskeySetup = () => {
             .then(() => {
                 fetchPasskeys(); // Refresh the list
             })
-            .catch((err) => {
+            .catch((/** @type {any} */ err) => {
                 setError("Error during passkey registration: " + (err.message || "Unknown error"));
             });
     };

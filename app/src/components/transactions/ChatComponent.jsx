@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 import LockIcon from "@mui/icons-material/Lock";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { environmentConfig } from "../../util/environment-util";
@@ -20,22 +21,35 @@ import { environmentConfig } from "../../util/environment-util";
 const GOLD = "#997029";
 const AGENT_WS_URL = environmentConfig.TRANSACTIONS_AGENT_URL || "ws://localhost:8011";
 
+/**
+ * @param {object} props
+ * @param {string} props.sessionId
+ * @param {boolean} [props.secured]
+ * @param {string} [props.title]
+ * @param {string} [props.placeholder]
+ */
 const ChatComponent = ({
   sessionId,
   secured = false,
   title = "Asgard Assistant",
   placeholder = "Ask about branches, products, or your account...",
 }) => {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(
+    /** @type {{role: "user" | "assistant", content: string}[]} */ ([])
+  );
   const [inputValue, setInputValue] = useState("");
   const [isConnected, setIsConnected] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const [pendingAuth, setPendingAuth] = useState(null);
+  const [pendingAuth, setPendingAuth] = useState(
+    /** @type {{auth_url: string, scopes: string[]} | null} */ (null)
+  );
 
-  const wsRef = useRef(null);
-  const messagesContainerRef = useRef(null);
-  const authWindowRef = useRef(null);
-  const authCheckIntervalRef = useRef(null);
+  const wsRef = useRef(/** @type {WebSocket | null} */ (null));
+  const messagesContainerRef = useRef(/** @type {HTMLDivElement | null} */ (null));
+  const authWindowRef = useRef(/** @type {Window | null} */ (null));
+  const authCheckIntervalRef = useRef(
+    /** @type {ReturnType<typeof setInterval> | null} */ (null)
+  );
 
   const scrollToBottom = useCallback(() => {
     const el = messagesContainerRef.current;
@@ -50,7 +64,7 @@ const ChatComponent = ({
 
   // Handle postMessage from OAuth popup
   useEffect(() => {
-    const handleMessage = (event) => {
+    const handleMessage = (/** @type {MessageEvent} */ event) => {
       if (event.data && event.data.type === "auth_callback") {
         setPendingAuth(null);
         if (authWindowRef.current && !authWindowRef.current.closed) {
@@ -76,7 +90,7 @@ const ChatComponent = ({
       setIsConnected(true);
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (/** @type {MessageEvent} */ event) => {
       try {
         const data = JSON.parse(event.data);
 
@@ -120,7 +134,7 @@ const ChatComponent = ({
     wsRef.current.send(text);
   }, [inputValue]);
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = (/** @type {React.KeyboardEvent} */ e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -140,7 +154,7 @@ const ChatComponent = ({
     // Poll for popup closure as a fallback
     authCheckIntervalRef.current = setInterval(() => {
       if (popup && popup.closed) {
-        clearInterval(authCheckIntervalRef.current);
+        if (authCheckIntervalRef.current) clearInterval(authCheckIntervalRef.current);
         setPendingAuth(null);
       }
     }, 1000);
@@ -220,15 +234,31 @@ const ChatComponent = ({
               }}
             >
               {msg.role === "user" ? (
-                <Typography variant="body2" sx={{ lineHeight: 1.5 }}>
-                  {msg.content}
-                </Typography>
+                <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5 }}>
+                  <Typography variant="body2" sx={{ lineHeight: 1.5 }}>
+                    {msg.content}
+                  </Typography>
+                  <IconButton
+                    size="small"
+                    onClick={() => navigator.clipboard.writeText(msg.content)}
+                    sx={{ color: "#fff", p: 0.25, mt: -0.25 }}
+                    aria-label="Copy prompt"
+                  >
+                    <ContentCopyIcon sx={{ fontSize: "0.9rem" }} />
+                  </IconButton>
+                </Box>
               ) : (
                 <Box
                   sx={{
                     fontSize: "0.875rem",
                     lineHeight: 1.6,
                     "& p": { m: 0, mb: 0.5 },
+                    "& h1, & h2, & h3, & h4, & h5, & h6": {
+                      fontSize: "0.875rem",
+                      fontWeight: 600,
+                      m: 0,
+                      mb: 0.5,
+                    },
                     "& ul, & ol": { mt: 0.5, mb: 0.5, pl: 2.5 },
                     "& li": { mb: 0.25 },
                     "& strong": { fontWeight: 600 },

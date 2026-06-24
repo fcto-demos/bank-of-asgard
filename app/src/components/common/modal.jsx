@@ -22,6 +22,18 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import PropTypes from "prop-types";
 
+/**
+ * @param {object} props
+ * @param {boolean} [props.isOpen]
+ * @param {() => void} props.handleClose
+ * @param {string} props.primaryActionText
+ * @param {() => void} props.primaryActionHandler
+ * @param {string} [props.secondaryActionText]
+ * @param {() => void} [props.secondaryActionHandler]
+ * @param {string} props.title
+ * @param {string} props.message
+ * @param {boolean} [props.disableEscapeKeyDown]
+ */
 const Modal = ({
   isOpen = false,
   handleClose,

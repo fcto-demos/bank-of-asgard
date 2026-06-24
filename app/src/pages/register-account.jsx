@@ -28,6 +28,10 @@ import { ACCOUNT_TYPES, ROUTES, SITE_SECTIONS, URL_QUERY_PARAMS } from "../const
 import { isFeatureEnabled } from "../util/environment-util";
 import { FEATURE_MAP } from "../constants/feature-constants";
 
+/**
+ * @param {object} props
+ * @param {(section: string | null) => void} props.setSiteSection
+ */
 const RegisterAccountPage = ({ setSiteSection }) => {
 
   const [ searchParams ] = useSearchParams();
@@ -168,7 +172,7 @@ const RegisterAccountPage = ({ setSiteSection }) => {
                         Business Banking
                       </h5>
                       <p>
-                        We&apos;re supporting smarter business by building future focused insights, 
+                        We&apos;re supporting smarter business by building future focused insights,
                         and easier to use products and services that facilitate new ways to grow
                       </p>
                       <Link to={ `${ROUTES.REGISTER_ACCOUNT}?${URL_QUERY_PARAMS.ACCOUNT_TYPE}=${ACCOUNT_TYPES.BUSINESS}` }>
