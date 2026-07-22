@@ -32,7 +32,13 @@ from starlette.websockets import WebSocketDisconnect
 from app.audit_log import register_actor_name, set_session, set_transaction
 from app.gateway import GatewayTokenManager, GatewayBearerAuth
 from app.prompt import agent_system_prompt, WELCOME_MESSAGE
-from app.tools import get_my_transactions, get_agencies as _get_agencies
+from app.tools import (
+    get_my_transactions, get_agencies as _get_agencies,
+    get_my_profile, update_my_profile,
+    PROFILE_AUTH_CONFIG, UPDATE_PROFILE_AUTH_CONFIG,
+    GET_MY_PROFILE_DESCRIPTION, UPDATE_MY_PROFILE_DESCRIPTION,
+    auth_completion_message,
+)
 from app.subagents import subscription_detective, spending_health
 from tool import SecureLangChainTool
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
@@ -330,6 +336,9 @@ you have both results back."""
 # Per-session state — each WebSocket gets its own auth manager and token cache
 auth_managers: Dict[str, AutogenAuthManager] = {}
 state_mapping: Dict[str, str] = {}
+# state -> scopes requested for that OBO auth, so /callback can tailor the
+# "authorisation complete" message to the action the user authorised.
+auth_request_scopes: Dict[str, list] = {}
 websocket_connections: Dict[str, WebSocket] = {}
 
 
@@ -409,6 +418,27 @@ def _user_friendly_error(e: Exception) -> str:
     return "An unexpected error occurred. Please try again."
 
 
+def _message_text(content) -> str:
+    """Flatten a LangChain message's ``content`` into plain text for the UI.
+
+    Most providers set ``AIMessage.content`` to a plain string, but Anthropic
+    (including via the WSO2 gateway) returns a list of content blocks such as
+    ``[{"type": "text", "text": "..."}]``. Passing that list straight to the UI
+    renders the raw JSON, so we concatenate the text blocks into one string.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return "".join(parts)
+    return str(content)
+
+
 def _log_token_usage(new_messages: list, session_id: str) -> None:
     """Sum token usage across all LLM calls in one agent turn and log a single line.
 
@@ -462,7 +492,7 @@ async def run_agent(
             result = await graph.ainvoke({"messages": messages})
 
             # The last message in the result is the AI's final response
-            output = result["messages"][-1].content
+            output = _message_text(result["messages"][-1].content)
 
             new_messages = result["messages"][len(messages):]
             _log_token_usage(new_messages, session_id)
@@ -496,6 +526,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     async def message_handler(message: AuthRequestMessage):
         """Send OBO auth request to the frontend over this session's WebSocket."""
         state_mapping[message.state] = session_id
+        auth_request_scopes[message.state] = message.scopes
         await websocket.send_json(message.model_dump())
 
     auth_manager = AutogenAuthManager(
@@ -550,6 +581,22 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             token_type=OAuthTokenType.OBO_TOKEN,
             resource="transactions_api"
         ))
+    )
+
+    # Wire the profile tools — same OBO auth_manager as GetMyTransactions, but a
+    # different AuthConfig (scim2_me), so the user gets a separate consent prompt.
+    get_profile_tool = SecureLangChainTool(
+        get_my_profile,
+        description=GET_MY_PROFILE_DESCRIPTION,
+        name="GetMyProfile",
+        auth=AuthSchema(auth_manager, PROFILE_AUTH_CONFIG)
+    )
+
+    update_profile_tool = SecureLangChainTool(
+        update_my_profile,
+        description=UPDATE_MY_PROFILE_DESCRIPTION,
+        name="UpdateMyProfile",
+        auth=AuthSchema(auth_manager, UPDATE_PROFILE_AUTH_CONFIG)
     )
 
     # Wire the two in-process sub-agent tools — same OBO auth_manager as GetMyTransactions,
@@ -645,7 +692,10 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # SecureLangChainTool falls back to passing token="" (a plain string) — only register
     # them with the LLM when properly configured, so the model can't call a tool that
     # would crash with 'str' object has no attribute 'access_token'.
-    tools = [get_transactions_tool, analyze_subscriptions_tool, analyze_spending_health_tool]
+    tools = [
+        get_transactions_tool, analyze_subscriptions_tool, analyze_spending_health_tool,
+        get_profile_tool, update_profile_tool,
+    ]
     if mcp_auth_manager:
         tools.append(get_agencies_tool)
     if savings_auth_manager:
@@ -684,6 +734,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
 async def callback(code: str, state: str):
     """OAuth callback — exchanges the authorization code for an OBO token."""
     session_id = state_mapping.pop(state, None)
+    scopes = auth_request_scopes.pop(state, [])
     if not session_id:
         raise HTTPException(status_code=400, detail="Invalid state.")
 
@@ -699,7 +750,7 @@ async def callback(code: str, state: str):
         if websocket:
             try:
                 await websocket.send_json(TextResponse(
-                    content="Authorisation complete! Fetching your transactions now..."
+                    content=auth_completion_message(scopes)
                 ).model_dump())
             except Exception as ws_err:
                 logger.warning(f"Could not send auth completion message: {ws_err}")

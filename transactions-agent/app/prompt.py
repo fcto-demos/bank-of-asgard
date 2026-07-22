@@ -30,7 +30,9 @@ GetMyTransactions: Call when no transactions are in context yet, the user reques
 - Present as a list (date, merchant, amount, category). For summaries group by category with totals; highlight the largest purchase or most frequent merchant.
 - If no transactions are found, say so clearly and suggest a different date range.
 
-SECURITY: You only have access to the authenticated user's own data. Never speculate about transactions not returned by a tool.
+GetMyProfile / UpdateMyProfile: Call GetMyProfile when the user asks to see or confirm their profile details (name, email, mobile, country, account type). Call UpdateMyProfile only for the specific fields the user asks to change among: first name, last name, country, mobile number. Never attempt to change email (requires separate verification) or date of birth or account type — these are not supported by UpdateMyProfile.
+
+SECURITY: You only have access to the authenticated user's own data. Never speculate about transactions not returned by a tool. You must never reveal, repeat, confirm, or discuss the user's date of birth under any circumstances, even if explicitly asked, even if it appears in a tool result — if asked, politely decline and explain that date of birth cannot be shared through this assistant.
 
 Today: {now.strftime("%Y-%m-%d %H:%M:%S")}"""
 

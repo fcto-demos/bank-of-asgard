@@ -2,17 +2,17 @@
 
 # Foreword
 
-This demo is an extension/rework of the original Bank of Asgard demo which was built to demonstrate IS CIAM capabilities. The instructions configure the demo only for the purpose of showing WSO2 Agentic platform capabilities. If you are looking for CIAM capabilities, get the original version. Identity server setup, in particular, is quite different. 
+This demo is an extension/rework of the original Bank of Asgard demo which was built to demonstrate IS CIAM capabilities. The instructions configure the demo only for the purpose of showing WSO2 Agentic platform capabilities. Identity server setup, in particular, is quite different. If you are looking to demo  CIAM/B2B capabilities, get the [original version](https://github.com/asgardeo-samples/bank-of-asgard). 
 
 Using this demo, you can experience:
 
-- AI Guardrails
+- AI Guardrails, including gateway-enforced redaction of sensitive profile fields (e.g. date of birth) before they reach the LLM
 - Agentic identity and OBO flows 
 - Agent Management
 
 # Deployment Architecture
 
-The Asgard assistant is a coordinator agent which can help Asgard customers with transactions information. In its langchain version, it can also give investment recommendations, leveraging sub-agents and the separate savings agent. 
+The Asgard assistant is a coordinator agent which can help Asgard customers with transactions information, as well as viewing and updating their basic profile details (name, country, mobile number) via `GetMyProfile`/`UpdateMyProfile`. In its langchain version, it can also give investment recommendations, leveraging sub-agents and the separate savings agent. 
 
 All LLM calls are proxied through the WSO2 AI Gateway. Users management and agent identity are provided by WSO2's Identity platform. Finally, agent observability and governance is provided by Agent Manager.
 
@@ -36,7 +36,7 @@ The following products are used in the context of this demo
 | React frontend | Node.js + npm | Node 20+ |
 | Node/Express server | Node.js + npm | Node 20+ |
 | Transactions API | Python + pip | Python 3.11+ |
-| Transactions Agent (plus subagents in Langchain) | Python + pip | Python 3.11+ |
+| Transactions Agent (plus subagents, Langchain only) | Python + pip | Python 3.11+ |
 | Agencies MCP Server | Python + pip | Python 3.11+ |
 | Savings Goals Agent (Langchain only) | Python + pip | Python 3.11+ |
 | Container-based deployment *(optional)* | Docker or Podman | — |
@@ -46,14 +46,14 @@ The following products are used in the context of this demo
 
 ## Identity provider
 
-The following instructions have been tested on June 2026 on the SaaS Identity Platform (https://console.asgardeo.io) and WSO2 Identity Server **7.2** (VM).
+The following instructions have been last tested in July 2026 on the SaaS Identity Platform (https://console.asgardeo.io) and WSO2 Identity Server **7.2** (VM).
 
 # Identity Provider Setup
 
 The full setup requires:
 
 1. The creation of 5 applications (Frontend / Backend / Transactions Agent / Agencies MCP Client / Savings Agent)
-2. The registration of the agentsvidentity (credentials)
+2. The registration of the Transaction agent identity (credentials)
 3. The creation of custom attributes and addition of these attributes to the OpenID connect profiles.
 
 Following table summarizes the apps plus credentials setup, and where this information is configured in the various environment files.
@@ -107,7 +107,7 @@ Resources include APIs and MCPs.
 
 ## Roles
 
-We need to create a role, which is assigned automatically to new personal banking users. The role is called **Read_Transactions** and has access to read_transactions scope - This name is the default one used in the code, but can be overriden in the .env file of the backend application if necessary.
+We need to create a role, which is assigned automatically to new personal banking users. The role is called **Read_Transactions** and has access to the read_transactions scope on the Transactions API - This name is the default one used in the code, but can be overriden in the .env file of the backend application if necessary.
 
 - Create the role as an <u>organization</u> role
 
@@ -181,7 +181,7 @@ Note the **Client ID**, you will use it to set `APP_CLIENT_ID` in `app/public/co
 
      > [!NOTE]
      >
-     > In the latest versions of IS / Asgardeo, some scopes will be added automatically as you add 			those above.
+     > In the latest versions of IS / Asgardeo, some scopes will be added automatically as you add those above.
 
      Note the clientID and clientSecret - You will use them to set `SERVER_APP_CLIENT_ID` / `SERVER_APP_CLIENT_SECRET` in `server/.env`.
 
@@ -194,7 +194,7 @@ Note the **Client ID**, you will use it to set `APP_CLIENT_ID` in `app/public/co
 5. Add the allowed origins: `http://localhost:8013` and `http://localhost:8011`
 6. Ensure token format is JWT.
 7. Under **Advanced**, enable "App Native Authentication "
-8. Copy the generated **Client ID** — You will use to set `AGENT_APP_ID` in `transactions-agent/.env`
+8. Copy the generated **Client ID** — You will use it to set `AGENT_APP_ID` in `transactions-agent/.env`
 
 ## Savings Agent (LangChain only)
 
@@ -539,6 +539,19 @@ GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
 #GATEWAY_CLIENT_SECRET=<apim_client_secret>
 #GATEWAY_TOKEN_ENDPOINT=https://my-api-gateway.com:9450/oauth2/token
 ```
+
+### Redacting sensitive fields (dateOfBirth) at the gateway
+
+The `GetMyProfile` assistant tool deliberately returns the user's full SCIM2 profile, including `dateOfBirth`, unredacted — nothing is filtered out in the agent code. This is intentional: it gives the WSO2 AI Gateway's guardrails something concrete to demonstrate. The assistant's system prompt also refuses to disclose date of birth as a first line of defense, but that's a request that can be jailbroken — the gateway is the enforcement layer meant to hold regardless.
+
+To configure the redaction:
+
+1. In the APIM Publisher console, attach the guardrail policy to the **v2 (`GATEWAY_BASE_URL_SECURED`)** API only — leave the v1 passthrough API untouched. This lets the demo toggle the existing "AI Guardrails" switch in the chat UI and show `dateOfBirth` leaking through on v1 vs. redacted on v2.
+2. Add a PII-masking / regex mediation guardrail (APIM 4.6/4.7's built-in AI API guardrail mediators, or a custom sensitive-data-filter if available) applied in **both directions**:
+   - **Request flow** (the `GetMyProfile` tool-result JSON sent to the LLM): redact the `dateOfBirth` value, e.g. match `"dateOfBirth"\s*:\s*"([^"]*)"` and replace the captured value with `"[REDACTED]"`.
+   - **Response flow** (the LLM's reply back to the agent): redact ISO-date patterns (`\b\d{4}-\d{2}-\d{2}\b`) found near the case-insensitive strings `date of birth` / `dateOfBirth` / `DOB` / `birthdate`, in case the model echoes the date despite request-side redaction.
+3. No client-side code changes are needed for this: gateway `446` (guardrail block) and `429` (rate limit) responses are already fully handled by all three agent implementations; a `200` response with a redacted body flows through the normal success path untouched.
+
 ### Agencies MCP Server
 
 You can proxy the Agencies MCP server via the publisher console:
@@ -608,7 +621,7 @@ cd ..
 ./demo_scripts/stop-demo.sh
 ```
 
-Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`.
+Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page's transaction list) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs.
 
 ### Running with Docker / Podman (alternative)
 

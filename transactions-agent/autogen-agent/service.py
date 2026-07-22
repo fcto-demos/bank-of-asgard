@@ -21,7 +21,13 @@ from starlette.websockets import WebSocketDisconnect
 from app.audit_log import register_actor_name
 from app.gateway import GatewayTokenManager, GatewayBearerAuth
 from app.prompt import agent_system_prompt, WELCOME_MESSAGE
-from app.tools import get_my_transactions, get_agencies as _get_agencies
+from app.tools import (
+    get_my_transactions, get_agencies as _get_agencies,
+    get_my_profile, update_my_profile,
+    PROFILE_AUTH_CONFIG, UPDATE_PROFILE_AUTH_CONFIG,
+    GET_MY_PROFILE_DESCRIPTION, UPDATE_MY_PROFILE_DESCRIPTION,
+    auth_completion_message,
+)
 from tool import SecureFunctionTool
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
 
@@ -236,6 +242,9 @@ else:
 # Per-session state — each WebSocket gets its own auth manager and token cache
 auth_managers: Dict[str, AutogenAuthManager] = {}
 state_mapping: Dict[str, str] = {}
+# state -> scopes requested for that OBO auth, so /callback can tailor the
+# "authorisation complete" message to the action the user authorised.
+auth_request_scopes: Dict[str, list] = {}
 websocket_connections: Dict[str, WebSocket] = {}
 
 
@@ -319,6 +328,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     async def message_handler(message: AuthRequestMessage):
         """Send OBO auth request to the frontend over this session's WebSocket."""
         state_mapping[message.state] = session_id
+        auth_request_scopes[message.state] = message.scopes
         await websocket.send_json(message.model_dump())
 
     auth_manager = AutogenAuthManager(
@@ -356,6 +366,22 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         ))
     )
 
+    # Wire the profile tools — same OBO auth_manager as GetMyTransactions, but a
+    # different AuthConfig (scim2_me), so the user gets a separate consent prompt.
+    get_profile_tool = SecureFunctionTool(
+        get_my_profile,
+        description=GET_MY_PROFILE_DESCRIPTION,
+        name="GetMyProfile",
+        auth=AuthSchema(auth_manager, PROFILE_AUTH_CONFIG)
+    )
+
+    update_profile_tool = SecureFunctionTool(
+        update_my_profile,
+        description=UPDATE_MY_PROFILE_DESCRIPTION,
+        name="UpdateMyProfile",
+        auth=AuthSchema(auth_manager, UPDATE_PROFILE_AUTH_CONFIG)
+    )
+
     # Wire the agencies MCP tool with agent token auth (no user context needed)
     get_agencies_tool = SecureFunctionTool(
         _get_agencies,
@@ -378,7 +404,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     banking_assistant = AssistantAgent(
         "banking_assistant",
         model_client=active_client,
-        tools=[get_transactions_tool, get_agencies_tool],
+        tools=[get_transactions_tool, get_agencies_tool, get_profile_tool, update_profile_tool],
         reflect_on_tool_use=True,
         system_message=agent_system_prompt,
     )
@@ -408,6 +434,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
 async def callback(code: str, state: str):
     """OAuth callback — exchanges the authorization code for an OBO token."""
     session_id = state_mapping.pop(state, None)
+    scopes = auth_request_scopes.pop(state, [])
     if not session_id:
         raise HTTPException(status_code=400, detail="Invalid state.")
 
@@ -423,7 +450,7 @@ async def callback(code: str, state: str):
         if websocket:
             try:
                 await websocket.send_json(TextResponse(
-                    content="Authorisation complete! Fetching your transactions now..."
+                    content=auth_completion_message(scopes)
                 ).model_dump())
             except Exception as ws_err:
                 logger.warning(f"Could not send auth completion message: {ws_err}")

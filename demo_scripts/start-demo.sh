@@ -221,6 +221,12 @@ fi
 mkdir -p "$LOG_DIR"
 : > "$PID_FILE"
 
+# Start each demo with a clean token audit trail. The agents append (never truncate)
+# to this file, so without this the Token Flow page's transaction_id list keeps growing
+# with stale entries from previous demo runs. Unlike the .log files (overwritten with >
+# on each start), this JSONL log would otherwise persist across demos.
+: > "$LOG_DIR/token-audit.jsonl"
+
 # Persist startup context so restart.sh can relaunch services identically
 cat > "$ROOT/.demo.context" <<EOF
 AGENT=$AGENT

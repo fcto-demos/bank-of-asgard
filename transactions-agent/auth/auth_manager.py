@@ -363,7 +363,7 @@ class AutogenAuthManager:
                 origin=self._agent_config.agent_id, destination="IS",
                 grant_type="authorization_code", kind="OBO_TOKEN",
                 client_id=self._config.client_id, resource=config.resource,
-                requested_by=self._agent_config.agent_id,
+                requested_by=self._agent_config.agent_id, scopes=config.scopes,
             )
 
             # Create future to await authorization completion

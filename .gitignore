@@ -63,3 +63,4 @@ app/public/config.asgardeo.js
 .claude/agent-memory/python-security-reviewer/project_transactions_agent_security.md
 .claude/agent-memory/python-security-reviewer/MEMORY.md
 agencies-mcp-server/server_poisoned.py
+docs/Migration to Agentic Platform.md

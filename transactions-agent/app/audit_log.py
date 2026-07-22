@@ -126,6 +126,7 @@ def emit_token_event(
     client_id: str | None = None,
     resource: str | None = None,
     requested_by: str | None = None,
+    scopes: Any = None,
     sub: str | None = None,
     act: Any = None,
     aud: Any = None,
@@ -152,6 +153,9 @@ def emit_token_event(
         # For OBO events sub is the actual end-user's claim (never registered), so
         # friendly() correctly leaves it unchanged — only known agent identities resolve.
         "requested_by": friendly(requested_by),
+        # OAuth scopes the token is being requested with (e.g. on obo_initiated) — kept as
+        # a list so the token-flow viewer can show them; dropped below when empty/None.
+        "scopes": list(scopes) if scopes else None,
         "sub": friendly(sub),
         "act": act,
         "aud": aud,

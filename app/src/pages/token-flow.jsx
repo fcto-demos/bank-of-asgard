@@ -33,7 +33,60 @@ import { getTokenAudit } from "../api/token-audit";
 
 const GOLD = "#997029";
 
-mermaid.initialize({ startOnLoad: false, theme: "neutral" });
+// On-brand sequence-diagram palette (warm gold / cream on ink) so the token flow
+// matches the Bank of Asgard styling instead of Mermaid's default flat grey.
+const CREAM = "#faf5e9";        // actor / label box fill
+const GOLD_BORDER = "#c7a24c";  // actor + note borders, lifelines base
+const INK = "#463a24";          // all diagram text
+const SIGNAL = "#7a5c2e";       // arrows, arrowheads, sequence-number circles
+const FAILURE = "#c0392b";      // failed hops (crosshead + tinted band)
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "base",
+  fontFamily: '"Inter", "Segoe UI", Roboto, system-ui, sans-serif',
+  themeVariables: {
+    primaryColor: CREAM,
+    primaryBorderColor: GOLD_BORDER,
+    primaryTextColor: INK,
+    lineColor: GOLD_BORDER,
+    textColor: INK,
+    actorBkg: CREAM,
+    actorBorder: GOLD_BORDER,
+    actorTextColor: INK,
+    actorLineColor: "#d8c79b",
+    signalColor: SIGNAL,
+    signalTextColor: INK,
+    labelBoxBkgColor: CREAM,
+    labelBoxBorderColor: GOLD_BORDER,
+    labelTextColor: INK,
+    noteBkgColor: "#fff8e6",
+    noteBorderColor: GOLD_BORDER,
+    noteTextColor: INK,
+    activationBkgColor: "#efe3c6",
+    activationBorderColor: GOLD_BORDER,
+    sequenceNumberColor: "#ffffff",
+  },
+  sequence: {
+    diagramMarginX: 24,
+    diagramMarginY: 18,
+    actorMargin: 110,
+    boxMargin: 12,
+    messageMargin: 44,
+    mirrorActors: false,   // no duplicate actor row at the bottom — shorter, cleaner
+    useMaxWidth: false,    // keep natural size + horizontal scroll (see container) over shrink-to-fit
+    actorFontSize: 14,
+    actorFontWeight: 600,
+    messageFontSize: 12.5,
+    noteFontSize: 12,
+  },
+  themeCSS: `
+    .actor { rx: 8px; ry: 8px; filter: drop-shadow(0 1px 2px rgba(60,45,15,0.18)); }
+    .actor-line { stroke-dasharray: 3 5; opacity: 0.55; }
+    .messageText { font-weight: 500; letter-spacing: 0.1px; }
+    [id$="-crosshead"] path { fill: ${FAILURE}; stroke: ${FAILURE}; }
+  `,
+});
 
 /** Formats elapsed milliseconds since the first event as a short "+Nms"/"+N.Ns" label. */
 const formatDelta = (/** @type {number} */ deltaMs) => {
@@ -50,6 +103,63 @@ const sanitizeLabel = (/** @type {string} */ label) => String(label).replace(/"/
 // already-in-flight token fetch) — real and useful in the raw audit log for verifying
 // the de-dup behavior itself, but it's not an actual hop and just clutters the diagram.
 const DIAGRAM_NOISE_EVENTS = new Set(["dedupe_wait"]);
+
+// The raw `event` strings from the audit log are terse internal names (e.g. "fresh",
+// "api_call") — fine in JSONL, but cryptic as a diagram label. Map the known vocabulary
+// to human-readable phrases; unknown events fall back to a de-underscored, capitalized
+// form. Acronym-leading names (api/llm/obo) MUST be mapped explicitly, since the fallback
+// would render them "Api"/"Llm"/"Obo".
+const EVENT_LABELS = /** @type {Record<string, string>} */ ({
+  // Note: `fresh` is intentionally absent — it is repainted (IS -> Agent) with its own
+  // label in effectiveHop() below, rather than drawn as a plain hop.
+  cache_hit: "Token reused (cache hit)",
+  obo_initiated: "OBO exchange initiated",
+  obo_exchanged: "OBO token issued",
+  agent_token_fetch: "Agent token requested",
+  gateway_token_fetch: "Gateway token requested",
+  gateway_token_fresh: "Gateway token obtained (fresh)",
+  validated_incoming: "Incoming token validated",
+  api_call: "API call",
+  llm_call: "LLM call",
+});
+
+const eventLabel = (/** @type {string} */ event) => {
+  if (EVENT_LABELS[event]) {
+    return EVENT_LABELS[event];
+  }
+  const words = String(event || "event").replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+// Short, readable token-type tag for the detail line, so an event like "fresh" carries
+// the context of *which* token was obtained (e.g. OBO vs Agent).
+const tokenTypeLabel = (/** @type {string} */ tokenType) =>
+  ({ OBO_TOKEN: "OBO", AGENT_TOKEN: "Agent" })[tokenType] ||
+  String(tokenType).replace(/_TOKEN$/, "").toLowerCase();
+
+// The canonical actor name for the identity server / IdP, as written to the audit log
+// (e.g. `obo_initiated` uses destination "IS").
+const IDP_ACTOR = "IS";
+
+// Resolve an event to the hop actually drawn. `fresh` is logged as Agent -> <resource>,
+// but the freshly-minted token was obtained FROM the IdP — so repaint it as IS -> Agent,
+// reading as the "token obtained" response rather than a second call to the resource.
+// (A cached token — `cache_hit` — genuinely does not come from the IdP, so it is left as
+// logged and is not repainted here.)
+const effectiveHop = (/** @type {any} */ event) => {
+  if (event.event === "fresh") {
+    return {
+      origin: IDP_ACTOR,
+      destination: event.origin || "unknown",
+      label: "Token obtained (fresh)",
+    };
+  }
+  return {
+    origin: event.origin || "unknown",
+    destination: event.destination || "unknown",
+    label: eventLabel(event.event),
+  };
+};
 
 /** Builds Mermaid sequenceDiagram source from a chronologically-sorted list of audit events. */
 const buildDiagramText = (/** @type {Array<any>} */ allEvents) => {
@@ -71,31 +181,57 @@ const buildDiagramText = (/** @type {Array<any>} */ allEvents) => {
   const lines = ["sequenceDiagram", "autonumber"];
 
   events.forEach((event) => {
-    const origin = event.origin || "unknown";
-    const destination = event.destination || "unknown";
-    aliasFor(origin);
-    aliasFor(destination);
+    const hop = effectiveHop(event);
+    aliasFor(hop.origin);
+    aliasFor(hop.destination);
   });
   actorAlias.forEach((alias, name) => {
     lines.push(`participant ${alias} as "${sanitizeLabel(name)}"`);
   });
 
   events.forEach((event) => {
-    const origin = aliasFor(event.origin || "unknown");
-    const destination = aliasFor(event.destination || "unknown");
+    const hop = effectiveHop(event);
+    const origin = aliasFor(hop.origin);
+    const destination = aliasFor(hop.destination);
     const deltaLabel = formatDelta((event.epoch - t0) * 1000);
-    const labelParts = [event.event, deltaLabel];
+
+    // Scopes note (e.g. on `obo_initiated`) — surface what the token is being requested
+    // for, as a note spanning the two actors just above the hop it belongs to.
+    if (Array.isArray(event.scopes) && event.scopes.length > 0) {
+      const span = origin === destination ? origin : `${origin},${destination}`;
+      const scopeText = sanitizeLabel(`Requested scopes:<br/>${event.scopes.join(", ")}`);
+      lines.push(`Note over ${span}: ${scopeText}`);
+    }
+
+    // First line is a human-readable event name; the timing + token/identity details go
+    // on a second, muted line so the primary action stays readable at a glance.
+    const meta = [deltaLabel];
+    if (event.token_type) {
+      meta.push(tokenTypeLabel(event.token_type));
+    }
     if (event.token_hash) {
-      labelParts.push(`tokenHash=${event.token_hash}`);
+      meta.push(`token ${event.token_hash}`);
     }
     if (event.sub) {
-      labelParts.push(`sub=${event.sub}`);
+      meta.push(`sub ${event.sub}`);
     }
     if (event.act) {
-      labelParts.push(`act=${event.act}`);
+      meta.push(`act ${event.act}`);
     }
-    const arrow = event.success === false ? "-x" : "->>";
-    lines.push(`${origin}${arrow}${destination}: ${sanitizeLabel(labelParts.join(" | "))}`);
+
+    const failed = event.success === false;
+    const arrow = failed ? "-x" : "->>";
+    const label = sanitizeLabel(`${hop.label}<br/>${meta.join(" · ")}`);
+    const line = `${origin}${arrow}${destination}: ${label}`;
+
+    // Tint the band behind a failed hop so failures are obvious beyond the red crosshead.
+    if (failed) {
+      lines.push("rect rgb(250, 233, 231)");
+      lines.push(line);
+      lines.push("end");
+    } else {
+      lines.push(line);
+    }
   });
 
   return lines.join("\n");
