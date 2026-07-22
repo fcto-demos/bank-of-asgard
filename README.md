@@ -518,7 +518,7 @@ provider: openai
 
 Change the configuration to route LLM calls via a gateway instead of a direct API key - The demo allows to switch between GATEWAY_BASE_URL and GATEWAY_BASE_URL_SECURED. Typically you want to expose a V1 and v2 of the same LLM API, one in passthrough mode (no guardrails) and one with guardrails, typically semantic analysis, content safety, content length guards.
 
-Then create a new application from dev portal, subscribe to the two APIs, and use CLIENTID/SECRET of this app as GATEWAY_CLIENT_ID/GATEWAY_CLIENT_SECRET.
+Then create two applications from dev portal (one for transactions agent, another one for savings agents) subscribe to the two APIs, and use CLIENTID/SECRET of this app as GATEWAY_CLIENT_ID/GATEWAY_CLIENT_SECRET.
 
 ```yaml
 # llm_config.yaml
@@ -538,19 +538,18 @@ GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
 #GATEWAY_CLIENT_ID=<apim_client_id>
 #GATEWAY_CLIENT_SECRET=<apim_client_secret>
 #GATEWAY_TOKEN_ENDPOINT=https://my-api-gateway.com:9450/oauth2/token
+
+# savings-goals-agent/.env
+# MUST be a DIFFERENT Gateway application/client than transactions-agent's — do not reuse
+# the same GATEWAY_CLIENT_ID/SECRET. WSO2 issuing a fresh client-credentials token for a
+# given client_id can invalidate that client's previously-cached token; if both services
+# share one client_id, the Coordinator's gateway calls start failing with 401 "Invalid
+# Credentials" right after the Savings Agent mints its own token under the same client.
+GATEWAY_CLIENT_ID=<SAVINGS_GATEWAY_CLIENT_ID>
+GATEWAY_CLIENT_SECRET=<SAVINGS_GATEWAY_CLIENT_SECRET>
+GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
+GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
 ```
-
-### Redacting sensitive fields (dateOfBirth) at the gateway
-
-The `GetMyProfile` assistant tool deliberately returns the user's full SCIM2 profile, including `dateOfBirth`, unredacted — nothing is filtered out in the agent code. This is intentional: it gives the WSO2 AI Gateway's guardrails something concrete to demonstrate. The assistant's system prompt also refuses to disclose date of birth as a first line of defense, but that's a request that can be jailbroken — the gateway is the enforcement layer meant to hold regardless.
-
-To configure the redaction:
-
-1. In the APIM Publisher console, attach the guardrail policy to the **v2 (`GATEWAY_BASE_URL_SECURED`)** API only — leave the v1 passthrough API untouched. This lets the demo toggle the existing "AI Guardrails" switch in the chat UI and show `dateOfBirth` leaking through on v1 vs. redacted on v2.
-2. Add a PII-masking / regex mediation guardrail (APIM 4.6/4.7's built-in AI API guardrail mediators, or a custom sensitive-data-filter if available) applied in **both directions**:
-   - **Request flow** (the `GetMyProfile` tool-result JSON sent to the LLM): redact the `dateOfBirth` value, e.g. match `"dateOfBirth"\s*:\s*"([^"]*)"` and replace the captured value with `"[REDACTED]"`.
-   - **Response flow** (the LLM's reply back to the agent): redact ISO-date patterns (`\b\d{4}-\d{2}-\d{2}\b`) found near the case-insensitive strings `date of birth` / `dateOfBirth` / `DOB` / `birthdate`, in case the model echoes the date despite request-side redaction.
-3. No client-side code changes are needed for this: gateway `446` (guardrail block) and `429` (rate limit) responses are already fully handled by all three agent implementations; a `200` response with a redacted body flows through the normal success path untouched.
 
 ### Agencies MCP Server
 
