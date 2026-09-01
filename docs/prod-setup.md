@@ -70,8 +70,9 @@ SSH into the VM and run:
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
-# Install Python 3.11+
-sudo apt-get install -y python3.11 python3.11-venv python3-pip
+# Install Python 3.13+ (deadsnakes PPA — 3.13 is not in the default repos on Ubuntu 22.04/24.04)
+sudo add-apt-repository -y ppa:deadsnakes/ppa && sudo apt-get update
+sudo apt-get install -y python3.13 python3.13-venv python3-pip
 
 # Clone the project
 cd ~

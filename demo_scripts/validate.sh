@@ -86,6 +86,12 @@ section "Python virtual environments"
 
 check_venv() {
     local py="$1" label="$2" hint="$3"
+    if [[ -L "$py" && ! -e "$py" ]]; then
+        # Dangling interpreter symlink — usually a Homebrew Python upgrade that
+        # removed the Cellar path the venv was built against.
+        fail "$label venv is broken (interpreter symlink is dangling) — recreate it: $hint"
+        return
+    fi
     if [[ ! -f "$py" ]]; then
         warn "$label venv missing — $hint"
         return
@@ -95,30 +101,30 @@ check_venv() {
     local major minor
     major=$(echo "$ver" | cut -d. -f1)
     minor=$(echo "$ver" | cut -d. -f2)
-    if [[ ${major:-0} -ge 3 && ${minor:-0} -ge 11 ]]; then
+    if [[ ${major:-0} -ge 3 && ${minor:-0} -ge 13 ]]; then
         pass "$label venv (Python $ver)"
     else
-        fail "$label venv uses Python $ver — 3.11+ required. Recreate with: python3.11 -m venv $(dirname "$(dirname "$py")")"
+        fail "$label venv uses Python $ver — 3.13+ required. Recreate with: python3.13 -m venv $(dirname "$(dirname "$py")")"
     fi
 }
 
 check_venv "$ROOT/transactions-api/venv/bin/python" \
     "transactions-api" \
-    "cd transactions-api && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt"
+    "cd transactions-api && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 
 for agent in langchain-agent autogen-agent strands-agent; do
     check_venv "$ROOT/transactions-agent/$agent/venv/bin/python" \
         "transactions-agent/$agent" \
-        "python3.11 -m venv transactions-agent/$agent/venv && transactions-agent/$agent/venv/bin/pip install -r transactions-agent/$agent/requirements.txt"
+        "python3.13 -m venv transactions-agent/$agent/venv && transactions-agent/$agent/venv/bin/pip install -r transactions-agent/$agent/requirements.txt"
 done
 
 check_venv "$ROOT/agencies-mcp-server/venv/bin/python" \
     "agencies-mcp-server" \
-    "cd agencies-mcp-server && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt"
+    "cd agencies-mcp-server && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 
 check_venv "$ROOT/savings-goals-agent/venv/bin/python" \
     "savings-goals-agent" \
-    "cd savings-goals-agent && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt"
+    "cd savings-goals-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 
 # ── Service import dry-run ────────────────────────────────────────────────────
 section "Service import check (dry run)"

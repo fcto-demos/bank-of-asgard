@@ -2,6 +2,7 @@ import json
 import logging
 from collections import defaultdict
 from datetime import datetime
+from typing import Any
 
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
@@ -41,7 +42,7 @@ def _detect_recurring(transactions: list[dict]) -> list[dict]:
         key = (tx["merchant"], round(abs(tx["amount"]), 2))
         groups[key].append(tx["date"])
 
-    recurring = []
+    recurring: list[dict[str, Any]] = []
     for (merchant, amount), dates in groups.items():
         if len(dates) < 3:
             continue

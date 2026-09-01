@@ -35,10 +35,10 @@ The following products are used in the context of this demo
 |-----------|---------------|-------------|
 | React frontend | Node.js + npm | Node 20+ |
 | Node/Express server | Node.js + npm | Node 20+ |
-| Transactions API | Python + pip | Python 3.11+ |
-| Transactions Agent (plus subagents, Langchain only) | Python + pip | Python 3.11+ |
-| Agencies MCP Server | Python + pip | Python 3.11+ |
-| Savings Goals Agent (Langchain only) | Python + pip | Python 3.11+ |
+| Transactions API | Python + pip | Python 3.13+ |
+| Transactions Agent (plus subagents, Langchain only) | Python + pip | Python 3.13+ |
+| Agencies MCP Server | Python + pip | Python 3.13+ |
+| Savings Goals Agent (Langchain only) | Python + pip | Python 3.13+ |
 | Container-based deployment *(optional)* | Docker or Podman | — |
 
 > All Node dependencies are installed via `npm install` inside `app/` and `server/`.
@@ -574,19 +574,19 @@ The `demo_scripts/` directory provides s helper scripts that manage the full sta
 
 ```bash
 # Transactions API
-cd transactions-api && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
+cd transactions-api && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
 
 # Agencies MCP server
-cd agencies-mcp-server && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
+cd agencies-mcp-server && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
 
 # Savings Goals agent
-cd savings-goals-agent && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
+cd savings-goals-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
 
 # Agents (repeat for each framework you want to run)
 cd transactions-agent
-python3.11 -m venv langchain-agent/venv && langchain-agent/venv/bin/pip install -r langchain-agent/requirements.txt
-python3.11 -m venv autogen-agent/venv   && autogen-agent/venv/bin/pip install   -r autogen-agent/requirements.txt
-python3.11 -m venv strands-agent/venv   && strands-agent/venv/bin/pip install   -r strands-agent/requirements.txt
+python3.13 -m venv langchain-agent/venv && langchain-agent/venv/bin/pip install -r langchain-agent/requirements.txt
+python3.13 -m venv autogen-agent/venv   && autogen-agent/venv/bin/pip install   -r autogen-agent/requirements.txt
+python3.13 -m venv strands-agent/venv   && strands-agent/venv/bin/pip install   -r strands-agent/requirements.txt
 cd ..
 ```
 

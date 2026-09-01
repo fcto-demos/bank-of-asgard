@@ -131,13 +131,13 @@ fi
 # ── MCP server paths ──────────────────────────────────────────────────────────
 MCP_PY="$ROOT/agencies-mcp-server/venv/bin/python"
 MCP_ENV="$ROOT/agencies-mcp-server/.env"
-[[ -f "$MCP_PY" ]]  || die "agencies-mcp-server venv not found. Run: cd agencies-mcp-server && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt"
+[[ -f "$MCP_PY" ]]  || die "agencies-mcp-server venv not found. Run: cd agencies-mcp-server && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 [[ -f "$MCP_ENV" ]] || die "agencies-mcp-server/.env not found — copy from agencies-mcp-server/.env.example"
 
 # ── Savings Goals agent paths ─────────────────────────────────────────────────
 SAVINGS_PY="$ROOT/savings-goals-agent/venv/bin/python"
 SAVINGS_ENV="$ROOT/savings-goals-agent/.env"
-[[ -f "$SAVINGS_PY" ]]  || die "savings-goals-agent venv not found. Run: cd savings-goals-agent && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt"
+[[ -f "$SAVINGS_PY" ]]  || die "savings-goals-agent venv not found. Run: cd savings-goals-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 [[ -f "$SAVINGS_ENV" ]] || die "savings-goals-agent/.env not found — copy from savings-goals-agent/.env.example"
 
 # ── Read LLM config ───────────────────────────────────────────────────────────
@@ -162,7 +162,7 @@ if [[ -n "$LLM_GATEWAY" ]]; then LLM_VIA=" via gateway"; else LLM_VIA=""; fi
 AGENT_DIR="$ROOT/transactions-agent"
 AGENT_PY="$AGENT_DIR/$AGENT/venv/bin/python"
 AMP_INSTRUMENT="$AGENT_DIR/$AGENT/venv/bin/amp-instrument"
-[[ -f "$AGENT_PY" ]] || die "venv not found for $AGENT — run: python3.11 -m venv transactions-agent/$AGENT/venv && transactions-agent/$AGENT/venv/bin/pip install -r transactions-agent/$AGENT/requirements.txt"
+[[ -f "$AGENT_PY" ]] || die "venv not found for $AGENT — run: python3.13 -m venv transactions-agent/$AGENT/venv && transactions-agent/$AGENT/venv/bin/pip install -r transactions-agent/$AGENT/requirements.txt"
 
 SAVINGS_AMP_INSTRUMENT="$ROOT/savings-goals-agent/venv/bin/amp-instrument"
 
@@ -296,7 +296,7 @@ wait_for_http() {
 section "Starting transactions-api (port $PORT_API)"
 
 TXAPI_PY="$ROOT/transactions-api/venv/bin/python"
-[[ -f "$TXAPI_PY" ]] || die "transactions-api venv not found — run: cd transactions-api && python3.11 -m venv venv && venv/bin/pip install -r requirements.txt"
+[[ -f "$TXAPI_PY" ]] || die "transactions-api venv not found — run: cd transactions-api && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 (cd "$ROOT/transactions-api" && "$TXAPI_PY" -m uvicorn app.main:app --port "$PORT_API" \
     > "$LOG_DIR/transactions-api.log" 2>&1) &
 echo "transactions-api:$!" >> "$PID_FILE"

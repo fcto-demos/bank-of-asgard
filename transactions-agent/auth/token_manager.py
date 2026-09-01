@@ -27,7 +27,7 @@ class TokenManager:
             maxsize: Maximum number of tokens to store in cache
             ttl: Time-to-live for cached tokens in seconds
         """
-        self.token_store = TTLCache(maxsize=maxsize, ttl=ttl)
+        self.token_store: TTLCache[Tuple, OAuthToken] = TTLCache(maxsize=maxsize, ttl=ttl)
 
     def add_token(self, config: AuthConfig, token: OAuthToken) -> None:
         """Add a token to the cache.

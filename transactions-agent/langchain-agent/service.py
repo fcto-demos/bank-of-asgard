@@ -184,6 +184,17 @@ _default_models = {
 }
 
 
+# Top-level auto-caching: langchain-anthropic merges `model_kwargs` into every request,
+# so setting `cache_control` here becomes Anthropic's top-level `cache_control` request
+# param, which auto-places a cache breakpoint on the last eligible content block (system
+# prompt + tool schemas + prior chat_history turns, since caching is a prefix match). Each
+# new turn's request then reuses everything cached by the previous one. Passed via
+# `model_kwargs` (not `.bind()`) so the constructed object stays a real ChatAnthropic
+# instance — create_agent() calls `.bind_tools()` on it internally, which a
+# `.bind()`-wrapped RunnableBinding doesn't reliably support.
+_ANTHROPIC_CACHE_CONTROL = {"cache_control": {"type": "ephemeral"}}
+
+
 def _build_gateway_llm(gw_base_url: str, token_manager: GatewayTokenManager):
     """Build a LangChain LLM routed via the WSO2 API Gateway at the given base URL."""
     gw_auth = GatewayBearerAuth(token_manager)
@@ -193,6 +204,7 @@ def _build_gateway_llm(gw_base_url: str, token_manager: GatewayTokenManager):
             anthropic_api_url=gw_base_url,
             anthropic_api_key="unused",
             gw_auth=gw_auth,
+            model_kwargs=_ANTHROPIC_CACHE_CONTROL,
         )
     else:
         return ChatOpenAI(
@@ -233,6 +245,7 @@ else:
             llm = ChatAnthropic(
                 model=llm_model or _default_models["anthropic"],
                 anthropic_api_key=anthropic_api_key,
+                model_kwargs=_ANTHROPIC_CACHE_CONTROL,
             )
         case 'mistral':
             llm = ChatOpenAI(
@@ -355,7 +368,7 @@ def _is_gateway_request(cause: Exception) -> bool:
 
 def _extract_gateway_error(e: Exception) -> str | None:
     """Walk the exception chain looking for known gateway HTTP errors and return a user-friendly message."""
-    cause = e
+    cause: Exception | None = e
     while cause is not None:
         if isinstance(cause, httpx.HTTPStatusError):
             status = cause.response.status_code
@@ -444,8 +457,13 @@ def _log_token_usage(new_messages: list, session_id: str) -> None:
 
     Handles both OpenAI (token_usage.prompt_tokens/completion_tokens) and
     Anthropic (usage.input_tokens/output_tokens) response_metadata shapes.
+
+    Also surfaces Anthropic's cache_read/cache_creation_input_tokens where present, so
+    prompt-caching hits (see _ANTHROPIC_CACHE_CONTROL) are visible in logs rather than
+    silently zero — a non-zero cache_read means the system prompt + tool schemas + prior
+    turns were served from cache instead of reprocessed at full price.
     """
-    total_input = total_output = calls = 0
+    total_input = total_output = total_cache_read = total_cache_write = calls = 0
     for msg in new_messages:
         if not isinstance(msg, AIMessage):
             continue
@@ -453,14 +471,20 @@ def _log_token_usage(new_messages: list, session_id: str) -> None:
         usage = meta.get("token_usage") or meta.get("usage") or {}
         inp = usage.get("input_tokens") or usage.get("prompt_tokens") or 0
         out = usage.get("output_tokens") or usage.get("completion_tokens") or 0
+        cache_read = usage.get("cache_read_input_tokens") or 0
+        cache_write = usage.get("cache_creation_input_tokens") or 0
         if inp or out:
             calls += 1
             total_input += inp
             total_output += out
+            total_cache_read += cache_read
+            total_cache_write += cache_write
     if calls:
         logger.info(
-            "[tokens] session=%s llm_calls=%d input=%d output=%d total=%d",
+            "[tokens] session=%s llm_calls=%d input=%d output=%d total=%d "
+            "cache_read=%d cache_write=%d",
             session_id, calls, total_input, total_output, total_input + total_output,
+            total_cache_read, total_cache_write,
         )
 
 

@@ -367,7 +367,7 @@ class AutogenAuthManager:
             )
 
             # Create future to await authorization completion
-            future = asyncio.Future()
+            future: asyncio.Future = asyncio.Future()
             self._pending_auths[state] = (config.scopes, config.resource, future, code_verifier)
 
             # Notify client via handler

@@ -44,8 +44,12 @@ async def call_agencies_mcp(town: str, endpoint_url: str, bearer_token: str) -> 
         town, endpoint_url, bearer_token[:12],
     )
 
-    def _httpx_factory(**kw) -> httpx.AsyncClient:
-        return httpx.AsyncClient(**{**kw, "verify": _ssl_verify})
+    def _httpx_factory(
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+    ) -> httpx.AsyncClient:
+        return httpx.AsyncClient(headers=headers, timeout=timeout, auth=auth, verify=_ssl_verify)
 
     try:
         async with sse_client(
