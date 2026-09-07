@@ -188,6 +188,14 @@ case "$SERVICE" in
             _amp_var() { grep -E "^$1=" "$AGENT_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"; }
             AMP_OTEL_ENDPOINT=$(_amp_var AMP_OTEL_ENDPOINT)
             AMP_AGENT_API_KEY=$(_amp_var AMP_AGENT_API_KEY)
+            # CA bundle for a self-signed OTLP endpoint (e.g. an OpenChoreo cluster). Python
+            # ignores the macOS Keychain, so the exporter needs an explicit PEM file.
+            AGENT_OTEL_CERT=$(_amp_var OTEL_EXPORTER_OTLP_CERTIFICATE || true)
+            AGENT_OTEL_CERT="${AGENT_OTEL_CERT/#\~/$HOME}"
+            if [[ -n "$AGENT_OTEL_CERT" ]]; then
+                [[ -f "$AGENT_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $AGENT_OTEL_CERT"
+                export OTEL_EXPORTER_OTLP_CERTIFICATE="$AGENT_OTEL_CERT"
+            fi
             (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY DEMO_VERSION; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" \
                 "$AMP_INSTRUMENT" "$UVICORN" service:app \
                 --app-dir "$AGENT" --port "$PORT_AGENT" \
@@ -238,6 +246,12 @@ case "$SERVICE" in
             _savings_amp_var() { grep -E "^$1=" "$SAVINGS_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"; }
             SAVINGS_AMP_OTEL_ENDPOINT=$(_savings_amp_var AMP_OTEL_ENDPOINT)
             SAVINGS_AMP_AGENT_API_KEY=$(_savings_amp_var AMP_AGENT_API_KEY)
+            SAVINGS_OTEL_CERT=$(_savings_amp_var OTEL_EXPORTER_OTLP_CERTIFICATE || true)
+            SAVINGS_OTEL_CERT="${SAVINGS_OTEL_CERT/#\~/$HOME}"
+            if [[ -n "$SAVINGS_OTEL_CERT" ]]; then
+                [[ -f "$SAVINGS_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $SAVINGS_OTEL_CERT"
+                export OTEL_EXPORTER_OTLP_CERTIFICATE="$SAVINGS_OTEL_CERT"
+            fi
             (export AMP_OTEL_ENDPOINT="$SAVINGS_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$SAVINGS_AMP_AGENT_API_KEY"; \
                 cd "$ROOT/savings-goals-agent" && "$SAVINGS_AMP_INSTRUMENT" "$SAVINGS_PY" server.py \
                 > "$LOG_DIR/savings.log" 2>&1) &

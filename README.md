@@ -456,6 +456,9 @@ AGENCIES_MCP_URL=http://localhost:8012/sse
 AMP_OTEL_ENDPOINT=http://localhost:22893/otel
 AMP_AGENT_API_KEY=<AMP_ASSISTANT_AGENT_API_KEY>
 
+# CA bundle for an https AMP_OTEL_ENDPOINT with a self-signed cert — see "Self-signed OTLP endpoints" below
+# OTEL_EXPORTER_OTLP_CERTIFICATE=~/.openchoreo/ca.pem
+
 
 ```
 
@@ -489,6 +492,32 @@ EXPECTED_AUDIENCE=SAVINGS_123
 # Create a different key for the main agent and this one.
 AMP_OTEL_ENDPOINT=http://localhost:22893/otel
 AMP_AGENT_API_KEY=<AMP_SAVINGS_AGENT_API_KEY>
+
+# CA bundle for an https AMP_OTEL_ENDPOINT with a self-signed cert — see "Self-signed OTLP endpoints" below
+# OTEL_EXPORTER_OTLP_CERTIFICATE=~/.openchoreo/ca.pem
+```
+
+### Self-signed OTLP endpoints
+
+When `AMP_OTEL_ENDPOINT` is an `https` URL served by a private CA — an OpenChoreo cluster such as `https://default-default.agents.local.apis.coach:19443/otel`, for example — the span exporter fails with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` and retries forever. Python's HTTP stack uses the `certifi` bundle and never reads the macOS Keychain, so adding the CA there fixes `curl` and the browser but not the agent.
+
+Export the CA to a PEM file and point `OTEL_EXPORTER_OTLP_CERTIFICATE` at it in the agent's `.env` (`transactions-agent/.env`, and `savings-goals-agent/.env` for the savings agent — each is read separately). On macOS, with the CA already trusted in the System keychain:
+
+```bash
+mkdir -p ~/.openchoreo
+security find-certificate -a -c openchoreo -p /Library/Keychains/System.keychain > ~/.openchoreo/ca.pem
+```
+
+```bash
+# in transactions-agent/.env
+OTEL_EXPORTER_OTLP_CERTIFICATE="~/.openchoreo/ca.pem"
+```
+
+The variable scopes the trust to OTLP exports only — other TLS calls (gateway, IdP) keep using the default bundle. A leading `~` is expanded by the demo scripts; both `start-demo.sh --amp` and `restart.sh` pass it through to `amp-instrument`, and both fail fast if the file is missing. Verify the bundle covers the endpoint with:
+
+```bash
+openssl s_client -connect default-default.agents.local.apis.coach:19443 </dev/null 2>/dev/null \
+  | openssl x509 > /tmp/leaf.pem && openssl verify -CAfile ~/.openchoreo/ca.pem /tmp/leaf.pem
 ```
 
 > > [!CAUTION]
