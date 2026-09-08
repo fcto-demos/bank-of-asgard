@@ -22,6 +22,7 @@ import { Box, Chip, FormControlLabel, Switch, Typography } from "@mui/material";
 import ShieldIcon from "@mui/icons-material/Shield";
 import { SITE_SECTIONS } from "../../constants/app-constants";
 import ChatComponent from "../transactions/ChatComponent";
+import ResizableChatColumn from "../transactions/ResizableChatColumn";
 import { TransactionInfoPanel } from "../../pages/transactions";
 
 const GOLD = "#997029";
@@ -87,9 +88,9 @@ const BusinessMemberContent = ({ setSiteSection, role }) => {
             </Box>
           </Box>
           <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <Box sx={{ flex: "0 0 420px", minWidth: 300 }}>
+            <ResizableChatColumn>
               <ChatComponent sessionId={sessionId} secured={secured} />
-            </Box>
+            </ResizableChatColumn>
             <TransactionInfoPanel />
           </Box>
         </div>

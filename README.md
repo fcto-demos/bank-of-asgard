@@ -26,7 +26,7 @@ The following products are used in the context of this demo
 
 - WSO2 Identity Server (on-prem or SaaS) for Agentic Identity , MCP identity and access management.
 - WSO2 AI Gateway (4.6 or 4.7 versions) for LLM governance and AI guardrails
-- WSO2 Agent Manager Beta for agent observability and governance
+- WSO2 Agent Manager for agent observability and governance
 - WSO2 Moesif for Analytics
 
 ## Tech stack
@@ -39,6 +39,7 @@ The following products are used in the context of this demo
 | Transactions Agent (plus subagents, Langchain only) | Python + pip | Python 3.13+ |
 | Agencies MCP Server | Python + pip | Python 3.13+ |
 | Savings Goals Agent (Langchain only) | Python + pip | Python 3.13+ |
+| Tax Agent  (Langchain only, optional) | Python + pip | Python 3.13+ |
 | Container-based deployment *(optional)* | Docker or Podman | — |
 
 > All Node dependencies are installed via `npm install` inside `app/` and `server/`.
@@ -52,7 +53,7 @@ The following instructions have been last tested in July 2026 on the SaaS Identi
 
 The full setup requires:
 
-1. The creation of 5 applications (Frontend / Backend / Transactions Agent / Agencies MCP Client / Savings Agent)
+1. The creation of 5 applications (Frontend / Backend / Transactions Agent / Agencies MCP Client / Savings Agent), plus an optional 6th for the Tax Agent
 2. The registration of the Transaction agent identity (credentials)
 3. The creation of custom attributes and addition of these attributes to the OpenID connect profiles.
 
@@ -65,6 +66,7 @@ Following table summarizes the apps plus credentials setup, and where this infor
 | 4    | **Asgard Assistant application** | Traditional Web Application — public client, token exchange grant | BOA-Agent       | `AGENT_APP_ID` in `transactions-agent/.env`                  |
 | 5    | **MCP Client application** | MCP client app                      | BOA-Agencies    | `MCP_CLIENT_ID` in `transactions-agent/.env`; `EXPECTED_AUDIENCE` in `agencies-mcp-server/.env` |
 | 6    | **Savings Agent ** | Traditional Web Application — Public client, client credentials grant | BOA-Savings     | `SAVINGS_AGENT_CLIENT_ID` in `transactions-agent/.env`; <br />`EXPECTED_AUDIENCE` in `savings-goals-agent/.env` |
+| 7    | **Tax Agent** *(optional)* | Traditional Web Application — Public client, client credentials grant | BOA-Tax | `TAX_AGENT_CLIENT_ID` in `transactions-agent/.env`; <br />`EXPECTED_AUDIENCE` in `tax-agent/.env` |
 
 ## Custom User Attributes
 
@@ -210,6 +212,41 @@ Note the **Client ID**, you will use it to set `APP_CLIENT_ID` in `app/public/co
 9. Under **Advanced**, enable "App Native Authentication"
 10. Copy the generated **Client ID** — You will use to set `SAVINGS_AGENT_CLIENT_ID` in `transactions-agent/.env` and `EXPECTED_AUDIENCE` in `savings-goals-agent/.env`
 
+## Tax Agent — Ministry of Finance (LangChain only, optional)
+
+Skip this section to run the demo without the tax flow; both tax tools then stay unregistered.
+
+1. Create a traditional web application, call it **BOA-Tax**.
+2. Once the app is created, enable the **Code** and **Token Exchange** grant types
+3. Select the Public Client option (secret will be removed)
+4. Add the redirect URL: `http://localhost:8011/callback`
+5. Add the allowed origin: `http://localhost:8011`
+6. Ensure token format is JWT.
+7. Under **Advanced**, enable "App Native Authentication"
+8. Copy the generated **Client ID** — You will use it to set `TAX_AGENT_CLIENT_ID` in `transactions-agent/.env` and `EXPECTED_AUDIENCE` in `tax-agent/.env`
+
+### Optional: a dedicated consent scope
+
+For the citizen to see a consent screen that names the purpose ("share your tax figures") rather than reusing the transaction-reading consent, register a `share_tax_data` scope and set `TAX_CONSENT_SCOPE=share_tax_data` in `transactions-agent/.env`:
+
+It is an **API resource** scope, not an MCP one — MCP servers are registered separately (the Agencies MCP server has no scopes at all), and OBO consent scopes come from API resources.
+
+Add it to the **existing Transactions API resource** rather than creating a new one:
+
+1. On the Transactions API resource (Console → Resources → API Resources, identifier `http://boa-transaction-api`), add the scope `share_tax_data`.
+2. On the **BOA-Agent** app, under **Authorization**, add that scope alongside `read_transactions`.
+3. Add it to the **Read_Transactions** role's permissions, so the signed-in user actually holds the right.
+
+The reason it belongs on that same resource: `SummarizeDeductibleExpenses` reads the user's transactions with this token, and `/transactions` enforces `read_transactions` whatever the consent was named. The tool therefore requests **both** scopes (`TAX_SCOPES` in `transactions-agent/app/tools.py`), and one OBO token can only carry them cleanly under one audience if both scopes live on the same API resource. Splitting `share_tax_data` onto a separate resource would mean a token spanning two audiences — avoid it unless you have time to work through how your IDP version handles that.
+
+The distinct consent prompt still appears, because the token cache is keyed on the scope set: `[read_transactions, share_tax_data]` is a different key from `[read_transactions]`, so it mints its own token and triggers its own authorisation.
+
+> [!CAUTION]
+>
+> The role's audience must match the app's audience level (Organization vs Application), or the scope is silently dropped from the OBO token and the tool fails with a missing-scope error. This is the same audience-matching requirement as elsewhere in this setup.
+
+Leaving `TAX_CONSENT_SCOPE` unset falls back to `read_transactions`: the flow works end to end, but without its own consent prompt.
+
 
 ## MCP Client
 
@@ -239,6 +276,7 @@ Note the **Client ID**, you will use it to set `APP_CLIENT_ID` in `app/public/co
 | `8011` | Asgard Assistant WebSocket (FastAPI) | `script/bank-of-asgard-agent.service` → `--port`, `transactions-agent/.env` → `IDP_REDIRECT_URI` callback path, `transactions-agent/Dockerfile` → `EXPOSE` + `CMD --port`, `docker-compose.yml` → port mapping |
 | `8012` | Agencies MCP Server (FastMCP SSE)    | `agencies-mcp-server/server.py` → port constant, `docker-compose.yml` → port mapping |
 | `8013` | Savings Goals Agent (FastAPI)        | `savings-goals-agent/server.py` → port constant              |
+| `8014` | Tax Agent — Ministry of Finance (FastAPI) | `tax-agent/server.py` → port constant, `transactions-agent/.env` → `TAX_AGENT_URL` |
 
 When changing a port, also update:
 
@@ -255,14 +293,22 @@ When changing a port, also update:
 | `TRANSACTIONS_AGENT_ID` + `TRANSACTIONS_AGENT_SECRET` | Asgardeo / IS (agent principal) | OBO token exchange (Flow 1) — credentials in native auth step | Transactions API    | AGENTID_123 / AGENTSECRET_123       |
 | `MCP_CLIENT_ID`                                       | Asgardeo / IS (public app)      | MCP bearer token (Flow 3)                                    | Agencies MCP Server | MCP_123                             |
 | `SAVINGS_AGENT_CLIENT_ID`                             | Asgardeo / IS (public app)      | Savings Goals agent bearer token (client-credentials)        | Savings Goals Agent | SAVINGS_123                         |
+| `TAX_AGENT_CLIENT_ID`                                 | Asgardeo / IS (public app)      | Tax agent bearer token (client-credentials)                  | Tax Agent           | TAX_123                             |
 | `GATEWAY_CLIENT_ID` + `GATEWAY_CLIENT_SECRET`         | WSO2 AI Gateway                 | LLM API access via gateway (Flow 4 only)                     | WSO2 AI Gateway     | GW_CLIENTID / GWCLIENT_SECRET       |
 | `APP_CLIENT_ID`                                       | Asgardeo / IS                   | Credential for FrontEnd App                                  | IS                  | APP_123                             |
 | `SERVER APP ID` + `SECRET`                            | Asgardeo / IS                   | Credentials for Backend App                                  | IS                  | SERVERID_123 SERVERSEC_123          |
 
 > `EXPECTED_AUDIENCE` in `agencies-mcp-server/.env` must equal `MCP_CLIENT_ID` — Asgardeo / IS puts the requesting application's client ID in the `aud` claim.
 > `EXPECTED_AUDIENCE` in `savings-goals-agent/.env` must equal `SAVINGS_AGENT_CLIENT_ID` for the same reason.
+> `EXPECTED_AUDIENCE` in `tax-agent/.env` must equal `TAX_AGENT_CLIENT_ID`, likewise.
 
 ## Frontend
+
+### Assistant panel width
+
+The Asgard Assistant column is resizable — drag the handle on its right edge, double-click that handle to reset, or focus it and use the arrow keys (`Home` resets). It starts at 560px and clamps between 320px and 1000px.
+
+The chosen width is remembered per browser via `localStorage`, so it survives reloads and navigation mid-demo. It is not shared between machines or browsers, and a browser blocking site data simply falls back to the default. The handle is hidden below the `md` breakpoint, where the columns stack. This applies everywhere the assistant appears: the transactions, personal banking and business profile pages, and the business member view.
 
 1. Create a copy of `app/public/config.example.js` inside the `app/public/` folder and name it `config.js`. 
 
@@ -417,6 +463,17 @@ TRANSACTIONS_AGENT_SECRET="AGENTSECRET_123"
 SAVINGS_AGENT_CLIENT_ID="SAVINGS_123"
 SAVINGS_AGENT_URL="http://localhost:8013/suggest-goal"
 
+# Ministry of Finance Tax Agent — a cross-organisation call. Unset TAX_AGENT_CLIENT_ID
+# to drop both tax tools from the assistant.
+# EXPECTED_AUDIENCE in tax-agent/.env must equal this value
+TAX_AGENT_CLIENT_ID="TAX_123"
+TAX_AGENT_URL="http://localhost:8014/prepare-return"
+# Dedicated consent scope for sharing deduction totals with the ministry. Provision it
+# on the AGENT_APP_ID app to get a distinct consent screen; unset falls back to
+# read_transactions (flow still works, without its own prompt).
+# TAX_CONSENT_SCOPE=share_tax_data
+# TAX_YEAR=2026
+
 # Transactions API URL
 TRANSACTIONS_API_BASE_URL="http://localhost:8010"
 
@@ -501,19 +558,24 @@ AMP_AGENT_API_KEY=<AMP_SAVINGS_AGENT_API_KEY>
 
 When `AMP_OTEL_ENDPOINT` is an `https` URL served by a private CA — an OpenChoreo cluster such as `https://default-default.agents.local.apis.coach:19443/otel`, for example — the span exporter fails with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` and retries forever. Python's HTTP stack uses the `certifi` bundle and never reads the macOS Keychain, so adding the CA there fixes `curl` and the browser but not the agent.
 
-Export the CA to a PEM file and point `OTEL_EXPORTER_OTLP_CERTIFICATE` at it in the agent's `.env` (`transactions-agent/.env`, and `savings-goals-agent/.env` for the savings agent — each is read separately). On macOS, with the CA already trusted in the System keychain:
+Export the CA to a PEM file and point `OTEL_EXPORTER_OTLP_CERTIFICATE` at it in that agent's `.env` (each service reads its own — `transactions-agent/.env`, `savings-goals-agent/.env`, `tax-agent/.env`).
+
+Build the bundle as **certifi's roots plus the private CA**, not the private CA alone. `OTEL_EXPORTER_OTLP_CERTIFICATE` *replaces* the trust store rather than adding to it, so a bundle holding only the OpenChoreo CA breaks any agent whose endpoint is a public host — for example a service still pointed at `https://opentelemetry.obs.dp.cloud.wso2.com/v1/traces`, which then fails with the same `CERTIFICATE_VERIFY_FAILED`. A combined bundle works for both. On macOS, with the CA already trusted in the System keychain:
 
 ```bash
 mkdir -p ~/.openchoreo
-security find-certificate -a -c openchoreo -p /Library/Keychains/System.keychain > ~/.openchoreo/ca.pem
+cat "$(tax-agent/venv/bin/python -c 'import certifi; print(certifi.where())')" > ~/.openchoreo/ca.pem
+security find-certificate -a -c openchoreo -p /Library/Keychains/System.keychain >> ~/.openchoreo/ca.pem
 ```
+
+(any service venv will do for the `certifi` path — they all ship it)
 
 ```bash
 # in transactions-agent/.env
 OTEL_EXPORTER_OTLP_CERTIFICATE="~/.openchoreo/ca.pem"
 ```
 
-The variable scopes the trust to OTLP exports only — other TLS calls (gateway, IdP) keep using the default bundle. A leading `~` is expanded by the demo scripts; both `start-demo.sh --amp` and `restart.sh` pass it through to `amp-instrument`, and both fail fast if the file is missing. Verify the bundle covers the endpoint with:
+The variable scopes the trust to OTLP exports only — other TLS calls (gateway, IdP) keep using the default bundle. A leading `~` is expanded by the demo scripts; both `start-demo.sh --amp` and `restart.sh` pass it through to `amp-instrument`, and both fail fast if the file is missing. Each service's cert is exported **inside its own launch subshell**, so one service's bundle can never leak into another's environment. Verify the bundle covers the endpoint with:
 
 ```bash
 openssl s_client -connect default-default.agents.local.apis.coach:19443 </dev/null 2>/dev/null \
@@ -523,6 +585,42 @@ openssl s_client -connect default-default.agents.local.apis.coach:19443 </dev/nu
 > > [!CAUTION]
 > >
 > > `EXPECTED_AUDIENCE` here must equal `SAVINGS_AGENT_CLIENT_ID` in `transactions-agent/.env` — same audience-matching requirement as the Agencies MCP Server.
+
+### Tax Agent (Ministry of Finance)
+
+An optional agent that models a **different organisation**: the assistant belongs to the bank, this one belongs to the tax authority. It is skipped by `start-demo.sh` when its venv or `.env` is missing, so the rest of the demo runs unchanged without it.
+
+What it demonstrates, in the order it happens:
+
+1. **Purpose-bound consent.** `SummarizeDeductibleExpenses` runs under the citizen's own OBO token, requesting `TAX_CONSENT_SCOPE`. Provision a dedicated scope (e.g. `share_tax_data`) on the `AGENT_APP_ID` app and the citizen gets a distinct consent screen naming the purpose, separate from the transaction-reading consent they already gave.
+2. **Data minimisation.** Classification into relief categories happens *inside the bank* (`transactions-agent/app/tax.py`). Only per-category totals and gross income leave — no transactions, merchants, dates or references. The tool reports how many transactions were examined to produce the totals, so the contrast is visible on screen.
+3. **Cross-organisation delegation.** `PrepareTaxReturn` calls the ministry with a token audienced for `TAX_AGENT_CLIENT_ID`, which `tax-agent/server.py` validates against the IDP's JWKS — the ministry can prove which agent called it, and on whose behalf (`user_sub`).
+4. **Reproducible arithmetic.** Every figure comes from `tax-agent/tax_rules.py` (published brackets, per-category rates and caps). The LLM only writes the explanation, and is instructed never to recompute or adjust a number. The figures are held in session state rather than passed through the model's arguments, so it cannot restate or round them.
+
+Create `.env` from `.env.example`:
+
+```YAML
+IDP_BASE_URL=https://api.asgardeo.io/t/<ORG_NAME>
+# Must equal TAX_AGENT_CLIENT_ID in transactions-agent/.env.
+EXPECTED_AUDIENCE=TAX_123
+# SSL_VERIFY=false   # only for self-signed certs in local dev
+
+# Gateway credentials — same pattern as the Savings Goals Agent (always the v1/unsecured
+# endpoint: this service never sees raw user chat input, only structured aggregates).
+# GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
+# GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
+# GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
+# GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
+
+# Its own entry in Agent Manager — a third distinct key.
+AMP_OTEL_ENDPOINT=http://localhost:22893/otel
+AMP_AGENT_API_KEY=<AMP_TAX_AGENT_API_KEY>
+```
+
+The relief categories in `tax-agent/tax_rules.py` (`RELIEF_RULES`) and the bank-side mapping in `transactions-agent/app/tax.py` (`CATEGORY_TO_RELIEF`) must stay in step — the ministry grants relief only for rules it publishes, and silently ignores any category it does not recognise.
+
+> [!NOTE]
+> Deductions are computed from generated demo transactions, so the totals depend on the seeded data for the signed-in user. With a full year of data a typical run yields a few thousand in deductions on ~50k of income.
 
 ## LLM Configuration
 
@@ -593,7 +691,7 @@ When `MCP_GATEWAY_ENABLED` is unset or `false`, the agent connects directly to `
 
 ### Demo scripts (recommended for local development)
 
-The `demo_scripts/` directory provides s helper scripts that manage the full stack — transactions-api, agencies-mcp-server, savings-goals-agent, selected agent, Express server, and frontend — as native processes with health-checked startup, clean teardown, and single-service restart.
+The `demo_scripts/` directory provides s helper scripts that manage the full stack — transactions-api, agencies-mcp-server, savings-goals-agent, tax-agent, selected agent, Express server, and frontend — as native processes with health-checked startup, clean teardown, and single-service restart.
 
 > [!NOTE]
 >
@@ -611,6 +709,9 @@ cd agencies-mcp-server && python3.13 -m venv venv && venv/bin/pip install -r req
 # Savings Goals agent
 cd savings-goals-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
 
+# Tax agent (Ministry of Finance) — optional; skipped by start-demo.sh if absent
+cd tax-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
+
 # Agents (repeat for each framework you want to run)
 cd transactions-agent
 python3.13 -m venv langchain-agent/venv && langchain-agent/venv/bin/pip install -r langchain-agent/requirements.txt
@@ -624,7 +725,7 @@ cd ..
 | `demo_scripts/validate.sh` | Pre-flight check — verifies versions, config files, venvs, imports, and port availability - Only runs as part of `start-demo.sh`. |
 | `demo_scripts/start-demo.sh [langchain\|autogen\|strands] [--env=is\|asgardeo] [--amp] [--v1\|--v2]` | Starts the full stack in order; polls each health endpoint before moving on; prompts for agent flavor and agent manager instructions if not specified. <br />Omit `--env` to keep existing `.env` files; pass a profile to back up and switch `.env` files **Note:** When you specify the  `--env` option, files with this environment name are expected to be present (`.env.is` or `.env.asgardeo`). Same is true of the `config.js` files. If a `.env`or `config.js` is already present in the target directory, it will backed up and then overriden. <br />`--v1`/`--v2` is a demo-only toggle (default `v1`) for showing tracing/eval tooling catch a regression: `v2` deliberately bloats the system prompt and over-fetches `GetMyTransactions`, increasing tokens and latency so the difference shows up clearly in traces. |
 | `demo_scripts/stop-demo.sh` | Gracefully stops everything started by `start-demo.sh` |
-| `demo_scripts/restart.sh <service>` | Stops and restarts a single service (`transactions-api`, `agent`, `mcp`, `savings`, `server`, `frontend`) |
+| `demo_scripts/restart.sh <service>` | Stops and restarts a single service (`transactions-api`, `agent`, `mcp`, `savings`, `tax`, `server`, `frontend`) |
 
 ```bash
 # Verify everything is configured correctly

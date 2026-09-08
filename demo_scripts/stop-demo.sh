@@ -13,6 +13,7 @@ PORT_API=8010
 PORT_AGENT=8011
 PORT_MCP=8012
 PORT_SAVINGS=8013
+PORT_TAX=8014
 
 QUIET=false
 [[ "${1:-}" == "--quiet" ]] && QUIET=true
@@ -57,7 +58,7 @@ done < "$PID_FILE"
 rm -f "$PID_FILE" "$ROOT/.demo.context"
 
 # ── Port sweep — catch any orphaned children the PID kill missed ──────────────
-for port in $PORT_API $PORT_AGENT $PORT_MCP $PORT_SAVINGS $PORT_SERVER $PORT_FRONTEND; do
+for port in $PORT_API $PORT_AGENT $PORT_MCP $PORT_SAVINGS $PORT_TAX $PORT_SERVER $PORT_FRONTEND; do
     pid=$(lsof -ti ":$port" 2>/dev/null || true)
     if [[ -n "$pid" ]]; then
         kill -KILL $pid 2>/dev/null || true

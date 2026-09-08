@@ -53,14 +53,38 @@ UPDATE_PROFILE_AUTH_CONFIG = AuthConfig(
 # message (see auth_completion_message).
 READ_TRANSACTIONS_SCOPE = "read_transactions"
 
+# Scope the citizen consents to before their deduction totals are classified for sharing
+# with the Ministry of Finance. A dedicated scope (e.g. share_tax_data) produces its own
+# purpose-named consent screen; it must exist on the AGENT_APP_ID app in the IDP. Where it
+# has not been provisioned, the default falls back to the already-consented transactions
+# scope, so the flow still runs — just without a distinct prompt.
+TAX_CONSENT_SCOPE = os.environ.get("TAX_CONSENT_SCOPE", READ_TRANSACTIONS_SCOPE)
+
+# The tax summariser reads the user's transactions with this token, so it needs
+# read_transactions as well — /transactions enforces that scope regardless of what the
+# consent was named (see transactions-api/app/main.py). Both scopes must therefore live on
+# the SAME API resource in the IDP, so one OBO token can carry them under one audience.
+# Requesting the pair also gives the flow its own token-cache key (the cache is keyed on
+# the scope set), which is what makes the dedicated consent prompt appear at all.
+TAX_SCOPES = (
+    [READ_TRANSACTIONS_SCOPE]
+    if TAX_CONSENT_SCOPE == READ_TRANSACTIONS_SCOPE
+    else [READ_TRANSACTIONS_SCOPE, TAX_CONSENT_SCOPE]
+)
+
 
 def auth_completion_message(scopes: List[str]) -> str:
     """Pick the "authorisation complete" status message for an OBO callback.
 
-    GetMyTransactions and the profile tools trigger separate consent prompts, so
-    after the user returns from the IDP we key off the scopes they authorised to
-    show a message that matches the action actually being performed.
+    GetMyTransactions, the profile tools and the tax flow trigger separate consent
+    prompts, so after the user returns from the IDP we key off the scopes they
+    authorised to show a message that matches the action actually being performed.
     """
+    # Checked before read_transactions: when TAX_CONSENT_SCOPE has its own value this is
+    # the more specific match, and when it falls back the transactions branch below is
+    # already the right message.
+    if TAX_CONSENT_SCOPE != READ_TRANSACTIONS_SCOPE and TAX_CONSENT_SCOPE in scopes:
+        return "Authorisation complete! Preparing your tax figures now..."
     if READ_TRANSACTIONS_SCOPE in scopes:
         return "Authorisation complete! Fetching your transactions now..."
     return "Authorisation complete! Fetching your profile now..."

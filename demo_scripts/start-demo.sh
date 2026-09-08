@@ -17,6 +17,7 @@ PORT_API=8010
 PORT_AGENT=8011
 PORT_MCP=8012
 PORT_SAVINGS=8013
+PORT_TAX=8014
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -140,6 +141,20 @@ SAVINGS_ENV="$ROOT/savings-goals-agent/.env"
 [[ -f "$SAVINGS_PY" ]]  || die "savings-goals-agent venv not found. Run: cd savings-goals-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 [[ -f "$SAVINGS_ENV" ]] || die "savings-goals-agent/.env not found — copy from savings-goals-agent/.env.example"
 
+# ── Tax agent paths (Ministry of Finance) ─────────────────────────────────────
+# Optional, unlike the savings agent: when its venv or .env is absent the rest of the
+# demo still starts, minus the two tax tools.
+TAX_PY="$ROOT/tax-agent/venv/bin/python"
+TAX_ENV="$ROOT/tax-agent/.env"
+TAX_ENABLED=true
+if [[ ! -f "$TAX_PY" ]]; then
+    TAX_ENABLED=false
+    warn "tax-agent venv not found — skipping. Run: cd tax-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
+elif [[ ! -f "$TAX_ENV" ]]; then
+    TAX_ENABLED=false
+    warn "tax-agent/.env not found — skipping. Copy from tax-agent/.env.example"
+fi
+
 # ── Read LLM config ───────────────────────────────────────────────────────────
 LLM_CONFIG="$ROOT/llm_config.yaml"
 LLM_PROVIDER=$(grep -E '^provider:' "$LLM_CONFIG" 2>/dev/null | sed 's/provider:[[:space:]]*//' | tr -d '[:space:]' || true)
@@ -165,6 +180,7 @@ AMP_INSTRUMENT="$AGENT_DIR/$AGENT/venv/bin/amp-instrument"
 [[ -f "$AGENT_PY" ]] || die "venv not found for $AGENT — run: python3.13 -m venv transactions-agent/$AGENT/venv && transactions-agent/$AGENT/venv/bin/pip install -r transactions-agent/$AGENT/requirements.txt"
 
 SAVINGS_AMP_INSTRUMENT="$ROOT/savings-goals-agent/venv/bin/amp-instrument"
+TAX_AMP_INSTRUMENT="$ROOT/tax-agent/venv/bin/amp-instrument"
 
 if $USE_AMP; then
     [[ -f "$AMP_INSTRUMENT" ]] || die "amp-instrument not found in $AGENT venv. Install via: $AGENT_DIR/$AGENT/venv/bin/pip install amp-instrumentation"
@@ -321,9 +337,13 @@ if $USE_AMP; then
     AGENT_OTEL_CERT="${AGENT_OTEL_CERT/#\~/$HOME}"
     if [[ -n "$AGENT_OTEL_CERT" ]]; then
         [[ -f "$AGENT_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $AGENT_OTEL_CERT"
-        export OTEL_EXPORTER_OTLP_CERTIFICATE="$AGENT_OTEL_CERT"
     fi
-    (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY DEMO_VERSION; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
+    # Exported INSIDE the subshell: each service reads its own .env, and a cert exported
+    # in the parent shell would leak into every service launched after it — pointing a
+    # service at a CA bundle chosen for a different service's endpoint.
+    (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY DEMO_VERSION
+     if [[ -n "$AGENT_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$AGENT_OTEL_CERT"; fi
+     cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
         --app-dir "$AGENT" --port "$PORT_AGENT" \
         > "$LOG_DIR/agent.log" 2>&1) &
 else
@@ -360,10 +380,10 @@ if $USE_AMP; then
     SAVINGS_OTEL_CERT="${SAVINGS_OTEL_CERT/#\~/$HOME}"
     if [[ -n "$SAVINGS_OTEL_CERT" ]]; then
         [[ -f "$SAVINGS_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $SAVINGS_OTEL_CERT"
-        export OTEL_EXPORTER_OTLP_CERTIFICATE="$SAVINGS_OTEL_CERT"
     fi
-    (export AMP_OTEL_ENDPOINT="$SAVINGS_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$SAVINGS_AMP_AGENT_API_KEY"; \
-        cd "$ROOT/savings-goals-agent" && "$SAVINGS_AMP_INSTRUMENT" "$SAVINGS_PY" server.py \
+    (export AMP_OTEL_ENDPOINT="$SAVINGS_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$SAVINGS_AMP_AGENT_API_KEY"
+     if [[ -n "$SAVINGS_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$SAVINGS_OTEL_CERT"; fi
+     cd "$ROOT/savings-goals-agent" && "$SAVINGS_AMP_INSTRUMENT" "$SAVINGS_PY" server.py \
         > "$LOG_DIR/savings.log" 2>&1) &
 else
     (set +u; set -a; source "$SAVINGS_ENV"; set +a; set -u; cd "$ROOT/savings-goals-agent" && "$SAVINGS_PY" server.py \
@@ -372,6 +392,33 @@ fi
 echo "savings:$!" >> "$PID_FILE"
 
 wait_for_port $PORT_SAVINGS "savings-goals-agent"
+
+# ── Start tax-agent (Ministry of Finance) ─────────────────────────────────────
+if $TAX_ENABLED; then
+    section "Starting tax-agent (port $PORT_TAX)"
+
+    if $USE_AMP && [[ -f "$TAX_AMP_INSTRUMENT" ]]; then
+        # Own entry in Agent Manager again — third distinct AMP_AGENT_API_KEY.
+        _tax_amp_var() { grep -E "^$1=" "$TAX_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"; }
+        TAX_AMP_OTEL_ENDPOINT=$(_tax_amp_var AMP_OTEL_ENDPOINT)
+        TAX_AMP_AGENT_API_KEY=$(_tax_amp_var AMP_AGENT_API_KEY)
+        TAX_OTEL_CERT=$(_tax_amp_var OTEL_EXPORTER_OTLP_CERTIFICATE || true)
+        TAX_OTEL_CERT="${TAX_OTEL_CERT/#\~/$HOME}"
+        if [[ -n "$TAX_OTEL_CERT" ]]; then
+            [[ -f "$TAX_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $TAX_OTEL_CERT"
+        fi
+        (export AMP_OTEL_ENDPOINT="$TAX_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$TAX_AMP_AGENT_API_KEY"
+         if [[ -n "$TAX_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$TAX_OTEL_CERT"; fi
+         cd "$ROOT/tax-agent" && "$TAX_AMP_INSTRUMENT" "$TAX_PY" server.py \
+            > "$LOG_DIR/tax.log" 2>&1) &
+    else
+        (set +u; set -a; source "$TAX_ENV"; set +a; set -u; cd "$ROOT/tax-agent" && "$TAX_PY" server.py \
+            > "$LOG_DIR/tax.log" 2>&1) &
+    fi
+    echo "tax:$!" >> "$PID_FILE"
+
+    wait_for_port $PORT_TAX "tax-agent"
+fi
 
 # ── Start server (Express) ────────────────────────────────────────────────────
 section "Starting server (port $PORT_SERVER)"
@@ -420,6 +467,7 @@ echo -e "  ${BOLD}Transactions API${NC}     http://localhost:$PORT_API"
 echo -e "  ${BOLD}Agent ($AGENT_ARG)${NC}           ws://localhost:$PORT_AGENT"
 echo -e "  ${BOLD}Agencies MCP${NC}         sse://localhost:$PORT_MCP"
 echo -e "  ${BOLD}Savings Goals agent${NC} http://localhost:$PORT_SAVINGS"
+$TAX_ENABLED && echo -e "  ${BOLD}Tax agent (Ministry)${NC} http://localhost:$PORT_TAX" || true
 echo -e "  ${BOLD}LLM${NC}                  $LLM_PROVIDER / $LLM_MODEL${LLM_VIA}"
 echo -e "  ${BOLD}IDP environment${NC}      ${ENV_PROFILE:-existing}"
 [[ "$AGENT" == "strands-agent" ]] && echo -e "  ${BOLD}AWS branding${NC}         enabled" || echo -e "  ${BOLD}AWS branding${NC}         disabled"
@@ -431,6 +479,7 @@ echo -e "    ${BLUE}$LOG_DIR/transactions-api.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/agent.log${NC}          ($AGENT_ARG)"
 echo -e "    ${BLUE}$LOG_DIR/mcp.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/savings.log${NC}"
+$TAX_ENABLED && echo -e "    ${BLUE}$LOG_DIR/tax.log${NC}" || true
 echo -e "    ${BLUE}$LOG_DIR/server.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/frontend.log${NC}"
 echo -e "  To stop: ${BLUE}./demo_scripts/stop-demo.sh${NC}"

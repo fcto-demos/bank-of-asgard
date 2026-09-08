@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # restart.sh — stop and restart a single Bank of Asgard service
 # Usage: ./demo_scripts/restart.sh <service>
-# Services: transactions-api | agent | mcp | savings | server | frontend
+# Services: transactions-api | agent | mcp | savings | tax | server | frontend
 
 set -euo pipefail
 
@@ -15,6 +15,7 @@ PORT_API=8010
 PORT_AGENT=8011
 PORT_MCP=8012
 PORT_SAVINGS=8013
+PORT_TAX=8014
 PORT_SERVER=3002
 PORT_FRONTEND=5173
 
@@ -32,7 +33,7 @@ show_help() {
     echo ""
     echo -e "${BOLD}Usage:${NC} ./demo_scripts/restart.sh <service>"
     echo ""
-    echo -e "  ${BOLD}service${NC}   transactions-api | agent | mcp | savings | server | frontend"
+    echo -e "  ${BOLD}service${NC}   transactions-api | agent | mcp | savings | tax | server | frontend"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
     echo "  ./demo_scripts/restart.sh agent"
@@ -194,9 +195,10 @@ case "$SERVICE" in
             AGENT_OTEL_CERT="${AGENT_OTEL_CERT/#\~/$HOME}"
             if [[ -n "$AGENT_OTEL_CERT" ]]; then
                 [[ -f "$AGENT_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $AGENT_OTEL_CERT"
-                export OTEL_EXPORTER_OTLP_CERTIFICATE="$AGENT_OTEL_CERT"
             fi
-            (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY DEMO_VERSION; cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" \
+            (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY DEMO_VERSION
+             if [[ -n "$AGENT_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$AGENT_OTEL_CERT"; fi
+             cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" \
                 "$AMP_INSTRUMENT" "$UVICORN" service:app \
                 --app-dir "$AGENT" --port "$PORT_AGENT" \
                 > "$LOG_DIR/agent.log" 2>&1) &
@@ -250,10 +252,10 @@ case "$SERVICE" in
             SAVINGS_OTEL_CERT="${SAVINGS_OTEL_CERT/#\~/$HOME}"
             if [[ -n "$SAVINGS_OTEL_CERT" ]]; then
                 [[ -f "$SAVINGS_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $SAVINGS_OTEL_CERT"
-                export OTEL_EXPORTER_OTLP_CERTIFICATE="$SAVINGS_OTEL_CERT"
             fi
-            (export AMP_OTEL_ENDPOINT="$SAVINGS_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$SAVINGS_AMP_AGENT_API_KEY"; \
-                cd "$ROOT/savings-goals-agent" && "$SAVINGS_AMP_INSTRUMENT" "$SAVINGS_PY" server.py \
+            (export AMP_OTEL_ENDPOINT="$SAVINGS_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$SAVINGS_AMP_AGENT_API_KEY"
+             if [[ -n "$SAVINGS_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$SAVINGS_OTEL_CERT"; fi
+             cd "$ROOT/savings-goals-agent" && "$SAVINGS_AMP_INSTRUMENT" "$SAVINGS_PY" server.py \
                 > "$LOG_DIR/savings.log" 2>&1) &
         else
             (set +u; set -a; source "$SAVINGS_ENV"; set +a; set -u; cd "$ROOT/savings-goals-agent" && "$SAVINGS_PY" server.py \
@@ -263,6 +265,42 @@ case "$SERVICE" in
         check_launched "$!" "savings-goals-agent"
         wait_for_port $PORT_SAVINGS "savings-goals-agent"
         LOG_FILE="$LOG_DIR/savings.log"
+        ;;
+
+    tax)
+        # Ministry of Finance tax agent — its own entry in Agent Manager again, so its
+        # own AMP_OTEL_ENDPOINT/AMP_AGENT_API_KEY from its own .env.
+        USE_AMP="${USE_AMP:-false}"
+        section "Restarting tax-agent (port $PORT_TAX)"
+        stop_service "tax"
+        free_port $PORT_TAX
+        TAX_PY="$ROOT/tax-agent/venv/bin/python"
+        TAX_ENV="$ROOT/tax-agent/.env"
+        TAX_AMP_INSTRUMENT="$ROOT/tax-agent/venv/bin/amp-instrument"
+        [[ -f "$TAX_PY" ]]  || die "tax-agent venv not found"
+        [[ -f "$TAX_ENV" ]] || die "tax-agent/.env not found"
+        if [[ "$USE_AMP" == "true" ]]; then
+            [[ -f "$TAX_AMP_INSTRUMENT" ]] || die "amp-instrument not found in tax-agent venv"
+            _tax_amp_var() { grep -E "^$1=" "$TAX_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"; }
+            TAX_AMP_OTEL_ENDPOINT=$(_tax_amp_var AMP_OTEL_ENDPOINT)
+            TAX_AMP_AGENT_API_KEY=$(_tax_amp_var AMP_AGENT_API_KEY)
+            TAX_OTEL_CERT=$(_tax_amp_var OTEL_EXPORTER_OTLP_CERTIFICATE || true)
+            TAX_OTEL_CERT="${TAX_OTEL_CERT/#\~/$HOME}"
+            if [[ -n "$TAX_OTEL_CERT" ]]; then
+                [[ -f "$TAX_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $TAX_OTEL_CERT"
+            fi
+            (export AMP_OTEL_ENDPOINT="$TAX_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$TAX_AMP_AGENT_API_KEY"
+             if [[ -n "$TAX_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$TAX_OTEL_CERT"; fi
+             cd "$ROOT/tax-agent" && "$TAX_AMP_INSTRUMENT" "$TAX_PY" server.py \
+                > "$LOG_DIR/tax.log" 2>&1) &
+        else
+            (set +u; set -a; source "$TAX_ENV"; set +a; set -u; cd "$ROOT/tax-agent" && "$TAX_PY" server.py \
+                > "$LOG_DIR/tax.log" 2>&1) &
+        fi
+        register_pid "tax" "$!"
+        check_launched "$!" "tax-agent"
+        wait_for_port $PORT_TAX "tax-agent"
+        LOG_FILE="$LOG_DIR/tax.log"
         ;;
 
     server)

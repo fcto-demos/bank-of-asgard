@@ -17,6 +17,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import ShieldIcon from "@mui/icons-material/Shield";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ChatComponent from "../components/transactions/ChatComponent";
+import ResizableChatColumn from "../components/transactions/ResizableChatColumn";
 import { environmentConfig } from "../util/environment-util";
 import { ROUTES } from "../constants/app-constants";
 
@@ -165,14 +166,14 @@ const TransactionsPage = () => {
           }}
         >
           {/* Left column — AI chat */}
-          <Box sx={{ flex: "0 0 420px", minWidth: 300 }}>
+          <ResizableChatColumn>
             <ChatComponent
               sessionId={sessionId}
               secured={secured}
               title="Asgard Assistant"
               placeholder="Ask about your transactions..."
             />
-          </Box>
+          </ResizableChatColumn>
 
           {/* Right column — Info panel */}
           <Box sx={{ flex: 1, minWidth: 260 }}>
@@ -203,6 +204,8 @@ const TransactionsPage = () => {
                   "Can you do a financial check-up for me?",
                   "Am I paying for any forgotten subscriptions?",
                   "Help me find money I could be saving",
+                  "Help me prepare my tax return",
+                  "Which of my expenses are tax deductible?",
                 ].map((example) => (
                   <Box
                     key={example}
