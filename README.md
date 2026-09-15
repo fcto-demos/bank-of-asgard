@@ -639,6 +639,20 @@ provider: openai
 | `bedrock`   | `eu.anthropic.claude-sonnet-4-6-20250514-v1:0` | strands agent only            |
 | `mistral`   | `mistral-small-latest`                         | Must be OpenAI-compatible API |
 
+### Config file location
+
+Every LLM-using service searches for `llm_config.yaml` in three places, in order: its own directory (the Docker mount point), the repo root (native development), then `/etc/config/llm_config.yaml` (the conventional mount point on hosts that project config files into a fixed directory).
+
+To read it from anywhere else, set `LLM_CONFIG_PATH` in that service's `.env`:
+
+```bash
+LLM_CONFIG_PATH=/etc/config/llm_config.yaml
+```
+
+It may point at the file itself or at a directory containing `llm_config.yaml`, and `~` is expanded. It replaces the search entirely: if the path doesn't exist the service fails to start rather than falling back to the `openai`/`gpt-4o-mini` default, since that default would silently bypass the gateway. Each service logs the resolved path at startup.
+
+Supported by all five services — `transactions-agent/{langchain,autogen,strands}-agent/service.py`, `savings-goals-agent/server.py`, and `tax-agent/server.py` — each reading its own `.env`.
+
 # Using WSO2 AI Gateway (recommended )
 
 ### LLM APIs

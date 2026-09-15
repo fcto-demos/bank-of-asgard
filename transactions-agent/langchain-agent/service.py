@@ -159,14 +159,37 @@ agent_config = AgentConfig(
 def _load_llm_config() -> dict:
     """Load LLM config from llm_config.yaml.
 
-    Searches: /app/ (Docker mount), then project root (native development).
+    LLM_CONFIG_PATH overrides the search entirely — point it at a mounted file (a
+    directory is also accepted, and llm_config.yaml is read from inside it). An explicit
+    path that doesn't exist is a deployment error, not a reason to guess: falling back to
+    the openai/gpt-4o-mini default would silently bypass the gateway, so raise instead.
+
+    With no override, searches: /app/ (Docker mount), project root (native development),
+    then /etc/config (the conventional mount point on hosts that project config files
+    into it).
     """
+    override = os.environ.get("LLM_CONFIG_PATH")
+    if override:
+        path = Path(override).expanduser()
+        if path.is_dir():
+            path = path / "llm_config.yaml"
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"LLM_CONFIG_PATH is set to {override!r} but no config file was found "
+                f"at {path} — refusing to fall back to defaults."
+            )
+        logger.info("Loading LLM config from %s (LLM_CONFIG_PATH)", path)
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+
     candidates = [
         Path(__file__).parent / "llm_config.yaml",               # Docker: /app/llm_config.yaml
         Path(__file__).parent.parent.parent / "llm_config.yaml",  # native: repo root
+        Path("/etc/config/llm_config.yaml"),                      # mounted config dir
     ]
     for path in candidates:
-        if path.exists():
+        if path.is_file():
+            logger.info("Loading LLM config from %s", path)
             with open(path) as f:
                 return yaml.safe_load(f) or {}
     logger.warning("llm_config.yaml not found — falling back to openai/gpt-4o-mini")
