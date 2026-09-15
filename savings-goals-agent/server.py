@@ -149,13 +149,18 @@ def _validate_token(token: str) -> None:
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """Validates the Authorization header on every request. No SSE/streaming responses
-    on this service, so BaseHTTPMiddleware (unlike the agencies MCP server) is fine here."""
+    """Validates the Authorization header on every request except /health. No
+    SSE/streaming responses on this service, so BaseHTTPMiddleware (unlike the agencies
+    MCP server) is fine here."""
 
     async def dispatch(self, request: Request, call_next):
         # Set from the header (not the body — the body isn't parsed yet at this point)
         # so _validate_token's audit event is tagged with the right transaction_id too.
         set_transaction(request.headers.get("x-transaction-id"))
+        # Liveness probes (start-demo.sh, container healthchecks) have no token to present
+        # and the response exposes nothing — same exemption as tax-agent/server.py.
+        if request.url.path == "/health":
+            return await call_next(request)
         auth = request.headers.get("authorization", "")
         if not auth.startswith("Bearer "):
             logger.warning("Request rejected — missing or invalid Authorization header")

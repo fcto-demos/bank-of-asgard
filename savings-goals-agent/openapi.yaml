@@ -1,4 +1,5 @@
 openapi: 3.0.3
+x-42c-accept-empty-security: true
 info:
   title: Bank of Asgard — Savings Goals Agent
   version: "1.0.0"
@@ -9,9 +10,10 @@ info:
     This service is **not user-facing**. Its only client is the Coordinator
     (`transactions-agent`), which calls it with an agent token audienced for this
     service's client ID (`SAVINGS_AGENT_CLIENT_ID` on the caller side,
-    `EXPECTED_AUDIENCE` here). Every request — including `/health` — is rejected with
-    `401` unless it carries a bearer token whose RS256 signature validates against the
-    IDP's JWKS and whose `aud` claim matches `EXPECTED_AUDIENCE`. No scopes are required.
+    `EXPECTED_AUDIENCE` here). Every request except the `/health` liveness probe is
+    rejected with `401` unless it carries a bearer token whose RS256 signature validates
+    against the IDP's JWKS and whose `aud` claim matches `EXPECTED_AUDIENCE`. No scopes
+    are required.
 
     Projected balances are computed by deterministic compound-interest arithmetic in
     `projections.py`; the LLM only frames and explains them, it never computes them.
@@ -35,12 +37,9 @@ paths:
       tags: [System]
       summary: Health check
       description: |
-        Returns the service health status.
-
-        Note: unlike most health endpoints, this one **is** authenticated — the bearer
-        auth middleware runs on every route, so an unauthenticated probe receives `401`.
-      security:
-        - OAuth2: []
+        Returns the service health status. No authentication required — the bearer auth
+        middleware exempts this route so liveness probes can reach it without a token.
+      security: []
       parameters:
         - $ref: '#/components/parameters/TransactionIdHeader'
       responses:
@@ -52,8 +51,6 @@ paths:
                 $ref: '#/components/schemas/HealthResponse'
               example:
                 status: healthy
-        '401':
-          $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /suggest-goal:
