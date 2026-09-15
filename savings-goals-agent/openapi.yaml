@@ -1,0 +1,361 @@
+openapi: 3.0.3
+info:
+  title: Bank of Asgard — Savings Goals Agent
+  version: "1.0.0"
+  description: |
+    Standalone agent service that turns findings from the Coordinator's sub-agents
+    (subscription analysis and spending health) into a concrete savings goal.
+
+    This service is **not user-facing**. Its only client is the Coordinator
+    (`transactions-agent`), which calls it with an agent token audienced for this
+    service's client ID (`SAVINGS_AGENT_CLIENT_ID` on the caller side,
+    `EXPECTED_AUDIENCE` here). Every request — including `/health` — is rejected with
+    `401` unless it carries a bearer token whose RS256 signature validates against the
+    IDP's JWKS and whose `aud` claim matches `EXPECTED_AUDIENCE`. No scopes are required.
+
+    Projected balances are computed by deterministic compound-interest arithmetic in
+    `projections.py`; the LLM only frames and explains them, it never computes them.
+  contact:
+    name: Bank of Asgard API Support
+    email: api-support@bankofasgard.example
+  license:
+    name: Proprietary
+servers:
+  - url: http://localhost:8013
+    description: Local development server
+tags:
+  - name: System
+    description: Health and status endpoints
+  - name: Savings Goals
+    description: Savings goal suggestion for the delegating user
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [System]
+      summary: Health check
+      description: |
+        Returns the service health status.
+
+        Note: unlike most health endpoints, this one **is** authenticated — the bearer
+        auth middleware runs on every route, so an unauthenticated probe receives `401`.
+      security:
+        - OAuth2: []
+      parameters:
+        - $ref: '#/components/parameters/TransactionIdHeader'
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: healthy
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /suggest-goal:
+    post:
+      operationId: suggestSavingsGoal
+      tags: [Savings Goals]
+      summary: Suggest a savings goal from recoverable monthly money
+      description: |
+        Takes the natural-language summaries already produced by the Coordinator's
+        `AnalyzeSubscriptions` and `AnalyzeSpendingHealth` tools, plus the total monthly
+        amount the user could redirect into savings, and returns a named goal, projected
+        balances at 1, 5 and 10 years (3% APY, compounded monthly), and a short
+        encouraging recommendation.
+
+        `user_sub` is decoded server-side by the Coordinator from the user's OBO token —
+        it is never supplied by the model — and ties the call back to whose consented
+        data is being delegated, for the shared audit trail.
+
+        `transaction_id` is the Coordinator's session ID, forwarded so this service can
+        tag its spans with the same Traceloop association property; OTEL context does not
+        cross the process boundary on its own. Send it in the `X-Transaction-Id` header
+        as well as the body, so the auth middleware — which runs before the body is
+        parsed — can tag its `validated_incoming` audit event with it too.
+      security:
+        - OAuth2: []
+      parameters:
+        - $ref: '#/components/parameters/TransactionIdHeader'
+      requestBody:
+        required: true
+        description: Sub-agent findings and the monthly amount available to save.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuggestGoalRequest'
+            example:
+              subscription_summary: >-
+                Found 3 likely-forgotten subscriptions totalling 47.97/month:
+                StreamMax (14.99), CloudBackup Pro (9.99), FitnessPlus (22.99).
+              spending_summary: >-
+                Spending over the last 45 days is up 8% versus the prior period,
+                driven mainly by Dining Out and Groceries.
+              monthly_recoverable: 47.97
+              user_sub: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+              transaction_id: "sess_9f2c1b7e"
+      responses:
+        '200':
+          description: Suggested savings goal with projections and recommendation text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestGoalResponse'
+              example:
+                goal_name: "Asgard Vault — Rainy Day Fund"
+                suggested_monthly_amount: 47.97
+                projected_balances:
+                  "1y": 584.14
+                  "5y": 3102.71
+                  "10y": 6699.29
+                message: >-
+                  Those three forgotten subscriptions are quietly costing you 47.97 a
+                  month. Redirected into an Asgard Vault — Rainy Day Fund, that same
+                  money becomes 584.14 in a year, 3102.71 in five, and 6699.29 in ten.
+                  Same spending habits, one small cancellation — that's a real cushion
+                  building itself in the background.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+components:
+  parameters:
+    TransactionIdHeader:
+      name: X-Transaction-Id
+      in: header
+      required: false
+      description: |
+        The Coordinator's session ID, used to correlate this service's audit events and
+        traces with the calling session. Read by the auth middleware before the request
+        body is parsed.
+      schema:
+        $ref: '#/components/schemas/TransactionId'
+  responses:
+    Unauthorized:
+      description: |
+        Bearer token is absent, malformed, expired, failed signature validation against
+        the IDP JWKS, or carries an `aud` claim other than `EXPECTED_AUDIENCE`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Unauthorized
+    UnprocessableEntity:
+      description: Request body failed schema validation (missing or wrongly typed fields).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+          example:
+            detail:
+              - loc: [body, monthly_recoverable]
+                msg: Input should be a valid number
+                type: float_parsing
+    InternalServerError:
+      description: |
+        An unexpected error occurred — most often the upstream LLM call via the WSO2
+        gateway failing or timing out.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+          example:
+            detail: Internal Server Error
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      description: |
+        Asgardeo OAuth 2.0, client credentials grant. The Coordinator obtains an agent
+        token audienced for this service (`SAVINGS_AGENT_CLIENT_ID`) and presents it as
+        `Authorization: Bearer <token>`.
+
+        No scopes are required — authorisation is audience-based: the token's `aud` must
+        equal this service's `EXPECTED_AUDIENCE`. Tokens must conform to RFC8725
+        (short-lived, explicit `aud` validation, RS256 only).
+      flows:
+        clientCredentials:
+          tokenUrl: https://api.asgardeo.io/t/{org}/oauth2/token
+          scopes: {}
+  schemas:
+    TransactionId:
+      type: string
+      description: Correlation ID shared with the calling Coordinator session.
+      pattern: '^[A-Za-z0-9_.:-]{1,100}$'
+      minLength: 1
+      maxLength: 100
+      example: "sess_9f2c1b7e"
+    HealthResponse:
+      type: object
+      description: Response body returned by the health check endpoint.
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [healthy]
+    SuggestGoalRequest:
+      type: object
+      description: Sub-agent findings used to frame a savings goal.
+      additionalProperties: false
+      required:
+        - subscription_summary
+        - spending_summary
+        - monthly_recoverable
+      properties:
+        subscription_summary:
+          type: string
+          description: |
+            Natural-language summary of recurring charges, as returned by the
+            Coordinator's `AnalyzeSubscriptions` tool. May span multiple lines.
+          minLength: 1
+          maxLength: 20000
+          example: >-
+            Found 3 likely-forgotten subscriptions totalling 47.97/month:
+            StreamMax (14.99), CloudBackup Pro (9.99), FitnessPlus (22.99).
+        spending_summary:
+          type: string
+          description: |
+            Natural-language spending-health summary, as returned by the Coordinator's
+            `AnalyzeSpendingHealth` tool. May span multiple lines.
+          minLength: 1
+          maxLength: 20000
+          example: >-
+            Spending over the last 45 days is up 8% versus the prior period,
+            driven mainly by Dining Out and Groceries.
+        monthly_recoverable:
+          type: number
+          format: float
+          description: Total amount per month the user could redirect into savings.
+          minimum: 0
+          maximum: 1000000
+          example: 47.97
+        user_sub:
+          type: string
+          format: uuid
+          description: |
+            Subject identifier of the delegating user, decoded server-side by the
+            Coordinator from the user's OBO token. Never LLM-supplied. Audit only —
+            this service performs no per-user lookup.
+          nullable: true
+          maxLength: 36
+          example: "c4d3e9a1-1234-5678-abcd-ef0123456789"
+        transaction_id:
+          allOf:
+            - $ref: '#/components/schemas/TransactionId'
+          nullable: true
+    ProjectedBalances:
+      type: object
+      description: |
+        Future value of depositing the suggested monthly amount at the end of each month,
+        compounded monthly at 3% APY, at each milestone. Computed arithmetically in
+        `projections.py` — not by the LLM.
+      additionalProperties: false
+      properties:
+        "1y":
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1000000000
+          example: 584.14
+        "5y":
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1000000000
+          example: 3102.71
+        "10y":
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1000000000
+          example: 6699.29
+    SuggestGoalResponse:
+      type: object
+      description: The suggested goal, its projections, and the recommendation text.
+      additionalProperties: false
+      properties:
+        goal_name:
+          type: string
+          description: |
+            Proposed goal name. Falls back to "Savings Goal" if the LLM response could
+            not be parsed as JSON.
+          pattern: '^[^\r\n]{1,200}$'
+          maxLength: 200
+          example: "Asgard Vault — Rainy Day Fund"
+        suggested_monthly_amount:
+          type: number
+          format: float
+          description: Echoes the requested `monthly_recoverable`.
+          minimum: 0
+          maximum: 1000000
+          example: 47.97
+        projected_balances:
+          $ref: '#/components/schemas/ProjectedBalances'
+        message:
+          type: string
+          description: |
+            Short (3–5 sentence) encouraging recommendation citing the projections. If
+            the LLM response could not be parsed as JSON, this holds its raw text.
+          minLength: 1
+          maxLength: 5000
+          example: >-
+            Those three forgotten subscriptions are quietly costing you 47.97 a month.
+            Redirected into an Asgard Vault — Rainy Day Fund, that same money becomes
+            584.14 in a year, 3102.71 in five, and 6699.29 in ten.
+    ErrorResponse:
+      type: object
+      description: Error body returned by the bearer auth middleware.
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+          pattern: '^[^\r\n]{0,200}$'
+          maxLength: 200
+          example: Unauthorized
+    ValidationErrorResponse:
+      type: object
+      description: |
+        FastAPI's standard error body. `detail` is a string for framework-raised errors
+        and an array of per-field errors for request-validation failures.
+      additionalProperties: false
+      properties:
+        detail:
+          oneOf:
+            - type: string
+              pattern: '^[^\r\n]{0,1000}$'
+              maxLength: 1000
+              example: Internal Server Error
+            - type: array
+              maxItems: 50
+              items:
+                $ref: '#/components/schemas/ValidationErrorItem'
+    ValidationErrorItem:
+      type: object
+      description: A single request-validation failure.
+      additionalProperties: false
+      properties:
+        loc:
+          type: array
+          description: Path to the offending field.
+          maxItems: 10
+          items:
+            type: string
+            pattern: '^[^\r\n]{1,100}$'
+            maxLength: 100
+          example: [body, monthly_recoverable]
+        msg:
+          type: string
+          pattern: '^[^\r\n]{0,500}$'
+          maxLength: 500
+          example: Input should be a valid number
+        type:
+          type: string
+          pattern: '^[a-z_.]{1,100}$'
+          maxLength: 100
+          example: float_parsing
