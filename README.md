@@ -643,13 +643,14 @@ provider: openai
 
 Every LLM-using service searches for `llm_config.yaml` in three places, in order: its own directory (the Docker mount point), the repo root (native development), then `/etc/config/llm_config.yaml` (the conventional mount point on hosts that project config files into a fixed directory).
 
-To read it from anywhere else, set `LLM_CONFIG_PATH` in that service's `.env`:
+To read it from anywhere else, set `LLM_CONFIG_PATH` in that service's `.env`. Either form works:
 
 ```bash
-LLM_CONFIG_PATH=/etc/config/llm_config.yaml
+LLM_CONFIG_PATH=/etc/config                  # a directory — llm_config.yaml is read from inside it
+LLM_CONFIG_PATH=/etc/config/llm_config.yaml  # or the file itself
 ```
 
-It may point at the file itself or at a directory containing `llm_config.yaml`, and `~` is expanded. It replaces the search entirely: if the path doesn't exist the service fails to start rather than falling back to the `openai`/`gpt-4o-mini` default, since that default would silently bypass the gateway. Each service logs the resolved path at startup.
+`~` is expanded in both. It replaces the search entirely: if the path doesn't exist the service fails to start rather than falling back to the `openai`/`gpt-4o-mini` default, since that default would silently bypass the gateway. Each service logs the resolved path at startup.
 
 Supported by all five services — `transactions-agent/{langchain,autogen,strands}-agent/service.py`, `savings-goals-agent/server.py`, and `tax-agent/server.py` — each reading its own `.env`.
 
@@ -691,6 +692,22 @@ GATEWAY_CLIENT_SECRET=<SAVINGS_GATEWAY_CLIENT_SECRET>
 GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
 GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
 ```
+
+#### API key instead of OAuth (Savings Goals Agent only)
+
+The Savings Goals Agent is the one service designed to run at a third party, which may be issued a **gateway API key** rather than OAuth client credentials it would have to hold and rotate. Set `GATEWAY_AUTH_MODE` in `savings-goals-agent/.env`:
+
+```YAML
+# savings-goals-agent/.env
+GATEWAY_AUTH_MODE=apikey
+GATEWAY_API_KEY=<SAVINGS_GATEWAY_API_KEY>
+GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
+# GATEWAY_API_KEY_HEADER=X-API-Key   # default; override if your gateway expects another header
+```
+
+The mode defaults to `oauth`, so existing deployments are unaffected and the other agents remain OAuth-only. In `apikey` mode `GATEWAY_CLIENT_ID`, `GATEWAY_CLIENT_SECRET` and `GATEWAY_TOKEN_ENDPOINT` are unused — there is no token endpoint, no refresh and nothing cached, just the key on each request.
+
+Calls still go through the gateway in both modes; only the credential presented changes. The key itself is never logged — the audit trail records a short hash of it, the same fingerprint treatment a bearer token gets, so you can still follow which credential made which call. An unrecognised mode, or `apikey` with no `GATEWAY_API_KEY`, fails at startup rather than surfacing as a 401 on the first LLM call.
 
 ### Agencies MCP Server
 
