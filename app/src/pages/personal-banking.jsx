@@ -32,6 +32,7 @@ import EverydayBanking from "../assets/images/A_women_laying_on_a_soft_with_a_he
 import GoGlobal from "../assets/images/A_business_women_in_a_city_walking_portrait_lookin_5e59fd5e-a8dd-43e0-b4ea-5a926d089913-C9naFSuO.jpg";
 import { ACCOUNT_TYPES, SITE_SECTIONS, ROUTES, URL_QUERY_PARAMS } from "../constants/app-constants";
 import ChatComponent from "../components/transactions/ChatComponent";
+import ResizableChatColumn from "../components/transactions/ResizableChatColumn";
 
 const GOLD = "#997029";
 
@@ -149,9 +150,9 @@ const PersonalBankingPage = ({ setSiteSection }) => {
             </Box>
           </Box>
           <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <Box sx={{ flex: "0 0 420px", minWidth: 300 }}>
+            <ResizableChatColumn>
               <ChatComponent sessionId={sessionId} secured={secured} />
-            </Box>
+            </ResizableChatColumn>
             <Box sx={{ flex: 1, minWidth: 260 }}>
               <Paper
                 elevation={0}

@@ -37,9 +37,10 @@ from app.tools import (
     get_my_profile, update_my_profile,
     PROFILE_AUTH_CONFIG, UPDATE_PROFILE_AUTH_CONFIG,
     GET_MY_PROFILE_DESCRIPTION, UPDATE_MY_PROFILE_DESCRIPTION,
-    auth_completion_message,
+    auth_completion_message, TAX_SCOPES,
 )
 from app.subagents import subscription_detective, spending_health
+from app.tax import DeductionSummary, format_summary, summarize_deductible_spend
 from tool import SecureLangChainTool
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
 
@@ -129,6 +130,26 @@ savings_asgardeo_config = AsgardeoConfig(
 
 SAVINGS_AGENT_URL = os.environ.get('SAVINGS_AGENT_URL', 'http://localhost:8013/suggest-goal')
 
+# Dedicated OAuth2 app for the Ministry of Finance Tax agent — same pattern again, but
+# this one crosses an ORGANISATIONAL boundary, not just a process one: the Coordinator is
+# the bank, the Tax Agent is the ministry.
+tax_agent_client_id = os.environ.get('TAX_AGENT_CLIENT_ID')
+if not tax_agent_client_id:
+    logger.warning("TAX_AGENT_CLIENT_ID not set — tax tools will not be available")
+
+tax_asgardeo_config = AsgardeoConfig(
+    base_url=base_url,
+    client_id=tax_agent_client_id,
+    redirect_uri=redirect_uri
+) if tax_agent_client_id else None
+
+TAX_AGENT_URL = os.environ.get('TAX_AGENT_URL', 'http://localhost:8014/prepare-return')
+
+# TAX_CONSENT_SCOPE — the citizen's consent scope for the tax flow — is defined in
+# app/tools.py alongside the other scope constants, since auth_completion_message keys
+# off it too.
+TAX_YEAR = int(os.environ.get('TAX_YEAR', '2026'))
+
 agent_config = AgentConfig(
     agent_id=transactions_agent_id,
     agent_secret=transactions_agent_secret,
@@ -138,14 +159,37 @@ agent_config = AgentConfig(
 def _load_llm_config() -> dict:
     """Load LLM config from llm_config.yaml.
 
-    Searches: /app/ (Docker mount), then project root (native development).
+    LLM_CONFIG_PATH overrides the search entirely — point it at a mounted file (a
+    directory is also accepted, and llm_config.yaml is read from inside it). An explicit
+    path that doesn't exist is a deployment error, not a reason to guess: falling back to
+    the openai/gpt-4o-mini default would silently bypass the gateway, so raise instead.
+
+    With no override, searches: /app/ (Docker mount), project root (native development),
+    then /etc/config (the conventional mount point on hosts that project config files
+    into it).
     """
+    override = os.environ.get("LLM_CONFIG_PATH")
+    if override:
+        path = Path(override).expanduser()
+        if path.is_dir():
+            path = path / "llm_config.yaml"
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"LLM_CONFIG_PATH is set to {override!r} but no config file was found "
+                f"at {path} — refusing to fall back to defaults."
+            )
+        logger.info("Loading LLM config from %s (LLM_CONFIG_PATH)", path)
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+
     candidates = [
         Path(__file__).parent / "llm_config.yaml",               # Docker: /app/llm_config.yaml
         Path(__file__).parent.parent.parent / "llm_config.yaml",  # native: repo root
+        Path("/etc/config/llm_config.yaml"),                      # mounted config dir
     ]
     for path in candidates:
-        if path.exists():
+        if path.is_file():
+            logger.info("Loading LLM config from %s", path)
             with open(path) as f:
                 return yaml.safe_load(f) or {}
     logger.warning("llm_config.yaml not found — falling back to openai/gpt-4o-mini")
@@ -327,6 +371,145 @@ async def _suggest_savings_goal(
     )
 
 
+async def _summarize_deductible_expenses(
+    token: OAuthToken, tax_year: int = TAX_YEAR,
+) -> DeductionSummary:
+    """Classify the user's transactions into the ministry's relief categories, bank-side.
+
+    Runs under the citizen's own consent (OBO) and never leaves the bank: the caller turns
+    this into a summary for the model, while the structured aggregates are held in session
+    state for PrepareTaxReturn to send. Nothing here is computed by the LLM."""
+    start_date = f"{tax_year}-01-01"
+    end_date = f"{tax_year}-12-31"
+    result = await get_my_transactions(
+        token, start_date=start_date, end_date=end_date, limit=500,
+    )
+    return summarize_deductible_spend(result["transactions"], tax_year)
+
+
+async def _prepare_tax_return(
+    token: OAuthToken,
+    summary: dict,
+    user_sub: str | None = None,
+    transaction_id: str | None = None,
+) -> str:
+    """Send the per-category totals to the Ministry of Finance's Tax Agent.
+
+    The cross-organisation hop. `summary` comes from session state rather than from the
+    model, so the figures the ministry receives are exactly the ones computed in
+    app/tax.py — the LLM cannot restate, round, or invent them. Note what is sent: gross
+    income and one total per relief category, and nothing else."""
+    headers = {"Authorization": f"Bearer {token.access_token}"}
+    # Also sent as a header (not just in the body) so the Tax Agent's bearer-auth
+    # middleware — which runs before the body is parsed — can tag its own
+    # validated_incoming audit event with the right transaction_id too.
+    if transaction_id:
+        headers["X-Transaction-Id"] = transaction_id
+    payload = {
+        "gross_income": summary["gross_income"],
+        "qualifying_spend": summary["qualifying_spend"],
+        "user_sub": user_sub,
+        "transaction_id": transaction_id,
+    }
+    logger.info(
+        "Sharing tax aggregates with Ministry of Finance — categories=%s (no transactions)",
+        sorted(summary["qualifying_spend"]),
+    )
+    async with httpx.AsyncClient(verify=_ssl_verify) as client:
+        response = await client.post(TAX_AGENT_URL, headers=headers, json=payload, timeout=30.0)
+        response.raise_for_status()
+        result = response.json()
+    a = result["assessment"]
+    return (
+        f"{result['message']} (Reference: {result['reference']}, "
+        f"total deductions: {a['total_deductions']}, taxable income: {a['taxable_income']}, "
+        f"estimated saving: {a['estimated_saving']}, deadline: {a['filing_deadline']})"
+    )
+
+
+def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) -> list:
+    """Build the two tax tools for one session, or [] when the tax agent isn't configured.
+
+    Kept out of websocket_endpoint so that function stays under the complexity limit, and
+    because the pair only makes sense together — see the two trust boundaries below.
+    """
+    if not tax_asgardeo_config:
+        return []
+
+    async def summarize_deductible_expenses(token: OAuthToken) -> str:
+        session_context["user_sub"] = _decode_sub(token.access_token)
+        summary = await _summarize_deductible_expenses(token)
+        session_context["tax_summary"] = summary
+        return format_summary(summary)
+
+    # No arguments beyond the injected token: the figures come from session state, and
+    # there is deliberately no tax_id parameter — the demo has no TIN attribute in the
+    # IDP, and an optional argument here would invite the model to stop and ask for one.
+    # tax-agent keeps the field optional server-side for when a real TIN exists.
+    async def prepare_tax_return(token: OAuthToken) -> str:
+        summary = session_context["tax_summary"]
+        if not summary:
+            return (
+                "No deduction summary has been prepared yet — call "
+                "SummarizeDeductibleExpenses first, so the figures sent to the ministry "
+                "are the ones computed from the user's own transactions."
+            )
+        return await _prepare_tax_return(
+            token, summary,
+            user_sub=session_context["user_sub"],
+            transaction_id=session_context["transaction_id"],
+        )
+
+    # SummarizeDeductibleExpenses runs bank-side under the CITIZEN's consent (OBO), with
+    # its own scope so the consent screen names the purpose — sharing tax data — rather
+    # than reusing the transaction-reading consent the user already gave.
+    summarize_tool = SecureLangChainTool(
+        summarize_deductible_expenses,
+        description=(
+            "Classify the user's transactions for the tax year into the Ministry of "
+            "Finance's relief categories (medical, commuting, home energy, professional "
+            "travel) and total each one. Call this first whenever the user asks about "
+            "preparing, filing, or estimating their tax return. Returns category totals "
+            "only — it does not send anything to the ministry."
+        ),
+        name="SummarizeDeductibleExpenses",
+        auth=AuthSchema(auth_manager, AuthConfig(
+            scopes=TAX_SCOPES,
+            token_type=OAuthTokenType.OBO_TOKEN,
+            resource="tax_authority"
+        ))
+    )
+
+    # PrepareTaxReturn crosses to a DIFFERENT ORGANISATION. Same AGENT_TOKEN pattern as
+    # GetAgencies/SuggestSavingsGoal, audienced for TAX_AGENT_CLIENT_ID, so the ministry
+    # can prove which agent called it — see tax-agent/server.py's _validate_token.
+    tax_auth_manager = AutogenAuthManager(
+        config=tax_asgardeo_config,
+        agent_config=agent_config,
+    )
+
+    prepare_tool = SecureLangChainTool(
+        prepare_tax_return,
+        description=(
+            "Send the deduction totals produced by SummarizeDeductibleExpenses to the "
+            "Ministry of Finance's Tax Agent, which applies the published relief rules and "
+            "returns a draft assessment: total deductions, taxable income, estimated tax "
+            "saving, any receipts still needed, and the filing deadline. Only call this "
+            "after SummarizeDeductibleExpenses, and only once the user has agreed to share "
+            "their figures with the ministry. Takes no arguments — the figures are taken "
+            "from the previous step, so never ask the user for them or for a tax ID."
+        ),
+        name="PrepareTaxReturn",
+        auth=AuthSchema(tax_auth_manager, AuthConfig(
+            scopes=[],
+            token_type=OAuthTokenType.AGENT_TOKEN,
+            resource="tax_agent"
+        ))
+    )
+
+    return [summarize_tool, prepare_tool]
+
+
 # Local to langchain-agent only — NOT added to the shared app/prompt.py, since autogen
 # and strands don't have these three tools wired up. Appended to agent_system_prompt
 # below, the same string-concatenation technique already used for DEMO_VERSION's v2
@@ -343,7 +526,26 @@ FINANCIAL CHECK-UP: You also coordinate two specialist sub-agents and a savings 
 When the user asks for a general financial check-up, health check, or "how am I doing
 financially", call AnalyzeSubscriptions and AnalyzeSpendingHealth together in the same
 turn (do not call one and wait for the other first), then call SuggestSavingsGoal once
-you have both results back."""
+you have both results back.
+
+TAX FILING: the Ministry of Finance runs its own Tax Agent, outside the bank. Two steps,
+never combined:
+1. SummarizeDeductibleExpenses — totals the user's qualifying spend by relief category,
+   inside the bank. Always first.
+2. PrepareTaxReturn — sends those totals to the ministry and returns a draft assessment.
+
+After step 1, tell the user what would be shared (their gross income and the category
+totals — no individual transactions, merchants or dates) and ask whether to send it. When
+they agree, call PrepareTaxReturn immediately in that same turn — the agreement arrives in
+a later message than the summary, and that is exactly when to call it. If they decline,
+stop and say the figures stayed with the bank.
+
+You cannot produce a tax assessment yourself. Deductions, reliefs, taxable income, tax due,
+estimated saving and the filing deadline come ONLY from PrepareTaxReturn — never compute,
+estimate or guess them, and never present step 1's category totals as though they were an
+assessment. If the user asks what their return looks like, that is a reason to call
+PrepareTaxReturn, not to answer from the summary. Report the ministry's numbers exactly as
+returned, and remind the user a draft is not a filed return."""
 
 
 # Per-session state — each WebSocket gets its own auth manager and token cache
@@ -567,7 +769,10 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # standalone Savings Agent can be traced back to whose consented data is involved.
     # transaction_id is refreshed per turn in run_agent (not per session) so each prompt
     # gets its own trace instead of accumulating the whole conversation under one ID.
-    session_context: dict = {"user_sub": None, "transaction_id": None}
+    # tax_summary holds the aggregates computed by SummarizeDeductibleExpenses so that
+    # PrepareTaxReturn sends the figures that were actually computed from the user's
+    # transactions, rather than whatever the model paraphrased back into its arguments.
+    session_context: dict = {"user_sub": None, "transaction_id": None, "tax_summary": None}
 
     async def _analyze_subscriptions_traced(token: OAuthToken) -> str:
         session_context["user_sub"] = _decode_sub(token.access_token)
@@ -708,6 +913,8 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         )) if savings_auth_manager else None
     )
 
+    tax_tools = _build_tax_tools(auth_manager, session_context)
+
     active_llm = llm_secured if secured else llm
     logger.info("Session %s using %s gateway", session_id, "secured" if secured else "base")
 
@@ -724,6 +931,10 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         tools.append(get_agencies_tool)
     if savings_auth_manager:
         tools.append(suggest_savings_goal_tool)
+    # Empty unless TAX_AGENT_CLIENT_ID is configured; the two tools are always registered
+    # together, since the summariser alone would let the model start a tax flow it can
+    # never finish.
+    tools.extend(tax_tools)
 
     graph = create_agent(
         active_llm,

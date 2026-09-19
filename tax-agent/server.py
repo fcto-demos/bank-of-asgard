@@ -1,3 +1,14 @@
+"""Ministry of Finance — Tax Filing Agent.
+
+A deliberately *cross-organisation* agent: it is not part of Bank of Asgard. The bank's
+Coordinator calls it with a token audienced for this service, carrying only the
+aggregate deduction figures the citizen consented to share — never the underlying
+transactions. See tax_rules.py for the arithmetic, which never goes near the LLM.
+
+Structurally a sibling of savings-goals-agent/server.py (same bearer validation, same
+gateway LLM construction); the interesting difference is what crosses the boundary.
+"""
+
 import json
 import logging
 import os
@@ -21,8 +32,8 @@ from pydantic import BaseModel, PrivateAttr
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from audit_log import emit_token_event, register_actor_name, set_transaction
-from gateway import GatewayTokenManager, GatewayBearerAuth, GatewayApiKeyAuth
-from projections import project_milestones
+from gateway import GatewayTokenManager, GatewayBearerAuth
+from tax_rules import assess
 
 load_dotenv()
 
@@ -36,26 +47,25 @@ IDP_BASE_URL = os.environ["IDP_BASE_URL"]
 SSL_VERIFY = os.environ.get("SSL_VERIFY", "true").lower() != "false"
 EXPECTED_AUDIENCE = os.environ["EXPECTED_AUDIENCE"]
 
-# The resource label "savings_agent" (used as a destination in transactions-agent's
-# auth_manager.py) and this service's own name both refer to the same real entity —
+# The resource label "tax_agent" (used as a destination in transactions-agent's
+# service.py) and this service's own name both refer to the same real entity —
 # register the synonym so they don't fragment into separate actors in the audit trail.
-register_actor_name("savings-goals-agent", "Savings Agent")
+register_actor_name("tax-agent", "Tax Agent")
 
 
 class GatewayChatAnthropic(ChatAnthropic):
-    """ChatAnthropic subclass that injects gateway auth via a custom httpx client.
+    """ChatAnthropic subclass that injects gateway Bearer auth via a custom httpx client.
 
     ChatAnthropic builds its own internal httpx client and does not expose http_client
     as a constructor parameter (passing it gets silently absorbed into model_kwargs and
-    never used). This subclass overrides _async_client to inject our gateway auth handler
-    so credentials are applied transparently on each request. Copied from
-    transactions-agent/langchain-agent/service.py's identical subclass, and widened to
-    any httpx.Auth so either GatewayBearerAuth or GatewayApiKeyAuth can be passed.
+    never used). This subclass overrides _async_client to inject our GatewayBearerAuth
+    handler so tokens are refreshed transparently on each request. Copied from
+    savings-goals-agent/server.py's identical subclass.
     """
 
-    _gw_auth: httpx.Auth = PrivateAttr()
+    _gw_auth: GatewayBearerAuth = PrivateAttr()
 
-    def __init__(self, *, gw_auth: httpx.Auth, **data):
+    def __init__(self, *, gw_auth: GatewayBearerAuth, **data):
         super().__init__(**data)
         self._gw_auth = gw_auth
 
@@ -65,7 +75,7 @@ class GatewayChatAnthropic(ChatAnthropic):
         return _anthropic_sdk.AsyncAnthropic(**self._client_params, http_client=http_client)
 
 
-# ── Bearer token validation (copied from agencies-mcp-server/server.py — each service
+# ── Bearer token validation (copied from savings-goals-agent/server.py — each service
 # is independently deployable, so this small block is duplicated rather than shared) ──
 
 _jwks_cache: dict | None = None
@@ -108,8 +118,8 @@ def _validate_token(token: str) -> None:
             unverified.get("exp"),
         )
         emit_token_event(
-            service="savings-goals-agent", event="validated_incoming",
-            origin=unverified.get("sub"), destination="savings-goals-agent",
+            service="tax-agent", event="validated_incoming",
+            origin=unverified.get("sub"), destination="tax-agent",
             access_token=token, client_id=EXPECTED_AUDIENCE,
             requested_by=unverified.get("sub"), sub=unverified.get("sub"),
             act=unverified.get("act"), aud=unverified.get("aud"), exp=unverified.get("exp"),
@@ -150,16 +160,13 @@ def _validate_token(token: str) -> None:
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """Validates the Authorization header on every request except /health. No
-    SSE/streaming responses on this service, so BaseHTTPMiddleware (unlike the agencies
-    MCP server) is fine here."""
+    """Validates the Authorization header on every request. No SSE/streaming responses
+    on this service, so BaseHTTPMiddleware (unlike the agencies MCP server) is fine here."""
 
     async def dispatch(self, request: Request, call_next):
         # Set from the header (not the body — the body isn't parsed yet at this point)
         # so _validate_token's audit event is tagged with the right transaction_id too.
         set_transaction(request.headers.get("x-transaction-id"))
-        # Liveness probes (start-demo.sh, container healthchecks) have no token to present
-        # and the response exposes nothing — same exemption as tax-agent/server.py.
         if request.url.path == "/health":
             return await call_next(request)
         auth = request.headers.get("authorization", "")
@@ -175,9 +182,9 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# ── LLM construction — trimmed copy of langchain-agent/service.py's gateway logic.
+# ── LLM construction — trimmed copy of savings-goals-agent/server.py's gateway logic.
 # Always uses GATEWAY_BASE_URL (v1/unsecured): this service never sees raw user chat
-# input, only structured summaries, so it's not subject to the AI guardrails toggle. ──
+# input, only structured aggregates, so it's not subject to the AI guardrails toggle. ──
 
 def _load_llm_config() -> dict:
     """Load LLM config from llm_config.yaml.
@@ -232,45 +239,15 @@ _default_models = {
     "mistral": "mistral-small-latest",
 }
 
-def _build_gateway_auth() -> httpx.Auth:
-    """Pick how this agent authenticates to the LLM gateway.
-
-    GATEWAY_AUTH_MODE=oauth (default) uses client credentials, as every other service
-    does. GATEWAY_AUTH_MODE=apikey presents a static key instead — this agent is the one
-    that can run at a third party, which may be issued a gateway API key rather than
-    OAuth client credentials it would have to hold and rotate.
-
-    Either way the call still goes through the gateway; only the credential changes. An
-    unknown mode or a missing key is a deployment error, so fail at startup rather than
-    falling through to the other mode and producing confusing 401s on the first LLM call.
-    """
-    mode = os.environ.get("GATEWAY_AUTH_MODE", "oauth").strip().lower()
-    if mode == "apikey":
-        api_key = os.environ.get("GATEWAY_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "GATEWAY_AUTH_MODE=apikey but GATEWAY_API_KEY is not set — "
-                "set the key, or use GATEWAY_AUTH_MODE=oauth."
-            )
-        header_name = os.environ.get("GATEWAY_API_KEY_HEADER", "X-API-Key")
-        logger.info("Gateway auth: API key (header %r)", header_name)
-        return GatewayApiKeyAuth(api_key, header_name=header_name)
-    if mode != "oauth":
-        raise ValueError(
-            f"GATEWAY_AUTH_MODE={mode!r} is not recognised — use 'oauth' or 'apikey'."
-        )
-    logger.info("Gateway auth: OAuth2 client credentials")
-    return GatewayBearerAuth(GatewayTokenManager(
+if _use_gateway:
+    logger.info("LLM routing via WSO2 API Gateway (provider=%s, v1/unsecured)", _llm_provider)
+    _gw_token_manager = GatewayTokenManager(
         token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
         client_id=os.environ["GATEWAY_CLIENT_ID"],
         client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
         ssl_verify=SSL_VERIFY,
-    ))
-
-
-if _use_gateway:
-    logger.info("LLM routing via WSO2 API Gateway (provider=%s, v1/unsecured)", _llm_provider)
-    _gw_auth = _build_gateway_auth()
+    )
+    _gw_auth = GatewayBearerAuth(_gw_token_manager)
     if _llm_provider == "anthropic":
         llm = GatewayChatAnthropic(
             model=_llm_model or _default_models["anthropic"],
@@ -311,25 +288,63 @@ else:
             )
 
 
-SAVINGS_GOAL_PROMPT = """You are the Savings Goals agent for Bank of Asgard.
+TAX_SUMMARY_PROMPT = """You are the Tax Filing agent for the Kingdom of Asgard's Ministry of Finance.
 
-You are given: a subscription summary, a spending-health summary, the recoverable monthly
-amount, and projected balances if that amount were saved monthly at a steady rate over 1,
-5, and 10 years (already computed — do not recompute or alter these numbers).
+You are given a completed assessment: gross income, the reliefs granted under the published
+rules, total deductions, taxable income, tax before and after reliefs, and the estimated
+saving. Every number has already been computed under the published rules — do not
+recompute, adjust, or invent any figure. Quote them exactly as given.
 
-Write a short, encouraging recommendation (3-5 sentences) that:
-- Proposes a concrete savings goal name (e.g. "Asgard Vault — Rainy Day Fund").
-- States the recoverable monthly amount.
-- Cites the 1, 5, and 10 year projected balances exactly as given, to make the case tangible.
-- Is warm and motivating, never preachy.
+Write a short, plain-language summary (4-6 sentences) for the citizen that:
+- States which reliefs were applied and what they are worth in total.
+- Gives the taxable income and the estimated tax saving, exactly as provided.
+- Names any relief marked as needing evidence, and says receipts must be attached before filing.
+- States the filing deadline.
+- Is factual and neutral in tone — this is a government service, not a sales pitch.
+  Never promise an outcome, and never advise the citizen how to reduce tax further.
 
-Respond with a JSON object: {"goal_name": str, "message": str}. No other text."""
+Write figures as plain numbers with no currency symbol — the amounts are notional units
+and attaching the wrong currency to a tax figure is worse than attaching none.
+
+Respond with a raw JSON object: {"headline": str, "message": str}. No other text, and no
+markdown code fences around it."""
 
 
-class SuggestGoalRequest(BaseModel):
-    subscription_summary: str
-    spending_summary: str
-    monthly_recoverable: float
+def _parse_llm_json(content: str | list) -> dict:
+    """Parse the model's JSON reply, tolerating a ```json fence around it.
+
+    Models wrap structured replies in a fence often enough that treating it as a parse
+    failure would silently downgrade every response to the fallback text. `content` is
+    typed as a union because LangChain messages can carry content blocks rather than a
+    plain string; anything but a string goes to the caller's fallback.
+    """
+    if not isinstance(content, str):
+        raise TypeError(f"expected string content, got {type(content).__name__}")
+    text = content.strip()
+    if text.startswith("```"):
+        # Drop the opening fence (with or without a language tag) and the closing one.
+        text = text.split("\n", 1)[-1] if "\n" in text else ""
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[: -len("```")]
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise TypeError(f"expected a JSON object, got {type(parsed).__name__}")
+    return parsed
+
+
+class PrepareReturnRequest(BaseModel):
+    """The whole payload the ministry receives.
+
+    Note what is *absent*: no transaction list, no merchant names, no dates, no account
+    identifiers. The bank classifies spend into the published relief categories on its
+    own side and sends only per-category totals — the data-minimisation point the demo
+    is built to make.
+    """
+
+    gross_income: float
+    # Per-category qualifying spend, keyed by the buckets in tax_rules.RELIEF_RULES.
+    qualifying_spend: dict[str, float]
+    tax_id: str | None = None
     # Decoded server-side by the Coordinator from the user's OBO token (never LLM-supplied)
     # — ties this call back to whose consented data is being delegated, for audit purposes.
     user_sub: str | None = None
@@ -338,7 +353,7 @@ class SuggestGoalRequest(BaseModel):
     transaction_id: str | None = None
 
 
-app = FastAPI(title="Bank of Asgard — Savings Goals Agent", version="1.0.0")
+app = FastAPI(title="Ministry of Finance — Tax Filing Agent", version="1.0.0")
 app.add_middleware(BearerAuthMiddleware)
 
 
@@ -347,46 +362,41 @@ async def health():
     return {"status": "healthy"}
 
 
-@app.post("/suggest-goal")
-async def suggest_goal(req: SuggestGoalRequest):
+@app.post("/prepare-return")
+async def prepare_return(req: PrepareReturnRequest):
     set_transaction(req.transaction_id)
 
     if req.transaction_id:
         Traceloop.set_association_properties({"transaction_id": req.transaction_id})
 
-    projected_balances = project_milestones(req.monthly_recoverable)
+    assessment = assess(req.gross_income, req.qualifying_spend)
 
-    prompt_input = {
-        "subscription_summary": req.subscription_summary,
-        "spending_summary": req.spending_summary,
-        "monthly_recoverable": req.monthly_recoverable,
-        "projected_balances": projected_balances,
-    }
     logger.info(
-        "Suggesting savings goal — user_sub=%r monthly_recoverable=%.2f",
-        req.user_sub, req.monthly_recoverable,
+        "Preparing return — user_sub=%r tax_id=%r categories=%s total_deductions=%.2f",
+        req.user_sub, req.tax_id, sorted(req.qualifying_spend), assessment["total_deductions"],
     )
 
     response = await llm.ainvoke([
-        SystemMessage(content=SAVINGS_GOAL_PROMPT),
-        HumanMessage(content=json.dumps(prompt_input)),
+        SystemMessage(content=TAX_SUMMARY_PROMPT),
+        HumanMessage(content=json.dumps(assessment)),
     ])
     try:
-        parsed = json.loads(response.content)
-        goal_name = parsed.get("goal_name", "Savings Goal")
+        parsed = _parse_llm_json(response.content)
+        headline = parsed.get("headline", "Draft tax return prepared")
         message = parsed.get("message", response.content)
-    except (json.JSONDecodeError, TypeError):
-        goal_name = "Savings Goal"
+    except (json.JSONDecodeError, TypeError, AttributeError) as exc:
+        logger.warning("Could not parse LLM reply as JSON (%s) — using raw text", exc)
+        headline = "Draft tax return prepared"
         message = response.content
 
     return {
-        "goal_name": goal_name,
-        "suggested_monthly_amount": req.monthly_recoverable,
-        "projected_balances": projected_balances,
+        "headline": headline,
         "message": message,
+        "assessment": assessment,
+        "reference": f"ASG-{assessment['tax_year']}-DRAFT",
     }
 
 
 if __name__ == "__main__":
-    logger.info("Starting Savings Goals agent on port 8013 (IDP: %s)", IDP_BASE_URL)
-    uvicorn.run(app, host="0.0.0.0", port=8013)  # noqa: S104
+    logger.info("Starting Tax Filing agent on port 8014 (IDP: %s)", IDP_BASE_URL)
+    uvicorn.run(app, host="0.0.0.0", port=8014)  # noqa: S104

@@ -33,6 +33,7 @@ import IDPList from "../components/business-user-profile/idp-list";
 import ManageUsers from "../components/business-user-profile/manage-users";
 import BusinessProfileCard from "../components/business-user-profile/business-profile-card";
 import ChatComponent from "../components/transactions/ChatComponent";
+import ResizableChatColumn from "../components/transactions/ResizableChatColumn";
 import { TransactionInfoPanel } from "./transactions";
 
 const GOLD = "#997029";
@@ -212,9 +213,9 @@ const BusinessProfilePage = ({ setSiteSection }) => {
                   </Box>
                 </Box>
                 <Box sx={{ display: "flex", gap: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
-                  <Box sx={{ flex: "0 0 420px", minWidth: 300 }}>
+                  <ResizableChatColumn>
                     <ChatComponent sessionId={sessionId} secured={secured} />
-                  </Box>
+                  </ResizableChatColumn>
                   <TransactionInfoPanel />
                 </Box>
               </Box>
