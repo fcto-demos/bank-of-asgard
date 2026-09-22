@@ -7,13 +7,14 @@ info:
     Standalone agent service that turns findings from the Coordinator's sub-agents
     (subscription analysis and spending health) into a concrete savings goal.
 
-    This service is **not user-facing**. Its only client is the Coordinator
+    This service is **not user-facing**. Its only configured client is the Coordinator
     (`transactions-agent`), which calls it with an agent token audienced for this
     service's client ID (`SAVINGS_AGENT_CLIENT_ID` on the caller side,
     `EXPECTED_AUDIENCE` here). Every request except the `/health` liveness probe is
     rejected with `401` unless it carries a bearer token whose RS256 signature validates
-    against the IDP's JWKS and whose `aud` claim matches `EXPECTED_AUDIENCE`. No scopes
-    are required.
+    against the IDP's JWKS and whose `aud` claim matches `EXPECTED_AUDIENCE` — or,
+    optionally, a static API key on `X-API-Key` when the deployment has `INBOUND_API_KEY`
+    set. Either credential independently satisfies the request; no scopes are required.
 
     Projected balances are computed by deterministic compound-interest arithmetic in
     `projections.py`; the LLM only frames and explains them, it never computes them.
@@ -76,6 +77,7 @@ paths:
         parsed — can tag its `validated_incoming` audit event with it too.
       security:
         - OAuth2: []
+        - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/TransactionIdHeader'
       requestBody:
@@ -136,8 +138,10 @@ components:
   responses:
     Unauthorized:
       description: |
-        Bearer token is absent, malformed, expired, failed signature validation against
-        the IDP JWKS, or carries an `aud` claim other than `EXPECTED_AUDIENCE`.
+        Neither credential validated: the bearer token is absent, malformed, expired,
+        failed signature validation against the IDP JWKS, or carries an `aud` claim other
+        than `EXPECTED_AUDIENCE`; and (when `INBOUND_API_KEY` is configured) `X-API-Key`
+        was absent or did not match.
       content:
         application/json:
           schema:
@@ -180,6 +184,16 @@ components:
         clientCredentials:
           tokenUrl: https://api.asgardeo.io/t/{org}/oauth2/token
           scopes: {}
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Static API key, presented as `X-API-Key`. An alternative to `OAuth2` above, not a
+        replacement — either independently satisfies the request. Only active when the
+        deployment has `INBOUND_API_KEY` set; intended for third-party callers that can't
+        be issued OAuth client credentials for this agent. Checked with a constant-time
+        comparison. No scopes — a valid key is sufficient to call any endpoint.
   schemas:
     TransactionId:
       type: string

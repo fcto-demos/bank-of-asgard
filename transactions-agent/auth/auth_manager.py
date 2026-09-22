@@ -264,6 +264,21 @@ class AutogenAuthManager:
     async def _fetch_agent_token(self, config: Optional[AuthConfig] = None) -> OAuthToken:
         """Fetch an agent token using agent credentials.
 
+        Despite the AGENT_TOKEN name, this is not a client_credentials grant:
+        asgardeo_ai.AgentAuthManager.get_agent_token authenticates the agent via
+        Asgardeo's Native Auth API (agent_id/agent_secret presented as a
+        username/password authenticator), which yields an authorization code, then
+        redeems that code via the standard authorization_code grant with PKCE. This
+        agent's AsgardeoConfig carries no client_secret, so the code exchange itself is
+        authenticated by the PKCE code_verifier alone (public client), not a secret.
+
+        get_agent_token() is a single opaque call into that library — we can't hook its
+        internal steps — so the three events below are emitted back-to-back just before
+        it, in the order those steps actually occur, purely to make the mechanism
+        visible on the token-flow page instead of collapsing it into one hop. Their
+        timestamps will be near-identical; only the gap before the final `fresh` event
+        (emitted by the caller once this returns) reflects real network time.
+
         Args:
             config: Optional authentication configuration for scopes
 
@@ -271,15 +286,33 @@ class AutogenAuthManager:
             Agent OAuth token
         """
         scopes = config.scopes if config else []
-        emit_token_event(
-            service="transactions-agent", event="agent_token_fetch",
-            origin=self._agent_config.agent_id, destination="IS",
-            grant_type="authorization_code", kind="AGENT_TOKEN",
+        common = dict(
+            service="transactions-agent", grant_type="authorization_code", kind="AGENT_TOKEN",
             client_id=self._config.client_id,
             resource=config.resource if config else "obo_actor_token",
             requested_by=self._agent_config.agent_id,
         )
-        return await self.agent_auth_manager.get_agent_token(scopes)
+        emit_token_event(
+            event="agent_native_auth_initiated",
+            origin=self._agent_config.agent_id, destination="IS",
+            **common,
+        )
+        emit_token_event(
+            event="agent_native_auth_completed",
+            origin="IS", destination=self._agent_config.agent_id,
+            **common,
+        )
+        emit_token_event(
+            event="agent_token_fetch",
+            origin=self._agent_config.agent_id, destination="IS",
+            **common,
+        )
+        agent_token = await self.agent_auth_manager.get_agent_token(scopes)
+        # TODO: remove before production
+        logger.warning(
+            "DEBUG AGENT token (resource=%s): %s", common["resource"], agent_token.access_token
+        )
+        return agent_token
 
     async def _fetch_oauth_token(
         self,

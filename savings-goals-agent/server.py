@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import secrets
 import time
 from functools import cached_property
 from pathlib import Path
@@ -35,6 +36,12 @@ logger = logging.getLogger(__name__)
 IDP_BASE_URL = os.environ["IDP_BASE_URL"]
 SSL_VERIFY = os.environ.get("SSL_VERIFY", "true").lower() != "false"
 EXPECTED_AUDIENCE = os.environ["EXPECTED_AUDIENCE"]
+
+# Inbound API key — an alternative to the bearer JWT below, not a replacement. Set
+# INBOUND_API_KEY to accept a static key on this header in addition to OAuth; leave it
+# unset (the default) and only bearer JWTs are accepted, same as before this existed.
+INBOUND_API_KEY = os.environ.get("INBOUND_API_KEY")
+INBOUND_API_KEY_HEADER = os.environ.get("INBOUND_API_KEY_HEADER", "X-API-Key")
 
 # The resource label "savings_agent" (used as a destination in transactions-agent's
 # auth_manager.py) and this service's own name both refer to the same real entity —
@@ -150,29 +157,43 @@ def _validate_token(token: str) -> None:
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """Validates the Authorization header on every request except /health. No
-    SSE/streaming responses on this service, so BaseHTTPMiddleware (unlike the agencies
-    MCP server) is fine here."""
+    """Validates every request except /health against either a bearer JWT or, if
+    INBOUND_API_KEY is set, a static API key — either credential is accepted, neither is
+    required over the other. No SSE/streaming responses on this service, so
+    BaseHTTPMiddleware (unlike the agencies MCP server) is fine here."""
 
     async def dispatch(self, request: Request, call_next):
         # Set from the header (not the body — the body isn't parsed yet at this point)
-        # so _validate_token's audit event is tagged with the right transaction_id too.
+        # so the validation audit events below are tagged with the right transaction_id.
         set_transaction(request.headers.get("x-transaction-id"))
         # Liveness probes (start-demo.sh, container healthchecks) have no token to present
         # and the response exposes nothing — same exemption as tax-agent/server.py.
         if request.url.path == "/health":
             return await call_next(request)
+
+        if INBOUND_API_KEY:
+            presented = request.headers.get(INBOUND_API_KEY_HEADER)
+            if presented and secrets.compare_digest(presented, INBOUND_API_KEY):
+                emit_token_event(
+                    service="savings-goals-agent", event="validated_incoming",
+                    origin="external-caller", destination="savings-goals-agent",
+                    access_token=presented, kind="API_KEY",
+                    client_id=EXPECTED_AUDIENCE, requested_by="external-caller",
+                )
+                return await call_next(request)
+
         auth = request.headers.get("authorization", "")
-        if not auth.startswith("Bearer "):
-            logger.warning("Request rejected — missing or invalid Authorization header")
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        token = auth[len("Bearer "):]
-        try:
-            _validate_token(token)
-        except Exception as exc:
-            logger.warning("Request rejected — token validation failed: %s", exc)
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return await call_next(request)
+        if auth.startswith("Bearer "):
+            token = auth[len("Bearer "):]
+            try:
+                _validate_token(token)
+                return await call_next(request)
+            except Exception as exc:
+                logger.warning("Request rejected — token validation failed: %s", exc)
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+        logger.warning("Request rejected — missing or invalid credentials")
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
 
 # ── LLM construction — trimmed copy of langchain-agent/service.py's gateway logic.
@@ -354,6 +375,7 @@ async def suggest_goal(req: SuggestGoalRequest):
     if req.transaction_id:
         Traceloop.set_association_properties({"transaction_id": req.transaction_id})
 
+    logger.info ("--> Entering savings agent code")
     projected_balances = project_milestones(req.monthly_recoverable)
 
     prompt_input = {

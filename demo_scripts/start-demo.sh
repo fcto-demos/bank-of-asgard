@@ -141,7 +141,7 @@ SAVINGS_ENV="$ROOT/savings-goals-agent/.env"
 [[ -f "$SAVINGS_PY" ]]  || die "savings-goals-agent venv not found. Run: cd savings-goals-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 [[ -f "$SAVINGS_ENV" ]] || die "savings-goals-agent/.env not found — copy from savings-goals-agent/.env.example"
 
-# ── Tax agent paths (Ministry of Finance) ─────────────────────────────────────
+# ── Tax agent paths ───────────────────────────────────
 # Optional, unlike the savings agent: when its venv or .env is absent the rest of the
 # demo still starts, minus the two tax tools.
 TAX_PY="$ROOT/tax-agent/venv/bin/python"
@@ -393,7 +393,7 @@ echo "savings:$!" >> "$PID_FILE"
 
 wait_for_port $PORT_SAVINGS "savings-goals-agent"
 
-# ── Start tax-agent (Ministry of Finance) ─────────────────────────────────────
+# ── Start tax-agent ─────────────────────────────────────
 if $TAX_ENABLED; then
     section "Starting tax-agent (port $PORT_TAX)"
 
@@ -467,7 +467,7 @@ echo -e "  ${BOLD}Transactions API${NC}     http://localhost:$PORT_API"
 echo -e "  ${BOLD}Agent ($AGENT_ARG)${NC}           ws://localhost:$PORT_AGENT"
 echo -e "  ${BOLD}Agencies MCP${NC}         sse://localhost:$PORT_MCP"
 echo -e "  ${BOLD}Savings Goals agent${NC} http://localhost:$PORT_SAVINGS"
-$TAX_ENABLED && echo -e "  ${BOLD}Tax agent (Ministry)${NC} http://localhost:$PORT_TAX" || true
+$TAX_ENABLED && echo -e "  ${BOLD}Tax agent ${NC} http://localhost:$PORT_TAX" || true
 echo -e "  ${BOLD}LLM${NC}                  $LLM_PROVIDER / $LLM_MODEL${LLM_VIA}"
 echo -e "  ${BOLD}IDP environment${NC}      ${ENV_PROFILE:-existing}"
 [[ "$AGENT" == "strands-agent" ]] && echo -e "  ${BOLD}AWS branding${NC}         enabled" || echo -e "  ${BOLD}AWS branding${NC}         disabled"

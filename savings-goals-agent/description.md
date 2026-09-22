@@ -49,6 +49,8 @@ Bearer JWT, validated on every route except `/health`. The token's RS256 signatu
 
 The only configured caller is the Bank of Asgard Coordinator, which presents an agent token audienced for `SAVINGS_AGENT_CLIENT_ID`. In A2A terms this is a `securityScheme` of type `oauth2` with the `clientCredentials` flow and an empty `scopes` object.
 
+Optionally, if `INBOUND_API_KEY` is set, a caller may instead present that value on the `X-API-Key` header (configurable via `INBOUND_API_KEY_HEADER`) — this is an alternative to the bearer JWT above, not a replacement, and is checked with a constant-time comparison. It exists for third-party callers that can't be issued OAuth client credentials for this agent. Left unset (the default), only bearer JWTs are accepted. In A2A terms this adds a second `securityScheme` of type `apiKey` (`in: header`, `name: X-API-Key`); either scheme independently satisfies the request.
+
 Callers should forward `X-Transaction-Id` so this agent's audit events and traces correlate with the calling session; the field is also accepted in the request body. `user_sub` identifies whose consented data is being delegated and is decoded by the caller from the user's OBO token — it is recorded for audit and never used to fetch anything.
 
 ## What a caller actually gets back

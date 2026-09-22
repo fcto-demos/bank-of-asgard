@@ -16,7 +16,10 @@
 #              Only supported by the strands agent implementation.
 
 provider: anthropic
+# For Anthropic direct
 model: claude-haiku-4-5
+# Via Bedrock
+# model: eu.anthropic.claude-haiku-4-5-20251001-v1:0
 
 # WSO2 API Gateway — optional, disabled by default.
 # When enabled, LLM calls are routed via the gateway using OAuth2 client credentials

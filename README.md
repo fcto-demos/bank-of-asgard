@@ -24,10 +24,10 @@ All LLM calls are proxied through the WSO2 AI Gateway. Users management and agen
 
 The following products are used in the context of this demo
 
-- WSO2 Identity Server (on-prem or SaaS) for Agentic Identity , MCP identity and access management.
+- WSO2 Identity Platform (on-prem or SaaS) for Agentic Identity, MCP identity and access control.
 - WSO2 AI Gateway (4.6 or 4.7 versions) for LLM governance and AI guardrails
-- WSO2 Agent Manager for agent observability and governance
-- WSO2 Moesif for Analytics
+- WSO2 Agent Manager for agent observability, governance and hosting
+- WSO2 Moesif for AI and API Analytics
 
 ## Tech stack
 
@@ -204,7 +204,6 @@ Note the **Client ID**, you will use it to set `APP_CLIENT_ID` in `app/public/co
 2. Once the app is created, enable the **Code** and  **Token Exchange** grant types
 3. Select the Public Client option (secret will be removed)
 4. Add the redirect URL: `http://localhost:8011/callback`
-
 5. Add the allowed origin: `http://localhost:8011`
 6. Ensure token format is JWT.
 7. Under **Authorization**, add the Transactions API and the `read_transactions` scope (this is required, otherwise the scope won't be added to the OBO token)
@@ -708,6 +707,20 @@ GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
 The mode defaults to `oauth`, so existing deployments are unaffected and the other agents remain OAuth-only. In `apikey` mode `GATEWAY_CLIENT_ID`, `GATEWAY_CLIENT_SECRET` and `GATEWAY_TOKEN_ENDPOINT` are unused — there is no token endpoint, no refresh and nothing cached, just the key on each request.
 
 Calls still go through the gateway in both modes; only the credential presented changes. The key itself is never logged — the audit trail records a short hash of it, the same fingerprint treatment a bearer token gets, so you can still follow which credential made which call. An unrecognised mode, or `apikey` with no `GATEWAY_API_KEY`, fails at startup rather than surfacing as a 401 on the first LLM call.
+
+Note this swaps the credential the Savings Goals Agent presents to the *outbound* LLM gateway — see below for the separate, inbound-facing API key.
+
+#### API key alongside OAuth for inbound calls (Savings Goals Agent only)
+
+Separately from the outbound gateway credential above, the Savings Goals Agent can also accept an API key from its *callers*, as an alternative to the bearer JWT it otherwise requires — not a replacement, either credential independently satisfies a request. Set `INBOUND_API_KEY` in `savings-goals-agent/.env`:
+
+```YAML
+# savings-goals-agent/.env
+INBOUND_API_KEY=<SAVINGS_AGENT_INBOUND_API_KEY>
+# INBOUND_API_KEY_HEADER=X-API-Key   # default; override if your caller sends another header
+```
+
+Left unset (the default), only OAuth-issued bearer JWTs are accepted, same as before this existed. The key is checked with a constant-time comparison and never logged in full — only a short hash appears in the audit trail, same treatment as every other credential. This is intended for configuring Agent Manager's testing interface, or any other third-party caller that can't be issued OAuth client credentials for this agent; see `savings-goals-agent/openapi-apikey.yaml` for an API-key-only variant of the OpenAPI spec (the main `openapi.yaml` documents both schemes as alternatives).
 
 ### Agencies MCP Server
 
