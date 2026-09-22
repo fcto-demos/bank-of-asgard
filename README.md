@@ -722,6 +722,17 @@ INBOUND_API_KEY=<SAVINGS_AGENT_INBOUND_API_KEY>
 
 Left unset (the default), only OAuth-issued bearer JWTs are accepted, same as before this existed. The key is checked with a constant-time comparison and never logged in full — only a short hash appears in the audit trail, same treatment as every other credential. This is intended for configuring Agent Manager's testing interface, or any other third-party caller that can't be issued OAuth client credentials for this agent; see `savings-goals-agent/openapi-apikey.yaml` for an API-key-only variant of the OpenAPI spec (the main `openapi.yaml` documents both schemes as alternatives).
 
+#### Forwarded bearer JWT header (Savings Goals Agent only)
+
+The Savings Goals Agent looks for the inbound bearer JWT on the standard `Authorization` header first. If that header is absent (for example, a fronting proxy forwards the original credential under a different name), it falls back to a second header, `x-forwarded-authorization` by default. Override it with `FORWARDED_AUTH_HEADER` in `savings-goals-agent/.env`:
+
+```YAML
+# savings-goals-agent/.env
+# FORWARDED_AUTH_HEADER=x-forwarded-authorization   # default; override if your proxy sends another header
+```
+
+Both headers are expected to carry a `Bearer <token>` value; whichever is present and well-formed first wins, and the token is validated the same way regardless of which header it came from.
+
 ### Agencies MCP Server
 
 You can proxy the Agencies MCP server via the publisher console:

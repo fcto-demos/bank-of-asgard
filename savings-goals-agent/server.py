@@ -43,6 +43,12 @@ EXPECTED_AUDIENCE = os.environ["EXPECTED_AUDIENCE"]
 INBOUND_API_KEY = os.environ.get("INBOUND_API_KEY")
 INBOUND_API_KEY_HEADER = os.environ.get("INBOUND_API_KEY_HEADER", "X-API-Key")
 
+# Bearer JWT is looked up on the standard Authorization header first; if absent, we fall
+# back to this second header (a proxy/gateway hop in front of this service may forward the
+# original credential under a different name). Overridable so deployments can point it at
+# whatever their fronting proxy actually uses.
+FORWARDED_AUTH_HEADER = os.environ.get("FORWARDED_AUTH_HEADER", "x-forwarded-authorization")
+
 # The resource label "savings_agent" (used as a destination in transactions-agent's
 # auth_manager.py) and this service's own name both refer to the same real entity —
 # register the synonym so they don't fragment into separate actors in the audit trail.
@@ -183,6 +189,8 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         auth = request.headers.get("authorization", "")
+        if not auth.startswith("Bearer "):
+            auth = request.headers.get(FORWARDED_AUTH_HEADER, "")
         if auth.startswith("Bearer "):
             token = auth[len("Bearer "):]
             try:
@@ -192,7 +200,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 logger.warning("Request rejected — token validation failed: %s", exc)
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-        logger.warning("Request rejected — missing or invalid credentials")
+        logger.warning("Request rejected at agent level — missing or invalid credentials")
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
 
