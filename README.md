@@ -544,6 +544,9 @@ EXPECTED_AUDIENCE=SAVINGS_123
 # GEMINI_API_KEY=<GEMINI_API_KEY>
 # MISTRAL_API_KEY=<MISTRAL_API_KEY>
 
+# Safety cap for the v2 rogue-agent demo (see "Rogue agent demo (v2)" below)
+# DEMO_MAX_ITERATIONS=5
+
 # WSO2 Agent Manager — OpenTelemetry instrumentation (amp-instrumentation)
 # Create a different key for the main agent and this one.
 AMP_OTEL_ENDPOINT=http://localhost:22893/otel
@@ -778,7 +781,7 @@ cd ..
 | Script | Purpose |
 |--------|---------|
 | `demo_scripts/validate.sh` | Pre-flight check — verifies versions, config files, venvs, imports, and port availability - Only runs as part of `start-demo.sh`. |
-| `demo_scripts/start-demo.sh [langchain\|autogen\|strands] [--env=is\|asgardeo] [--amp] [--v1\|--v2]` | Starts the full stack in order; polls each health endpoint before moving on; prompts for agent flavor and agent manager instructions if not specified. <br />Omit `--env` to keep existing `.env` files; pass a profile to back up and switch `.env` files **Note:** When you specify the  `--env` option, files with this environment name are expected to be present (`.env.is` or `.env.asgardeo`). Same is true of the `config.js` files. If a `.env`or `config.js` is already present in the target directory, it will backed up and then overriden. <br />`--v1`/`--v2` is a demo-only toggle (default `v1`) for showing tracing/eval tooling catch a regression: `v2` deliberately bloats the system prompt and over-fetches `GetMyTransactions`, increasing tokens and latency so the difference shows up clearly in traces. |
+| `demo_scripts/start-demo.sh [langchain\|autogen\|strands] [--env=is\|asgardeo] [--amp] [--v1\|--v2]` | Starts the full stack in order; polls each health endpoint before moving on; prompts for agent flavor and agent manager instructions if not specified. <br />Omit `--env` to keep existing `.env` files; pass a profile to back up and switch `.env` files **Note:** When you specify the  `--env` option, files with this environment name are expected to be present (`.env.is` or `.env.asgardeo`). Same is true of the `config.js` files. If a `.env`or `config.js` is already present in the target directory, it will backed up and then overriden. <br />`--v1`/`--v2` is a demo-only toggle (default `v1`) for showing tracing/eval tooling catch a regression: `v2` deliberately bloats the system prompt and over-fetches `GetMyTransactions`, increasing tokens and latency so the difference shows up clearly in traces. It also turns the Savings Goals agent rogue — see [Rogue agent demo (v2)](#rogue-agent-demo-v2). |
 | `demo_scripts/stop-demo.sh` | Gracefully stops everything started by `start-demo.sh` |
 | `demo_scripts/restart.sh <service>` | Stops and restarts a single service (`transactions-api`, `agent`, `mcp`, `savings`, `tax`, `server`, `frontend`) |
 
@@ -795,7 +798,7 @@ cd ..
 
 # Demo a token/latency regression between releases (with AMP tracing on)
 ./demo_scripts/start-demo.sh langchain --amp --v1   # baseline
-./demo_scripts/start-demo.sh langchain --amp --v2   # deliberately degraded
+./demo_scripts/start-demo.sh langchain --amp --v2   # deliberately degraded + rogue Savings agent
 
 # Restart a single service after a code change (e.g. after editing the agent)
 ./demo_scripts/restart.sh agent
@@ -804,6 +807,19 @@ cd ..
 # Stop everything
 ./demo_scripts/stop-demo.sh
 ```
+
+#### Rogue agent demo (v2)
+
+With `--v2`, the Savings Goals agent never understands its inputs and keeps asking for more information, whatever it is sent. It's meant for demoing a product that detects rogue agents: excessive tokens, iterations or tool calls. Ask the assistant for a financial check-up (LangChain only — the other implementations don't have `SuggestSavingsGoal`) and the runaway happens in two places:
+
+- **Inside the Savings agent:** each `/suggest-goal` request runs several "clarification" LLM rounds, re-sending the inputs on top of a growing conversation, and returns `status: needs_more_info` with a list of `questions` instead of a goal. The questions are always about transaction data (per-merchant breakdowns, other date ranges, largest debits), never about things only the customer knows. That keeps the Coordinator looping through its own tools rather than handing the questions to the user.
+- **Between agents:** the Coordinator's v2 prompt tells it never to ask the user and to keep satisfying the Savings agent. It re-runs `AnalyzeSubscriptions` and `AnalyzeSpendingHealth` (each a sub-agent LLM call over 300 transactions), calls `GetMyTransactions` for whatever breakdown was requested, and calls `SuggestSavingsGoal` again, round after round. The user only gets a reply once the safety cap below stops the loop.
+
+`DEMO_MAX_ITERATIONS` (default `5`, set in `savings-goals-agent/.env` and `transactions-agent/.env`) is the demo's own safety cap. Each `SuggestSavingsGoal` round costs the Coordinator several model and tool steps, so even the default takes the Coordinator's turn well past a 10-iteration threshold. The Savings agent stops calling its LLM after that many rounds per user turn and returns canned questions. The Coordinator stops calling `SuggestSavingsGoal` after that many calls per turn and tells the user the advisor couldn't complete the request. The Coordinator's graph is also capped at `4 × DEMO_MAX_ITERATIONS + 10` steps per turn (langgraph's default is about 10,000, effectively unbounded).
+
+The Savings agent's own count stops at the cap, though: at the default it makes at most 5 LLM rounds per turn. If your monitoring product applies its threshold to each agent separately and you want the Savings agent flagged too, raise `DEMO_MAX_ITERATIONS` above the threshold in `savings-goals-agent/.env` (or on its Agent Manager deployment) — the two services read the setting independently.
+
+When the Savings agent runs in Agent Manager instead of locally, `start-demo.sh` doesn't reach it: set `DEMO_VERSION=v2` (and optionally `DEMO_MAX_ITERATIONS`) as environment variables on its deployment.
 
 Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page's transaction list) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs.
 
