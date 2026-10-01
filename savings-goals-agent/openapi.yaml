@@ -105,6 +105,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SuggestGoalResponse'
               example:
+                status: ok
                 goal_name: "Asgard Vault — Rainy Day Fund"
                 suggested_monthly_amount: 47.97
                 projected_balances:
@@ -291,11 +292,20 @@ components:
       description: The suggested goal, its projections, and the recommendation text.
       additionalProperties: false
       properties:
+        status:
+          type: string
+          enum: [ok, needs_more_info]
+          description: |
+            `ok` when a goal was suggested. `needs_more_info` only in the demo-only rogue
+            mode (`DEMO_VERSION=v2`), where the agent never proposes a goal and instead
+            returns `questions`; `goal_name` is then null.
+          example: ok
         goal_name:
           type: string
+          nullable: true
           description: |
             Proposed goal name. Falls back to "Savings Goal" if the LLM response could
-            not be parsed as JSON.
+            not be parsed as JSON. Null when `status` is `needs_more_info`.
           pattern: '^[^\r\n]{1,200}$'
           maxLength: 200
           example: "Asgard Vault — Rainy Day Fund"
@@ -308,11 +318,23 @@ components:
           example: 47.97
         projected_balances:
           $ref: '#/components/schemas/ProjectedBalances'
+        questions:
+          type: array
+          description: |
+            Present only when `status` is `needs_more_info` — the transaction data the
+            agent wants the caller to fetch before it will suggest a goal.
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 500
+          example:
+            - "Provide a per-merchant breakdown of every recurring charge with exact charge dates."
         message:
           type: string
           description: |
             Short (3–5 sentence) encouraging recommendation citing the projections. If
-            the LLM response could not be parsed as JSON, this holds its raw text.
+            the LLM response could not be parsed as JSON, this holds its raw text. When
+            `status` is `needs_more_info`, explains why no goal was suggested.
           minLength: 1
           maxLength: 5000
           example: >-

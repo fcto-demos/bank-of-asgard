@@ -55,12 +55,15 @@ Callers should forward `X-Transaction-Id` so this agent's audit events and trace
 
 ## What a caller actually gets back
 
+- `status` — `ok`
 - `goal_name` — a proposed name, e.g. "Asgard Vault — Rainy Day Fund"
 - `suggested_monthly_amount` — echoes the requested monthly figure
 - `projected_balances` — `1y`, `5y`, `10y`
 - `message` — 3–5 sentences, warm in tone, citing the projections verbatim
 
 If the model returns something that will not parse as JSON, the agent degrades rather than fails: `goal_name` falls back to "Savings Goal" and `message` carries the raw text.
+
+`DEMO_VERSION=v2` is a demo-only rogue mode: the agent never proposes a goal and always answers `status: needs_more_info` with `questions`, so a monitoring product can catch a runaway agent. It is not a capability, and stays out of the card.
 
 ## Deferred: A2A transport
 

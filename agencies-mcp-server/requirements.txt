@@ -1,6 +1,6 @@
 fastmcp>=2.0
 uvicorn>=0.30
-PyJWT>=2.9
+PyJWT>=2.15.1
 cryptography>=48.0.1
 httpx>=0.27
 python-dotenv>=1.0

@@ -235,6 +235,8 @@ case "$SERVICE" in
         # so it needs its own AMP_OTEL_ENDPOINT/AMP_AGENT_API_KEY (from its own .env),
         # not transactions-agent's.
         USE_AMP="${USE_AMP:-false}"
+        # DEMO_VERSION=v2 turns the savings agent rogue (see savings-goals-agent/server.py).
+        DEMO_VERSION="${DEMO_VERSION:-v1}"
         section "Restarting savings-goals-agent (port $PORT_SAVINGS)"
         stop_service "savings"
         free_port $PORT_SAVINGS
@@ -253,12 +255,12 @@ case "$SERVICE" in
             if [[ -n "$SAVINGS_OTEL_CERT" ]]; then
                 [[ -f "$SAVINGS_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $SAVINGS_OTEL_CERT"
             fi
-            (export AMP_OTEL_ENDPOINT="$SAVINGS_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$SAVINGS_AMP_AGENT_API_KEY"
+            (export AMP_OTEL_ENDPOINT="$SAVINGS_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$SAVINGS_AMP_AGENT_API_KEY" DEMO_VERSION
              if [[ -n "$SAVINGS_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$SAVINGS_OTEL_CERT"; fi
              cd "$ROOT/savings-goals-agent" && "$SAVINGS_AMP_INSTRUMENT" "$SAVINGS_PY" server.py \
                 > "$LOG_DIR/savings.log" 2>&1) &
         else
-            (set +u; set -a; source "$SAVINGS_ENV"; set +a; set -u; cd "$ROOT/savings-goals-agent" && "$SAVINGS_PY" server.py \
+            (set +u; set -a; source "$SAVINGS_ENV"; set +a; set -u; export DEMO_VERSION; cd "$ROOT/savings-goals-agent" && "$SAVINGS_PY" server.py \
                 > "$LOG_DIR/savings.log" 2>&1) &
         fi
         register_pid "savings" "$!"

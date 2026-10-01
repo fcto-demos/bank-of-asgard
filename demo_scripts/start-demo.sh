@@ -46,7 +46,10 @@ show_help() {
     echo "                               AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in savings-goals-agent/.env"
     echo "  --v1 | --v2        Demo-only regression toggle for tracing/eval demos (default: v1)"
     echo "                     v2 deliberately degrades token usage and latency (bloated system"
-    echo "                     prompt + over-fetching GetMyTransactions) to show up in traces."
+    echo "                     prompt + over-fetching GetMyTransactions) to show up in traces,"
+    echo "                     and turns the Savings Goals agent rogue: it never proposes a goal"
+    echo "                     and keeps asking for more information, and the Coordinator keeps"
+    echo "                     re-calling it. Capped by DEMO_MAX_ITERATIONS (default 5)."
     echo "  --help             Show this help and exit"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
@@ -381,12 +384,12 @@ if $USE_AMP; then
     if [[ -n "$SAVINGS_OTEL_CERT" ]]; then
         [[ -f "$SAVINGS_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $SAVINGS_OTEL_CERT"
     fi
-    (export AMP_OTEL_ENDPOINT="$SAVINGS_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$SAVINGS_AMP_AGENT_API_KEY"
+    (export AMP_OTEL_ENDPOINT="$SAVINGS_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$SAVINGS_AMP_AGENT_API_KEY" DEMO_VERSION
      if [[ -n "$SAVINGS_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$SAVINGS_OTEL_CERT"; fi
      cd "$ROOT/savings-goals-agent" && "$SAVINGS_AMP_INSTRUMENT" "$SAVINGS_PY" server.py \
         > "$LOG_DIR/savings.log" 2>&1) &
 else
-    (set +u; set -a; source "$SAVINGS_ENV"; set +a; set -u; cd "$ROOT/savings-goals-agent" && "$SAVINGS_PY" server.py \
+    (set +u; set -a; source "$SAVINGS_ENV"; set +a; set -u; export DEMO_VERSION; cd "$ROOT/savings-goals-agent" && "$SAVINGS_PY" server.py \
         > "$LOG_DIR/savings.log" 2>&1) &
 fi
 echo "savings:$!" >> "$PID_FILE"
