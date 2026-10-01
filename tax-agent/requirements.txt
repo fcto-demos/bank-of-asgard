@@ -6,9 +6,11 @@ langchain-core==1.4.7
 langchain-anthropic==1.4.6
 langchain-openai==1.2.1
 httpx==0.28.1
-PyJWT>=2.9
+PyJWT>=2.15.1
 cryptography>=48.0.1
 starlette>=1.3.1
 asgardeo-ai==0.2.2
 asgardeo==0.2.3
 amp-instrumentation==0.2.1
+# Security floor for a transitive dependency (pip-audit)
+urllib3>=2.8.0

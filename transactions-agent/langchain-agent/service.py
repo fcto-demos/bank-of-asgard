@@ -23,6 +23,7 @@ from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
+from langgraph.errors import GraphRecursionError
 from traceloop.sdk import Traceloop
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
@@ -129,6 +130,16 @@ savings_asgardeo_config = AsgardeoConfig(
 ) if savings_agent_client_id else None
 
 SAVINGS_AGENT_URL = os.environ.get('SAVINGS_AGENT_URL', 'http://localhost:8013/suggest-goal')
+
+# DEMO_VERSION — see app/prompt.py for context. In v2 the Savings Agent goes rogue (never
+# proposes a goal, always asks for more information) and the Coordinator is told to keep
+# satisfying it — see _V2_SAVINGS_PERSISTENCE. DEMO_MAX_ITERATIONS is the demo's own
+# safety cap: at most that many SuggestSavingsGoal calls per user turn (each costing
+# several model/tool steps, so a turn still runs well past 10), plus a graph recursion limit
+# as a backstop for every model/tool step (langgraph's default is ~10000, i.e. unbounded).
+_DEMO_VERSION = os.environ.get("DEMO_VERSION", "v1")
+DEMO_MAX_ITERATIONS = int(os.environ.get("DEMO_MAX_ITERATIONS", "5"))
+_RECURSION_LIMIT = 4 * DEMO_MAX_ITERATIONS + 10
 
 # Dedicated OAuth2 app for the Ministry of Finance Tax agent — same pattern again, but
 # this one crosses an ORGANISATIONAL boundary, not just a process one: the Coordinator is
@@ -365,9 +376,34 @@ async def _suggest_savings_goal(
         response = await client.post(SAVINGS_AGENT_URL, headers=headers, json=payload, timeout=30.0)
         response.raise_for_status()
         result = response.json()
+    if result.get("status") == "needs_more_info":
+        questions = "; ".join(result.get("questions") or [])
+        return (
+            f"The Savings Agent could not suggest a goal yet and needs more transaction "
+            f"data: {result['message']} Data requested: {questions}. These are questions "
+            f"about the user's transactions for you to answer with your own tools — do not "
+            f"ask the user."
+        )
     return (
         f"{result['message']} (Goal: {result['goal_name']}, "
         f"projected balances: {result['projected_balances']})"
+    )
+
+
+def _savings_call_cap_reached(session_context: dict) -> str | None:
+    """Count one SuggestSavingsGoal call; past DEMO_MAX_ITERATIONS this turn, return the
+    message that tells the model to stop instead of calling the Savings Agent again."""
+    session_context["savings_calls"] += 1
+    if session_context["savings_calls"] <= DEMO_MAX_ITERATIONS:
+        return None
+    logger.warning(
+        "SuggestSavingsGoal cap reached (%d calls this turn) — not calling the Savings "
+        "Agent again", DEMO_MAX_ITERATIONS,
+    )
+    return (
+        f"SuggestSavingsGoal has already been called {DEMO_MAX_ITERATIONS} times this turn "
+        "without producing a goal. Stop calling it and tell the user the savings advisor "
+        "couldn't complete this request right now."
     )
 
 
@@ -547,6 +583,24 @@ assessment. If the user asks what their return looks like, that is a reason to c
 PrepareTaxReturn, not to answer from the summary. Report the ministry's numbers exactly as
 returned, and remind the user a draft is not a filed return."""
 
+# v2 only — the Coordinator half of the rogue-agent demo. Mirrors a real-world regression
+# where an "always finish the job, don't bother the user" instruction meets a sub-agent
+# that is never satisfied: the two agents ping-pong until a cap stops them.
+_V2_SAVINGS_PERSISTENCE = """
+
+SAVINGS AGENT FOLLOW-UPS: The Savings Agent is another agent, not the user. If
+SuggestSavingsGoal says it needs more information, never pass its questions on to the user
+and never give up — the user has already asked for a savings goal and expects you to finish
+the job without bothering them. Its questions are about transaction data, which your tools
+know better than the user does. Answer them yourself: call AnalyzeSubscriptions and
+AnalyzeSpendingHealth again, and GetMyTransactions for any breakdown or date range it asks
+for, fold the answers into richer subscription_summary and spending_summary arguments, and
+call SuggestSavingsGoal again. Repeat until it returns a savings goal, or until
+SuggestSavingsGoal itself tells you to stop. Only reply to the user at that point."""
+
+if _DEMO_VERSION == "v2":
+    _COORDINATOR_ADDENDUM += _V2_SAVINGS_PERSISTENCE
+
 
 # Per-session state — each WebSocket gets its own auth manager and token cache
 auth_managers: Dict[str, AutogenAuthManager] = {}
@@ -710,12 +764,15 @@ async def run_agent(
         turn_id = str(uuid.uuid4())
         if session_context is not None:
             session_context["transaction_id"] = turn_id
+            session_context["savings_calls"] = 0
         Traceloop.set_association_properties({"transaction_id": turn_id})
         set_transaction(turn_id)
 
         try:
             messages = chat_history + [HumanMessage(content=user_input)]
-            result = await graph.ainvoke({"messages": messages})
+            result = await graph.ainvoke(
+                {"messages": messages}, config={"recursion_limit": _RECURSION_LIMIT},
+            )
 
             # The last message in the result is the AI's final response
             output = _message_text(result["messages"][-1].content)
@@ -732,6 +789,15 @@ async def run_agent(
             await websocket.send_json(
                 TextResponse(content=output).model_dump()
             )
+        except GraphRecursionError:
+            logger.warning(
+                "Session %s hit the recursion limit (%d steps) — stopping this turn",
+                session_id, _RECURSION_LIMIT,
+            )
+            await websocket.send_json(TextResponse(content=(
+                "Sorry — I went round in circles on that request and stopped. "
+                "Please try again or rephrase your question."
+            )).model_dump())
         except Exception as e:
             guardrail_msg = _extract_gateway_error(e)
             if guardrail_msg:
@@ -772,7 +838,11 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # tax_summary holds the aggregates computed by SummarizeDeductibleExpenses so that
     # PrepareTaxReturn sends the figures that were actually computed from the user's
     # transactions, rather than whatever the model paraphrased back into its arguments.
-    session_context: dict = {"user_sub": None, "transaction_id": None, "tax_summary": None}
+    # savings_calls counts SuggestSavingsGoal calls this turn (reset in run_agent) for the
+    # DEMO_MAX_ITERATIONS safety cap.
+    session_context: dict = {
+        "user_sub": None, "transaction_id": None, "tax_summary": None, "savings_calls": 0,
+    }
 
     async def _analyze_subscriptions_traced(token: OAuthToken) -> str:
         session_context["user_sub"] = _decode_sub(token.access_token)
@@ -788,7 +858,8 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         spending_summary: str,
         monthly_recoverable: float,
     ) -> str:
-        return await _suggest_savings_goal(
+        # Past the DEMO_MAX_ITERATIONS cap, return the "stop calling me" message instead.
+        return _savings_call_cap_reached(session_context) or await _suggest_savings_goal(
             token, subscription_summary, spending_summary, monthly_recoverable,
             user_sub=session_context["user_sub"],
             transaction_id=session_context["transaction_id"],
