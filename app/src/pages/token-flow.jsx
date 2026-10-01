@@ -117,6 +117,7 @@ const EVENT_LABELS = /** @type {Record<string, string>} */ ({
   obo_exchanged: "OBO token issued",
   agent_native_auth_initiated: "Native auth initiated (PKCE challenge)",
   agent_native_auth_completed: "Native auth completed (password authenticator)",
+  agent_native_auth_failed: "Agent authentication failed",
   agent_token_fetch: "Authorization code exchanged (PKCE, no client secret)",
   gateway_token_fetch: "Gateway token requested",
   gateway_token_fresh: "Gateway token obtained (fresh)",

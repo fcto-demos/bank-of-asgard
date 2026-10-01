@@ -273,11 +273,12 @@ class AutogenAuthManager:
         authenticated by the PKCE code_verifier alone (public client), not a secret.
 
         get_agent_token() is a single opaque call into that library — we can't hook its
-        internal steps — so the three events below are emitted back-to-back just before
-        it, in the order those steps actually occur, purely to make the mechanism
-        visible on the token-flow page instead of collapsing it into one hop. Their
-        timestamps will be near-identical; only the gap before the final `fresh` event
-        (emitted by the caller once this returns) reflects real network time.
+        internal steps — so `initiated` is emitted just before it and `completed` /
+        `agent_token_fetch` back-to-back once it succeeds, in the order those steps
+        actually occur, purely to make the mechanism visible on the token-flow page
+        instead of collapsing it into one hop. If it fails, a single failed
+        `agent_native_auth_failed` hop is emitted instead, so the page never shows a
+        completed auth that didn't happen.
 
         Args:
             config: Optional authentication configuration for scopes
@@ -297,6 +298,16 @@ class AutogenAuthManager:
             origin=self._agent_config.agent_id, destination="IS",
             **common,
         )
+        try:
+            agent_token = await self.agent_auth_manager.get_agent_token(scopes)
+        except Exception as e:
+            emit_token_event(
+                event="agent_native_auth_failed",
+                origin="IS", destination=self._agent_config.agent_id,
+                success=False, error=f"{type(e).__name__}: {e}",
+                **common,
+            )
+            raise
         emit_token_event(
             event="agent_native_auth_completed",
             origin="IS", destination=self._agent_config.agent_id,
@@ -307,7 +318,6 @@ class AutogenAuthManager:
             origin=self._agent_config.agent_id, destination="IS",
             **common,
         )
-        agent_token = await self.agent_auth_manager.get_agent_token(scopes)
         # TODO: remove before production
         logger.warning(
             "DEBUG AGENT token (resource=%s): %s", common["resource"], agent_token.access_token

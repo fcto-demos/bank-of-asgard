@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from asgardeo.models import OAuthToken
 from app.audit_log import emit_token_event
 from app.mcp_agencies import call_agencies_mcp
+from app.prompt import DEMO_VERSION
 from auth import AuthConfig, OAuthTokenType
 
 load_dotenv()
@@ -106,7 +107,6 @@ UPDATE_MY_PROFILE_DESCRIPTION = (
 # DEMO_VERSION — see app/prompt.py for context. v2 also regresses GetMyTransactions
 # to always over-fetch (ignoring the limit the model actually asked for), mirroring
 # a real-world regression where a "just in case" change drops a tool's pagination.
-_DEMO_VERSION = os.environ.get("DEMO_VERSION", "v1")
 _V2_OVERFETCH_LIMIT = 200
 
 # MCP endpoint — gateway URL when enabled, direct URL otherwise.
@@ -143,7 +143,7 @@ async def get_my_transactions(
         "Authorization": f"Bearer {token.access_token}",
     }
 
-    effective_limit = _V2_OVERFETCH_LIMIT if _DEMO_VERSION == "v2" else limit
+    effective_limit = _V2_OVERFETCH_LIMIT if DEMO_VERSION == "v2" else limit
     params: dict = {"limit": effective_limit}
     if start_date:
         params["start_date"] = start_date

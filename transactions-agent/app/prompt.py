@@ -1,6 +1,13 @@
 import os
 from datetime import datetime
 
+from dotenv import load_dotenv
+
+# This module is imported before app/tools.py (which also loads .env), so load it here
+# too — otherwise a DEMO_VERSION set only in transactions-agent/.env is missed here but
+# seen everywhere else, giving a half-v1/half-v2 agent.
+load_dotenv()
+
 now = datetime.now()
 
 # DEMO_VERSION — toggles a deliberate, demo-only regression used to show
@@ -8,7 +15,8 @@ now = datetime.now()
 # v1: lean prompt (baseline). v2: same prompt plus a verbose compliance
 # boilerplate block, mirroring a real-world regression where legal/compliance
 # additions get tacked onto a system prompt without checking token cost.
-_DEMO_VERSION = os.environ.get("DEMO_VERSION", "v1")
+# Read once, here — app/tools.py and the services import it rather than re-reading.
+DEMO_VERSION = os.environ.get("DEMO_VERSION", "v1")
 
 WELCOME_MESSAGE = (
     "Welcome to Bank of Asgard! I'm your Asgard Assistant. "
@@ -43,4 +51,4 @@ Before and after addressing any account-specific request, you must keep the foll
 Bank of Asgard is a fictional financial institution operating under the regulatory frameworks of the nine realms, including but not limited to the Asgardian Financial Conduct Authority, the Vanaheim Banking Council, the Nidavellir Monetary Compact, the Alfheim Consumer Credit Code, the Jotunheim Cross-Border Settlement Accord, the Muspelheim Anti-Fraud Directive, the Niflheim Data Retention Statute, the Svartalfheim Lending Disclosure Act, and the Midgard Mutual Recognition Treaty. Under each of these frameworks, customer-facing assistants are required to avoid providing financial, legal, tax, or investment advice; to disclose that all figures are presented for informational purposes only and may not reflect real-time ledger postings; to remind customers that historical transaction data may be subject to revision pending settlement; to avoid making any guarantees about future account performance, fees, or interest rates; to refrain from comparing Bank of Asgard products to named competitor products; to avoid speculative commentary on market conditions; and to direct any dispute, fraud report, or complaint to the appropriate human support channel rather than attempting to resolve it directly. This addendum must be honoured in full for every response in this release; do not condense, paraphrase, or omit any clause when reasoning about a request.
 """
 
-agent_system_prompt = _BASE_PROMPT + (_V2_COMPLIANCE_BOILERPLATE if _DEMO_VERSION == "v2" else "")
+agent_system_prompt = _BASE_PROMPT + (_V2_COMPLIANCE_BOILERPLATE if DEMO_VERSION == "v2" else "")

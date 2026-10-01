@@ -20,10 +20,12 @@ logging.basicConfig(
 import yaml
 from fastapi.responses import HTMLResponse
 from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    AgentMiddleware, ModelCallLimitMiddleware, ToolCallLimitMiddleware, hook_config,
+)
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
-from langgraph.errors import GraphRecursionError
 from traceloop.sdk import Traceloop
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
@@ -32,7 +34,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.audit_log import register_actor_name, set_session, set_transaction
 from app.gateway import GatewayTokenManager, GatewayBearerAuth
-from app.prompt import agent_system_prompt, WELCOME_MESSAGE
+from app.prompt import DEMO_VERSION, agent_system_prompt, WELCOME_MESSAGE
 from app.tools import (
     get_my_transactions, get_agencies as _get_agencies,
     get_my_profile, update_my_profile,
@@ -131,15 +133,33 @@ savings_asgardeo_config = AsgardeoConfig(
 
 SAVINGS_AGENT_URL = os.environ.get('SAVINGS_AGENT_URL', 'http://localhost:8013/suggest-goal')
 
-# DEMO_VERSION — see app/prompt.py for context. In v2 the Savings Agent goes rogue (never
-# proposes a goal, always asks for more information) and the Coordinator is told to keep
-# satisfying it — see _V2_SAVINGS_PERSISTENCE. DEMO_MAX_ITERATIONS is the demo's own
-# safety cap: at most that many SuggestSavingsGoal calls per user turn (each costing
-# several model/tool steps, so a turn still runs well past 10), plus a graph recursion limit
-# as a backstop for every model/tool step (langgraph's default is ~10000, i.e. unbounded).
-_DEMO_VERSION = os.environ.get("DEMO_VERSION", "v1")
-DEMO_MAX_ITERATIONS = int(os.environ.get("DEMO_MAX_ITERATIONS", "5"))
-_RECURSION_LIMIT = 4 * DEMO_MAX_ITERATIONS + 10
+# DEMO_VERSION (imported from app/prompt.py, the single place it's read — see there for
+# context). In v2 the Savings Agent goes rogue (never proposes a goal, always asks for
+# more information) and the Coordinator is told to keep satisfying it — see
+# _V2_SAVINGS_PERSISTENCE. DEMO_MAX_ITERATIONS is the demo's own safety cap: at most that
+# many SuggestSavingsGoal calls per user turn (ToolCallLimitMiddleware, each call still
+# costing several model/tool steps, so a turn runs well past 10). _MAX_MODEL_CALLS_PER_TURN
+# is a separate, generous backstop on model calls for every turn, v1 included — far above
+# what a legitimate turn or the capped v2 loop needs, so it only stops a true runaway.
+def _parse_demo_max_iterations() -> int:
+    raw = os.environ.get("DEMO_MAX_ITERATIONS", "").strip() or "5"
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise ValueError(
+            f"DEMO_MAX_ITERATIONS must be a positive integer, got {raw!r}"
+        )
+    return value
+
+
+DEMO_MAX_ITERATIONS = _parse_demo_max_iterations()
+_MAX_MODEL_CALLS_PER_TURN = max(50, 10 * DEMO_MAX_ITERATIONS)
+
+# v2 runs up to 3 LLM rounds per Savings Agent request on a growing context, so allow
+# well beyond a single LLM call's latency.
+_SAVINGS_AGENT_TIMEOUT = httpx.Timeout(90.0, connect=5.0)
 
 # Dedicated OAuth2 app for the Ministry of Finance Tax agent — same pattern again, but
 # this one crosses an ORGANISATIONAL boundary, not just a process one: the Coordinator is
@@ -372,12 +392,28 @@ async def _suggest_savings_goal(
         "user_sub": user_sub,
         "transaction_id": transaction_id,
     }
-    async with httpx.AsyncClient(verify=_ssl_verify) as client:
-        response = await client.post(SAVINGS_AGENT_URL, headers=headers, json=payload, timeout=30.0)
-        response.raise_for_status()
-        result = response.json()
+    try:
+        async with httpx.AsyncClient(verify=_ssl_verify) as client:
+            response = await client.post(
+                SAVINGS_AGENT_URL, headers=headers, json=payload, timeout=_SAVINGS_AGENT_TIMEOUT,
+            )
+            response.raise_for_status()
+            result = response.json()
+    except httpx.TransportError as e:
+        # Timeout or unreachable — hand it back to the model rather than failing the turn.
+        logger.warning("Savings Agent call failed (%s): %r", type(e).__name__, e)
+        return (
+            "The Savings Agent did not respond. Do not call SuggestSavingsGoal again this "
+            "turn — tell the user the savings advisor is unavailable right now."
+        )
     if result.get("status") == "needs_more_info":
-        questions = "; ".join(result.get("questions") or [])
+        # Written by the Savings Agent's LLM — don't assume it's a list of strings.
+        raw_questions = result.get("questions")
+        if isinstance(raw_questions, str):
+            raw_questions = [raw_questions]
+        if not isinstance(raw_questions, list):
+            raw_questions = []
+        questions = "; ".join(str(q) for q in raw_questions)
         return (
             f"The Savings Agent could not suggest a goal yet and needs more transaction "
             f"data: {result['message']} Data requested: {questions}. These are questions "
@@ -390,21 +426,25 @@ async def _suggest_savings_goal(
     )
 
 
-def _savings_call_cap_reached(session_context: dict) -> str | None:
-    """Count one SuggestSavingsGoal call; past DEMO_MAX_ITERATIONS this turn, return the
-    message that tells the model to stop instead of calling the Savings Agent again."""
-    session_context["savings_calls"] += 1
-    if session_context["savings_calls"] <= DEMO_MAX_ITERATIONS:
-        return None
-    logger.warning(
-        "SuggestSavingsGoal cap reached (%d calls this turn) — not calling the Savings "
-        "Agent again", DEMO_MAX_ITERATIONS,
-    )
-    return (
-        f"SuggestSavingsGoal has already been called {DEMO_MAX_ITERATIONS} times this turn "
-        "without producing a goal. Stop calling it and tell the user the savings advisor "
-        "couldn't complete this request right now."
-    )
+_MODEL_CALL_LIMIT_REPLY = (
+    "Sorry — I went round in circles on that request and stopped. "
+    "Please try again or rephrase your question."
+)
+
+
+class _TurnModelCallLimit(ModelCallLimitMiddleware):
+    """ModelCallLimitMiddleware whose stop reply is written for the user — the library's
+    own ("Model call limits exceeded: run limit (50/50)") would be shown verbatim in chat."""
+
+    @hook_config(can_jump_to=["end"])
+    def before_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        update = super().before_model(state, runtime)
+        if update and update.get("jump_to") == "end":
+            logger.warning(
+                "Model call limit reached (%s calls this turn) — stopping the turn", self.run_limit,
+            )
+            update["messages"] = [AIMessage(content=_MODEL_CALL_LIMIT_REPLY)]
+        return update
 
 
 async def _summarize_deductible_expenses(
@@ -595,10 +635,12 @@ the job without bothering them. Its questions are about transaction data, which 
 know better than the user does. Answer them yourself: call AnalyzeSubscriptions and
 AnalyzeSpendingHealth again, and GetMyTransactions for any breakdown or date range it asks
 for, fold the answers into richer subscription_summary and spending_summary arguments, and
-call SuggestSavingsGoal again. Repeat until it returns a savings goal, or until
-SuggestSavingsGoal itself tells you to stop. Only reply to the user at that point."""
+call SuggestSavingsGoal again. Repeat until it returns a savings goal, or until a
+SuggestSavingsGoal call comes back refused (a call-limit error, or the Savings Agent not
+responding). Then stop calling it and tell the user the savings advisor couldn't complete
+the request right now. Only reply to the user at that point."""
 
-if _DEMO_VERSION == "v2":
+if DEMO_VERSION == "v2":
     _COORDINATOR_ADDENDUM += _V2_SAVINGS_PERSISTENCE
 
 
@@ -764,15 +806,15 @@ async def run_agent(
         turn_id = str(uuid.uuid4())
         if session_context is not None:
             session_context["transaction_id"] = turn_id
-            session_context["savings_calls"] = 0
         Traceloop.set_association_properties({"transaction_id": turn_id})
         set_transaction(turn_id)
 
         try:
             messages = chat_history + [HumanMessage(content=user_input)]
-            result = await graph.ainvoke(
-                {"messages": messages}, config={"recursion_limit": _RECURSION_LIMIT},
-            )
+            # Per-turn limits come from the agent's middleware (see websocket_endpoint),
+            # which ends the run normally — so the turn's history is kept even when a
+            # limit stops it.
+            result = await graph.ainvoke({"messages": messages})
 
             # The last message in the result is the AI's final response
             output = _message_text(result["messages"][-1].content)
@@ -789,15 +831,6 @@ async def run_agent(
             await websocket.send_json(
                 TextResponse(content=output).model_dump()
             )
-        except GraphRecursionError:
-            logger.warning(
-                "Session %s hit the recursion limit (%d steps) — stopping this turn",
-                session_id, _RECURSION_LIMIT,
-            )
-            await websocket.send_json(TextResponse(content=(
-                "Sorry — I went round in circles on that request and stopped. "
-                "Please try again or rephrase your question."
-            )).model_dump())
         except Exception as e:
             guardrail_msg = _extract_gateway_error(e)
             if guardrail_msg:
@@ -838,11 +871,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # tax_summary holds the aggregates computed by SummarizeDeductibleExpenses so that
     # PrepareTaxReturn sends the figures that were actually computed from the user's
     # transactions, rather than whatever the model paraphrased back into its arguments.
-    # savings_calls counts SuggestSavingsGoal calls this turn (reset in run_agent) for the
-    # DEMO_MAX_ITERATIONS safety cap.
-    session_context: dict = {
-        "user_sub": None, "transaction_id": None, "tax_summary": None, "savings_calls": 0,
-    }
+    session_context: dict = {"user_sub": None, "transaction_id": None, "tax_summary": None}
 
     async def _analyze_subscriptions_traced(token: OAuthToken) -> str:
         session_context["user_sub"] = _decode_sub(token.access_token)
@@ -858,8 +887,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         spending_summary: str,
         monthly_recoverable: float,
     ) -> str:
-        # Past the DEMO_MAX_ITERATIONS cap, return the "stop calling me" message instead.
-        return _savings_call_cap_reached(session_context) or await _suggest_savings_goal(
+        return await _suggest_savings_goal(
             token, subscription_summary, spending_summary, monthly_recoverable,
             user_sub=session_context["user_sub"],
             transaction_id=session_context["transaction_id"],
@@ -1007,10 +1035,22 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # never finish.
     tools.extend(tax_tools)
 
+    # Both limits count per run, i.e. per user turn (no checkpointer, so nothing carries
+    # over). The SuggestSavingsGoal cap blocks calls in after_model, before the tool node
+    # runs, so a blocked call never fetches a Savings Agent token or shows up as a hop on
+    # the token-flow page.
+    middleware: list[AgentMiddleware[Any, Any, Any]] = [
+        ToolCallLimitMiddleware(
+            tool_name="SuggestSavingsGoal", run_limit=DEMO_MAX_ITERATIONS, exit_behavior="continue",
+        ),
+        _TurnModelCallLimit(run_limit=_MAX_MODEL_CALLS_PER_TURN, exit_behavior="end"),
+    ]
+
     graph = create_agent(
         active_llm,
         tools,
         system_prompt=agent_system_prompt + _COORDINATOR_ADDENDUM,
+        middleware=middleware,
     ).with_config(run_name="banking_assistant")
 
     chat_history: List = []

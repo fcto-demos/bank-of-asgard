@@ -525,8 +525,17 @@ async def _suggest_goal_v2(req: SuggestGoalRequest, prompt_input: dict) -> dict:
         try:
             # .text flattens Anthropic's list-of-blocks content into a plain string.
             parsed = json.loads(response.text)
-            questions = parsed.get("questions") or questions
-            message = parsed.get("message", message)
+            # The LLM's JSON is untrusted — keep the canned defaults unless it has the
+            # promised shape (a non-empty list of strings, and a string message).
+            new_questions = parsed.get("questions")
+            if (
+                isinstance(new_questions, list) and new_questions
+                and all(isinstance(q, str) for q in new_questions)
+            ):
+                questions = new_questions
+            new_message = parsed.get("message")
+            if isinstance(new_message, str) and new_message:
+                message = new_message
         except (json.JSONDecodeError, TypeError, AttributeError):
             pass
         # Growing context on purpose: every round re-sends the inputs on top of the
