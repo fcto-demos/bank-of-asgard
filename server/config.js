@@ -35,6 +35,13 @@ export const USER_STORE_NAME = process.env.USER_STORE_NAME || "PRIMARY";
 export const TRANSACTIONS_ROLE_NAME = process.env.TRANSACTIONS_ROLE_NAME || "Read_Transactions";
 export const TRANSACTIONS_API_URL = process.env.TRANSACTIONS_API_URL || "http://localhost:8010";
 
+// Direct SCIM2 admin auth (see resolveScimUserByToken in server.js) - used
+// instead of the M2M client_credentials token for SCIM2 calls made on
+// behalf of a wallet-based login, so that path doesn't depend on a
+// particular M2M application existing/being authorized for user-mgt scopes.
+export const SCIM2_ADMIN_USERNAME = process.env.SCIM2_ADMIN_USERNAME;
+export const SCIM2_ADMIN_PASSWORD = process.env.SCIM2_ADMIN_PASSWORD;
+
 // Added to compress self signed cert validation
 export const agent = new https.Agent({
   rejectUnauthorized: false, // Disable SSL certificate validation

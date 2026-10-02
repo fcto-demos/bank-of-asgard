@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scan to Verify — Bank Of Asgard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" type="image/svg+xml" href="/branding/bank-of-asgard-favicon.svg">
+</head>
+<body>
+  <div class="app-shell">
+    <%- include('partials/header', { badgeClass: 'pending', badgeLabel: '⏳ Awaiting Presentation', badgeText: copy.badge || 'Identity Verification' }) %>
+
+    <main class="app-main">
+    <div class="app-main-inner">
+    <div class="card text-center">
+      <h1><%= copy.heading %></h1>
+      <p class="subtitle"><%= copy.subtitle %></p>
+
+      <% if (reason === 'statement') { %>
+        <div class="statement-preview">
+          <div class="statement-preview-doc">
+            <div class="statement-preview-doc-header">
+              <span class="statement-preview-doc-bank">BANK OF ASGARD</span>
+              <span class="statement-preview-doc-period">Statement &middot; Last 30 days</span>
+            </div>
+            <div class="statement-preview-doc-lines">
+              <div class="line"></div>
+              <div class="line"></div>
+              <div class="line short"></div>
+              <div class="line"></div>
+              <div class="line short"></div>
+            </div>
+            <div class="statement-preview-lock">🔒</div>
+          </div>
+          <div class="statement-preview-caption">Your statement is locked — verify your identity below to unlock it</div>
+        </div>
+      <% } %>
+
+      <div class="qr-wrapper">
+        <img src="<%= qrDataUrl %>" alt="VP Request QR Code" width="300">
+        <div class="qr-label"><%= copy.qrLabel %></div>
+      </div>
+
+      <div id="status-box" class="status-waiting">
+        <div class="spinner"></div>
+        <span id="status-text">Waiting for the customer to present their credential…</span>
+      </div>
+
+      <div class="mobile-link">
+        <p class="note">On the customer's own device? Tap to open directly in the wallet:</p>
+        <a href="<%= walletUrl %>" class="btn btn-secondary">Open in Wallet</a>
+      </div>
+
+      <p class="note">Verification reference: <code><%= sessionId %></code></p>
+    </div>
+    </div>
+    </main>
+
+    <%- include('partials/footer') %>
+  </div>
+
+  <script>
+    const sessionId = '<%= sessionId %>';
+    let poll;
+
+    async function checkStatus() {
+      try {
+        const res  = await fetch('/session/' + sessionId);
+        const data = await res.json();
+
+        if (data.status === 'verified') {
+          clearInterval(poll);
+          document.getElementById('status-box').className = 'status-success';
+          document.getElementById('status-text').textContent = '✅ Identity verified! Redirecting…';
+          setTimeout(() => window.location.href = '/result/' + sessionId, 1000);
+        } else if (data.status === 'error') {
+          clearInterval(poll);
+          document.getElementById('status-box').className = 'status-error';
+          document.getElementById('status-text').textContent = '❌ ' + (data.error || 'Verification failed');
+        }
+      } catch (e) { /* keep polling on network hiccups */ }
+    }
+
+    poll = setInterval(checkStatus, 2000);
+    checkStatus();
+  </script>
+</body>
+</html>

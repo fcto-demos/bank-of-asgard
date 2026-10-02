@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verification Result — Bank Of Asgard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" type="image/svg+xml" href="/branding/bank-of-asgard-favicon.svg">
+</head>
+<body>
+  <div class="app-shell">
+    <%- include('partials/header', {
+      badgeClass: session.status === 'verified' ? 'success' : 'error',
+      badgeLabel: session.status === 'verified' ? '✅ Verified' : '❌ Failed',
+      badgeText: copy.badge || 'Identity Verification'
+    }) %>
+
+    <main class="app-main">
+    <div class="app-main-inner">
+    <%
+      // Computed up front (outside the block below) so the postMessage
+      // script at the bottom of this page can still read it — claims
+      // pulled from the verified presentation aren't otherwise visible
+      // outside the "verified" branch's block scope.
+      let verifiedAddressText = null;
+      if (session.reason === 'verify-address' && session.status === 'verified' && session.presentation) {
+        const _creds  = session.presentation.credentials || [];
+        const _claims = Object.assign({}, ...(_creds.map(c => c.claims || {})));
+        // The utility-credential-presentation definition discloses a single
+        // flat "home_address" claim (WSO2 IS local claim
+        // http://wso2.org/claims/homeAddress) — not a structured "address"
+        // object or the individual street_address/locality/etc. fields
+        // those come from a different (personal-data) credential shape.
+        if (_claims.home_address) {
+          const _h = _claims.home_address;
+          verifiedAddressText = (typeof _h === 'string')
+            ? _h
+            : (_h.formatted || [_h.street_address, _h.locality, _h.region, _h.postal_code, _h.country].filter(Boolean).join(', '));
+        } else if (_claims.address) {
+          const _a = _claims.address;
+          verifiedAddressText = (typeof _a === 'string')
+            ? _a
+            : (_a.formatted || [_a.street_address, _a.locality, _a.region, _a.postal_code, _a.country].filter(Boolean).join(', '));
+        } else {
+          const _parts = [_claims.street_address, _claims.locality, _claims.region, _claims.postal_code, _claims.country].filter(Boolean);
+          verifiedAddressText = _parts.length ? _parts.join(', ') : null;
+        }
+      }
+    %>
+    <% if (session.status === 'verified' && session.presentation) { %>
+      <% const p = session.presentation; %>
+      <% const credentials = p.credentials || []; %>
+      <% const holder = p.holder || {}; %>
+      <% const kb = p.keyBinding; %>
+      <% const allClaims = Object.assign({}, ...credentials.map(c => c.claims || {})); %>
+      <% const maskedIban = allClaims.iban ? ('•••• ' + String(allClaims.iban).replace(/\s+/g, '').slice(-4)) : null; %>
+
+      <div class="card">
+        <div class="result-header">
+          <div class="result-icon">✅</div>
+          <div>
+            <h1><%= credentials.length > 1 ? credentials.length + ' Credentials Verified' : 'Identity Verified' %></h1>
+            <p class="subtitle">
+              <% if (credentials.length > 1) { %>
+                <%= credentials.length %> credentials were cryptographically verified against each trusted issuer's public key.
+              <% } else { %>
+                This credential was cryptographically verified against the trusted issuer's public key — no manual document checks required.
+              <% } %>
+            </p>
+          </div>
+        </div>
+
+        <div class="verified-stamp">
+          IDENTITY CRYPTOGRAPHICALLY VERIFIED
+          <small>OpenID4VP &mdash; Format: <%= p.format || 'n/a' %> &mdash; Submitted: <%= p.submittedAt ? new Date(p.submittedAt).toLocaleString() : 'n/a' %></small>
+        </div>
+
+        <% if (session.reason === 'statement') { %>
+          <script>
+            var STATEMENT_DATA = <%- JSON.stringify({
+              holderName: (((allClaims.given_name || '') + ' ' + (allClaims.family_name || '')).trim()) || 'Account Holder',
+              maskedIban: maskedIban || '•••• 4821',
+              periodStart: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toLocaleDateString(),
+              periodEnd: new Date().toLocaleDateString(),
+              generatedAt: new Date().toLocaleString(),
+              fileName: 'BankOfAsgard_Statement_' + new Date().toISOString().slice(0, 7) + '.pdf'
+            }) %>;
+          </script>
+
+          <div class="statement-ready-card">
+            <div class="statement-ready-icon">📄</div>
+            <div class="statement-ready-info">
+              <div class="statement-ready-title">Your statement is ready</div>
+              <div class="statement-ready-account">Everyday Checking &middot; <strong><%= maskedIban || '&bull;&bull;&bull;&bull; 4821' %></strong></div>
+              <div class="statement-ready-meta">
+                <span id="statement-filename"></span>
+                <span>&middot;</span>
+                <span>4 pages</span>
+                <span>&middot;</span>
+                <span>212 KB</span>
+              </div>
+            </div>
+            <button type="button" class="btn btn-primary statement-download-btn" onclick="downloadStatement()">
+              &#8681; Download PDF
+            </button>
+          </div>
+          <p class="statement-ready-footnote">
+            Released after your identity was confirmed against the credential in your Digital ID Wallet — Bank Of Asgard
+            never saw your underlying ID document.
+          </p>
+
+          <script>
+            document.getElementById('statement-filename').textContent = STATEMENT_DATA.fileName;
+
+            function pdfEscape(s) {
+              return String(s).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+            }
+
+            function toAscii(s) {
+              // The PDF byte-offset math below assumes 1 JS string char ==
+              // 1 output byte, which only holds for ASCII text (Blob encodes
+              // strings as UTF-8, so any non-ASCII character — e.g. the
+              // "•" bullets in a masked IBAN, or an accented name from
+              // a real credential — would silently corrupt the xref table).
+              // Swap anything outside printable ASCII for '*' to keep the
+              // generated PDF valid no matter what the verified claims contain.
+              return String(s).replace(/[^\x20-\x7E]/g, '*');
+            }
+
+            function downloadStatement() {
+              var d = STATEMENT_DATA;
+              var lines = [
+                'Account holder: ' + toAscii(d.holderName),
+                'Account: Everyday Checking ' + toAscii(d.maskedIban),
+                'Statement period: ' + toAscii(d.periodStart) + '  to  ' + toAscii(d.periodEnd),
+                '',
+                'Opening balance:            $11,296.77',
+                'Closing balance:            $12,480.32',
+                '',
+                'Identity verified via Digital ID Wallet',
+                'OpenID4VP - WSO2 Identity Server',
+                '',
+                'Generated ' + toAscii(d.generatedAt)
+              ];
+
+              var contentLines = [];
+              contentLines.push('BT /F1 16 Tf 50 740 Td (' + pdfEscape('BANK OF ASGARD') + ') Tj ET');
+              contentLines.push('BT /F1 11 Tf 50 715 Td (' + pdfEscape('Account Statement') + ') Tj ET');
+              var y = 680;
+              for (var i = 0; i < lines.length; i++) {
+                if (lines[i] === '') { y -= 10; continue; }
+                contentLines.push('BT /F1 10 Tf 50 ' + y + ' Td (' + pdfEscape(lines[i]) + ') Tj ET');
+                y -= 18;
+              }
+              var contentStream = contentLines.join('\n');
+
+              var objects = [];
+              objects.push('<</Type/Catalog/Pages 2 0 R>>');
+              objects.push('<</Type/Pages/Kids[3 0 R]/Count 1>>');
+              objects.push('<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>');
+              objects.push('<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>');
+              objects.push('<</Length ' + contentStream.length + '>>\nstream\n' + contentStream + '\nendstream');
+
+              var pdf = '%PDF-1.4\n';
+              var offsets = [0];
+              for (var i = 0; i < objects.length; i++) {
+                offsets.push(pdf.length);
+                pdf += (i + 1) + ' 0 obj\n' + objects[i] + '\nendobj\n';
+              }
+              var xrefOffset = pdf.length;
+              pdf += 'xref\n0 ' + (objects.length + 1) + '\n0000000000 65535 f \n';
+              for (var i = 1; i <= objects.length; i++) {
+                pdf += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+              }
+              pdf += 'trailer\n<</Size ' + (objects.length + 1) + '/Root 1 0 R>>\nstartxref\n' + xrefOffset + '\n%%EOF';
+
+              var blob = new Blob([pdf], { type: 'application/pdf' });
+              var url = URL.createObjectURL(blob);
+              var a = document.createElement('a');
+              a.href = url;
+              a.download = d.fileName;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+
+              // The statement has now been handed to the customer — return
+              // them to the Bank Of Asgard app instead of leaving this
+              // window open on the result page.
+              if (window.opener) {
+                setTimeout(function () { window.close(); }, 1200);
+              }
+            }
+          </script>
+        <% } else { %>
+          <div class="eligibility-banner">
+            <div class="eligibility-icon">🏦</div>
+            <div>
+              <div class="eligibility-title"><%= copy.eligibilityTitle %></div>
+              <div class="eligibility-body"><%= copy.eligibilityBody %></div>
+            </div>
+          </div>
+        <% } %>
+
+        <% if (session.reason === 'statement') { %>
+          <details class="verification-details-toggle">
+            <summary>View full identity verification &amp; credential details (technical)</summary>
+            <div class="verification-details-body">
+              <%- include('partials/verified-claims', { credentials: credentials, holder: holder, kb: kb }) %>
+            </div>
+          </details>
+        <% } else { %>
+          <%- include('partials/verified-claims', { credentials: credentials, holder: holder, kb: kb }) %>
+        <% } %>
+
+        <div class="raw-toggle">
+          <details>
+            <summary>View raw presentation (technical detail)</summary>
+            <pre class="raw-json"><%= JSON.stringify(session.presentation, null, 2) %></pre>
+          </details>
+        </div>
+      </div>
+
+    <% } else { %>
+
+      <div class="card text-center">
+        <div class="result-icon error-icon">❌</div>
+        <h1>Identity Verification Failed</h1>
+        <div class="alert error"><%= session.error || 'An unknown error occurred' %></div>
+        <p class="note">This customer cannot be verified at this time. Please ask them to try again, or continue with your branch's standard manual verification process.</p>
+        <a href="/" class="btn btn-secondary">Try Again</a>
+      </div>
+
+    <% } %>
+
+    <div class="actions">
+      <a href="/" class="btn btn-ghost">← New Verification</a>
+      <button id="close-window-btn" class="btn btn-secondary" style="display:none" onclick="window.close()">Close this window</button>
+    </div>
+    </div>
+    </main>
+
+    <%- include('partials/footer') %>
+  </div>
+
+  <script>
+    // If this page was opened as a popup from the Bank Of Asgard app, offer a
+    // "Close this window" action instead of only a link back to "/", and let
+    // the opener know how the verification went so it can update its own UI
+    // without polling. Demo-only: a production integration should check
+    // event.origin on the receiving end rather than using '*' here.
+    if (window.opener) {
+      document.getElementById('close-window-btn').style.display = 'inline-block';
+
+      try {
+        window.opener.postMessage({
+          source: 'meridian-verifier',
+          reason: '<%= session.reason || "default" %>',
+          status: '<%= session.status %>'<% if (verifiedAddressText) { %>,
+          address: <%- JSON.stringify(verifiedAddressText) %><% } %>
+        }, '*');
+      } catch (e) { /* opener may be on a different, unreachable origin */ }
+
+      // Statement has its own "Download PDF" action to wait for — see
+      // downloadStatement() above, which closes the window once the
+      // download has started. Everything else here (e.g. Verify My
+      // Address, or a failed verification) has nothing further for the
+      // customer to do, so return them to the Bank Of Asgard app
+      // automatically instead of making them click "Close this window".
+      if ('<%= session.reason %>' !== 'statement') {
+        setTimeout(function () { window.close(); }, 1800);
+      }
+    }
+  </script>
+</body>
+</html>

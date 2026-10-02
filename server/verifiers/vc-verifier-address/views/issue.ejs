@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Credential — Bank Of Asgard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" type="image/svg+xml" href="/branding/bank-of-asgard-favicon.svg">
+</head>
+<body>
+  <div class="app-shell">
+    <%- include('partials/header', { badgeClass: 'pending', badgeLabel: '🪪 Credential Offer', badgeText: copy.badge || 'Credential Issuance' }) %>
+
+    <main class="app-main">
+    <div class="app-main-inner">
+    <div class="card text-center">
+      <h1><%= copy.heading %></h1>
+      <p class="subtitle"><%= copy.subtitle %></p>
+
+      <div class="qr-wrapper">
+        <img src="<%= qrDataUrl %>" alt="Credential Offer QR Code" width="300">
+        <div class="qr-label"><%= copy.qrLabel %></div>
+      </div>
+
+      <p class="note" style="margin-top: 4px;">Credential offer link (same link the QR code encodes):</p>
+      <p class="note" style="word-break: break-all; text-align: left; background: var(--mb-bg); padding: 8px 10px; border-radius: 4px;">
+        <code style="background: none; padding: 0; font-size: 0.78rem;"><%= offerLink %></code>
+      </p>
+
+      <div id="status-box" class="status-waiting">
+        <span id="status-text">Scan the QR code, then accept the credential in your Digital ID Wallet.</span>
+      </div>
+
+      <div class="mobile-link">
+        <p class="note">On the customer's own device? Tap to open directly in the wallet:</p>
+        <a href="<%= offerLink %>" class="btn btn-secondary">Open in Wallet</a>
+      </div>
+
+      <button id="confirm-btn" type="button" class="btn btn-primary" onclick="confirmIssued()" style="margin-top: 16px;">
+        I&rsquo;ve added this to my wallet
+      </button>
+
+      <p class="note">This is a credential offer (OID4VCI) — Bank Of Asgard is issuing to your wallet, not asking it for anything.</p>
+    </div>
+    </div>
+    </main>
+
+    <%- include('partials/footer') %>
+  </div>
+
+  <script>
+    var issuedConfirmed = false;
+    var wasHidden = false;
+
+    function confirmIssued() {
+      if (issuedConfirmed) {
+        return;
+      }
+      issuedConfirmed = true;
+
+      document.getElementById('status-box').className = 'status-success';
+      document.getElementById('status-text').textContent = <%- JSON.stringify('✅ ' + copy.successBody) %>;
+      document.getElementById('confirm-btn').style.display = 'none';
+
+      if (window.opener) {
+        try {
+          window.opener.postMessage({
+            source: 'meridian-verifier',
+            reason: '<%= reason %>',
+            status: 'verified'
+          }, '*');
+        } catch (e) { /* opener may be on a different, unreachable origin */ }
+        setTimeout(function () { window.close(); }, 1200);
+      }
+    }
+
+    // There's no server-side signal that tells us a phone wallet scanned the
+    // QR and accepted the offer, so that path still needs the manual
+    // "I've added this to my wallet" button above. But when the customer
+    // taps "Open in Wallet" on this SAME device, the OS switches away to
+    // the wallet app and this tab is backgrounded; when they switch back
+    // here after accepting it, that's a reasonably strong same-device
+    // signal to auto-confirm and close the popup for them instead of
+    // making them click the button too.
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') {
+        wasHidden = true;
+        return;
+      }
+      if (document.visibilityState === 'visible' && wasHidden && !issuedConfirmed) {
+        setTimeout(confirmIssued, 600);
+      }
+    });
+  </script>
+</body>
+</html>
