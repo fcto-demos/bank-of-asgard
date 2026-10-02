@@ -1,0 +1,127 @@
+        <%# ── Verified Claims (one block per credential) ────────────────────── %>
+        <h2 class="section-title">Verified Claims</h2>
+        <% const priority = ['given_name', 'family_name', 'birthdate', 'nationality', 'document_number', 'national_id', 'iban', 'address', 'email', 'phone_number']; %>
+        <% const labelOverrides = { iban: 'IBAN' }; %>
+        <% for (let ci = 0; ci < credentials.length; ci++) { %>
+          <% const credClaims = credentials[ci].claims || {}; %>
+          <% if (Object.keys(credClaims).length === 0) { %><% continue; } %>
+          <% if (credentials.length > 1) { %>
+            <div class="credential-item-header" style="margin-top:12px"><%= credentials[ci].type || ('Credential ' + (ci + 1)) %></div>
+          <% } %>
+          <div class="claims-grid">
+            <% const shownKeys = new Set(); %>
+            <% for (const key of priority) { %>
+              <% if (credClaims[key] != null) { shownKeys.add(key); %>
+              <div class="claim-row highlight">
+                <span class="claim-key"><%= labelOverrides[key] || key.replace(/_/g, ' ') %></span>
+                <span class="claim-val"><strong><%= credClaims[key] %></strong></span>
+              </div>
+              <% } %>
+            <% } %>
+            <% for (const [key, val] of Object.entries(credClaims).filter(([k]) => !shownKeys.has(k))) { %>
+              <div class="claim-row">
+                <span class="claim-key"><%= key.replace(/_/g, ' ') %></span>
+                <span class="claim-val">
+                  <% if (typeof val === 'object' && val !== null) { %>
+                    <code><%= JSON.stringify(val) %></code>
+                  <% } else { %>
+                    <%= val %>
+                  <% } %>
+                </span>
+              </div>
+            <% } %>
+          </div>
+        <% } %>
+        <% if (holder.id) { %>
+        <div class="claims-grid" style="margin-top:8px">
+          <div class="claim-row">
+            <span class="claim-key">holder</span>
+            <span class="claim-val issuer"><%= holder.id %></span>
+          </div>
+        </div>
+        <% } %>
+
+        <%# ── Credential Metadata (one block per credential) ─────────────────── %>
+        <h2 class="section-title">
+          <%= credentials.length === 1 ? 'Credential Details' : 'Credentials (' + credentials.length + ')' %>
+        </h2>
+
+        <% for (let ci = 0; ci < credentials.length; ci++) { %>
+          <% const cred = credentials[ci]; %>
+          <div class="<%= credentials.length > 1 ? 'credential-item' : '' %>">
+            <% if (credentials.length > 1) { %>
+              <div class="credential-item-header">Credential <%= ci + 1 %></div>
+            <% } %>
+            <div class="claims-grid">
+              <% if (cred.type) { %>
+              <div class="claim-row">
+                <span class="claim-key">type</span>
+                <span class="claim-val"><%= cred.type %></span>
+              </div>
+              <% } %>
+              <% if (cred.issuer) { %>
+              <div class="claim-row">
+                <span class="claim-key">issuer</span>
+                <span class="claim-val issuer"><%= cred.issuer %></span>
+              </div>
+              <% } %>
+              <% if (cred.signingAlgorithm) { %>
+              <div class="claim-row">
+                <span class="claim-key">signing algorithm</span>
+                <span class="claim-val"><code><%= cred.signingAlgorithm %></code></span>
+              </div>
+              <% } %>
+              <% if (cred.issuedAt) { %>
+              <div class="claim-row">
+                <span class="claim-key">issued at</span>
+                <span class="claim-val"><%= new Date(cred.issuedAt).toLocaleString() %></span>
+              </div>
+              <% } %>
+              <% if (cred.expiresAt) { %>
+              <div class="claim-row">
+                <span class="claim-key">expires at</span>
+                <span class="claim-val"><%= new Date(cred.expiresAt).toLocaleString() %></span>
+              </div>
+              <% } %>
+              <% if (cred.holderBinding) { %>
+              <div class="claim-row">
+                <span class="claim-key">holder binding</span>
+                <span class="claim-val">
+                  <%= cred.holderBinding.method %>
+                  &mdash; <%= cred.holderBinding.keyType %><% if (cred.holderBinding.curve) { %> / <%= cred.holderBinding.curve %><% } %>
+                </span>
+              </div>
+              <% } %>
+            </div>
+          </div>
+        <% } %>
+
+        <%# ── Key Binding ─────────────────────────────────────────────────────── %>
+        <% if (kb) { %>
+        <h2 class="section-title">Key Binding (KB-JWT)</h2>
+        <div class="claims-grid">
+          <div class="claim-row">
+            <span class="claim-key">verified</span>
+            <span class="claim-val"><strong><%= kb.verified ? '✅ Yes' : '❌ No' %></strong></span>
+          </div>
+          <% if (kb.presentedAt) { %>
+          <div class="claim-row">
+            <span class="claim-key">presented at</span>
+            <span class="claim-val"><%= new Date(kb.presentedAt).toLocaleString() %></span>
+          </div>
+          <% } %>
+          <% if (kb.audience) { %>
+          <div class="claim-row">
+            <span class="claim-key">audience</span>
+            <span class="claim-val issuer"><%= kb.audience %></span>
+          </div>
+          <% } %>
+          <% if (kb.nonce) { %>
+          <div class="claim-row">
+            <span class="claim-key">nonce</span>
+            <span class="claim-val"><code><%= kb.nonce %></code></span>
+          </div>
+          <% } %>
+        </div>
+        <% } %>
+

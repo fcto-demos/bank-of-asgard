@@ -24,6 +24,8 @@ export const environmentConfig = {
   API_SERVICE_URL: window.config && window.config.API_SERVICE_URL,
   APP_BASE_URL: window.config && window.config.APP_BASE_URL,
   IDP_BASE_URL: window.config && window.config.IDP_BASE_URL,
+  VERIFIER_PORTAL_URL: window.config && window.config.VERIFIER_PORTAL_URL,
+  VERIFIER_PORTAL_ADDRESS_URL: window.config && window.config.VERIFIER_PORTAL_ADDRESS_URL,
   ORGANIZATION_NAME: window.config && window.config.ORGANIZATION_NAME,
   APP_CLIENT_ID: window.config && window.config.APP_CLIENT_ID,
   APP_NAME: window.config && window.config.APP_NAME,

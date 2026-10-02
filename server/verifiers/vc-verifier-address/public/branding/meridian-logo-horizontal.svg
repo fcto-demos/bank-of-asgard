@@ -1,0 +1,5 @@
+<svg width="260" height="56" viewBox="0 0 260 56" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0" y="7" width="42" height="42" fill="#1C1C1C"/>
+  <path d="M11 30V15.2L21 24.5L31 15.2V30" stroke="#997029" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <text x="54" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="700" fill="#1C1C1C">Meridian Bank</text>
+</svg>

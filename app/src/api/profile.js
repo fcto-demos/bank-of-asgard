@@ -31,6 +31,23 @@ export const closeBusinessAccount = (/** @type {string} */ businessName, /** @ty
   });
 };
 
+// Fallback profile read/write for sessions where self-service /scim2/Me
+// doesn't resolve a local user (wallet-based sign-ins have no backing SCIM
+// user reachable that way - see wallet-provider.jsx / user-profile.jsx).
+// The BOA server resolves the real account via the caller's verified email
+// instead, using its own M2M credentials.
+export const getExtendedProfile = (/** @type {string} */ token) => {
+  return axiosClient.get(`/me-extended`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+};
+
+export const updateExtendedProfile = (/** @type {string} */ token, /** @type {object} */ fields) => {
+  return axiosClient.patch(`/me-extended`, fields, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+};
+
 export const resetPassword = (
   /** @type {string} */ username,
   /** @type {string} */ currentPassword,

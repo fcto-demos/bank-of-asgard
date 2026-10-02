@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Identity Verification — Bank Of Asgard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" type="image/svg+xml" href="/branding/bank-of-asgard-favicon.svg">
+</head>
+<body>
+  <div class="app-shell">
+    <%- include('partials/header', { badgeClass: 'official', badgeLabel: 'Secured by WSO2 Identity Server', badgeText: 'Identity Verification' }) %>
+
+    <main class="app-main">
+    <div class="app-main-inner">
+    <div class="hero">
+      <div class="hero-icon">
+        <svg width="56" height="56" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="34" height="34" fill="#1C1C1C"/>
+          <path d="M9 24V10.5L17 18.5L25 10.5V24" stroke="#997029" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </div>
+      <h1>Verify a Customer's Identity</h1>
+      <p>Confirm a customer's identity in seconds using the digital ID credential in their wallet — before opening an account, approving a high-value transfer, or completing a branch visit. Bank Of Asgard verifies every credential cryptographically against the issuing authority, with no photocopies or manual checks required.</p>
+    </div>
+
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="info-icon">🏦</div>
+        <div class="info-title">Bank-Grade Verification</div>
+        <div class="info-body">Every credential is cryptographically checked against the issuer's public key. Tampered, revoked, or expired credentials are rejected automatically — supporting KYC/AML compliance.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-icon">📲</div>
+        <div class="info-title">Any Digital ID Wallet</div>
+        <div class="info-body">Works with any OpenID4VP-compatible wallet. The customer scans the QR code and chooses which credential to present — nothing is stored by the bank until they consent.</div>
+      </div>
+      <div class="info-card">
+        <div class="info-icon">⚡</div>
+        <div class="info-title">Real-Time Decisioning</div>
+        <div class="info-body">Verification status updates the moment the wallet submits the presentation, so front-line staff and digital channels get an instant approve/decline decision.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Start a Verification</h2>
+      <p class="subtitle">Generate a QR code for the customer to scan with their digital ID wallet. Bank Of Asgard will request only the credential fields needed for this transaction.</p>
+      <form action="/verify" method="POST">
+        <button type="submit" class="btn btn-primary">Generate Verification Request →</button>
+      </form>
+    </div>
+
+    </div>
+    </main>
+
+    <%- include('partials/footer') %>
+  </div>
+</body>
+</html>

@@ -37,6 +37,7 @@ import "./assets/css/style.scss";
 import { BankAccountProvider } from "./context/bank-account-provider";
 import IdentityVerificationPage from "./pages/identity-verification";
 import { IdentityVerificationProvider } from "./context/identity-verification-provider";
+import { WalletProvider } from "./context/wallet-provider";
 import { Dropdown, DropdownButton } from "react-bootstrap";
 import BusinessProfilePage from "./pages/business-profile";
 import TransactionsPage from "./pages/transactions";
@@ -55,6 +56,7 @@ const App = () => {
     <SnackbarProvider maxSnack={ 3 }>
     <BankAccountProvider>
     <IdentityVerificationProvider>
+    <WalletProvider>
     <Router>
       <header className="header_section">
         <div className="header_top">
@@ -348,6 +350,7 @@ const App = () => {
         </div>
       </section>
     </Router>
+    </WalletProvider>
     </IdentityVerificationProvider>
     </BankAccountProvider>
     </SnackbarProvider>

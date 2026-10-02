@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Error — Bank Of Asgard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" type="image/svg+xml" href="/branding/bank-of-asgard-favicon.svg">
+</head>
+<body>
+  <div class="app-shell">
+    <%- include('partials/header', { badgeClass: 'error', badgeLabel: 'Error', badgeText: 'Identity Verification' }) %>
+
+    <main class="app-main">
+    <div class="app-main-inner">
+    <div class="card text-center">
+      <div class="result-icon error-icon">❌</div>
+      <h1>Something went wrong</h1>
+      <div class="alert error"><%= message %></div>
+      <% if (detail) { %>
+        <p class="note"><%= detail %></p>
+      <% } %>
+      <br>
+      <a href="/" class="btn btn-secondary">← Back</a>
+    </div>
+    </div>
+    </main>
+
+    <%- include('partials/footer') %>
+  </div>
+</body>
+</html>

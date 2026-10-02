@@ -5,6 +5,8 @@ window.config = {
   API_SERVICE_URL: "http://localhost:3002",
   APP_BASE_URL: "http://localhost:5173",
   IDP_BASE_URL: "",
+  VERIFIER_PORTAL_URL: "http://localhost:3001",
+  VERIFIER_PORTAL_ADDRESS_URL: "http://localhost:3003",
   ORGANIZATION_NAME: "",
   APP_CLIENT_ID: "",
   APP_NAME: "",
