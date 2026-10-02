@@ -20,6 +20,7 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import PasskeySetup from "../passkey-setup/passkey-setup";
 import TotpSetup from "../totp/totp-setup";
+import WalletLink from "../wallet-link/wallet-link";
 import { ACCOUNT_TYPES } from "../../constants/app-constants";
 import ResetPasswordForm from "./reset-password-form";
 
@@ -60,6 +61,9 @@ const AccountSecurityCard = ({ username, accountType }) => {
               ) : (
                 <PasskeySetup />
               )}
+              <hr />
+
+              <WalletLink />
             </div>
           </div>
         </div>

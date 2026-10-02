@@ -18,6 +18,7 @@
 
 import Chip from "@mui/material/Chip";
 import { IdentityVerificationContext } from "../../../context/identity-verification-provider";
+import { WalletContext } from "../../../context/wallet-provider";
 import PropTypes from "prop-types";
 import { useContext } from "react";
 import { IDENTITY_VERIFICATION_STATUS } from "../../../constants/app-constants";
@@ -32,6 +33,7 @@ const UserProfileCard = ({ userInfo, setShowEditForm }) => {
     isIdVStatusLoading,
     identityVerificationStatus,
   } = useContext(IdentityVerificationContext);
+  const { verifiedAddress, isAddressVerified } = useContext(WalletContext);
 
   /**
    * Resolves the user name by dropping the user store domain.
@@ -103,6 +105,16 @@ const UserProfileCard = ({ userInfo, setShowEditForm }) => {
             <li>
               <strong>User ID:</strong> {userInfo.userId}
             </li>
+            {isAddressVerified && verifiedAddress && (
+              <li>
+                <strong>Address:</strong> {verifiedAddress}
+              </li>
+            )}
+            {userInfo.iban && (
+              <li>
+                <strong>IBAN:</strong> {userInfo.iban}
+              </li>
+            )}
           </ul>
 
           <div className="form-buttons">
