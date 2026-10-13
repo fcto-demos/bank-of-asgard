@@ -556,5 +556,9 @@ async def _suggest_goal_v2(req: SuggestGoalRequest, prompt_input: dict) -> dict:
 
 
 if __name__ == "__main__":
-    logger.info("Starting Savings Goals agent on port 8013 (IDP: %s)", IDP_BASE_URL)
-    uvicorn.run(app, host="0.0.0.0", port=8013)  # noqa: S104
+    # BIND_HOST defaults to all interfaces so containers (Docker, Agent Manager) stay
+    # reachable; native/VM launches (start-demo.sh, systemd) set 127.0.0.1 so the port
+    # isn't exposed on a public host.
+    bind_host = os.environ.get("BIND_HOST", "0.0.0.0")  # noqa: S104
+    logger.info("Starting Savings Goals agent on %s:8013 (IDP: %s)", bind_host, IDP_BASE_URL)
+    uvicorn.run(app, host=bind_host, port=8013)

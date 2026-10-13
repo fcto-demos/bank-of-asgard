@@ -19,6 +19,11 @@ PORT_TAX=8014
 PORT_SERVER=3002
 PORT_FRONTEND=5173
 
+# Native launches bind the standalone Python services (MCP, savings, tax) to localhost
+# only — on a public VM their ports would otherwise be reachable directly. Override with
+# BIND_HOST=0.0.0.0 if something off-host (e.g. a container) must reach them.
+export BIND_HOST="${BIND_HOST:-127.0.0.1}"
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
 info()    { echo -e "  ${BLUE}→${NC}  $1"; }

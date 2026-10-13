@@ -59,6 +59,19 @@ Set to **3600 seconds**. The default of 60 s will kill live WebSocket conversati
 
 Add your VM as a backend droplet on the **Droplets** tab.
 
+### Firewall (required for a public demo)
+
+Every service on the VM listens on a port, and the droplet has its own public IP, so the load balancer is not the only way in. In **DO Console → Networking → Firewalls**, create a firewall, apply it to the droplet, and allow only:
+
+| Type | Port | Source |
+|---|---|---|
+| SSH | 22 | your own IP |
+| Custom | 5173, 3002, 8011 | the load balancer (pick it from the source list) |
+
+Delete the default "all IPv4/IPv6" inbound rules. Everything else (8010, 8012, 8013, 8014) is internal, and the systemd units and demo scripts also bind those to `127.0.0.1`.
+
+Check from a machine outside the VPC: `curl -m 5 http://<droplet-public-ip>:8010/health` must time out, and the public URLs must still work.
+
 ---
 
 ## 3. VM — one-time setup
@@ -136,6 +149,11 @@ TRANSACTIONS_API_BASE_URL=http://localhost:8010   # ← not the docker container
 OPENAI_API_KEY=<your-key>   # or GEMINI_API_KEY / ANTHROPIC_API_KEY
 ```
 
+Also set these in the other services' `.env` files:
+
+- `server/.env`: `TRUST_PROXY=1`, so rate limits see each visitor's IP rather than the load balancer's. Add `SSL_VERIFY=true` if the IDP has a real certificate.
+- `transactions-api/.env`: `JWT_ISSUER`. Without it the API doesn't verify the token issuer, and logs a warning at startup.
+
 > If you previously used Docker, note that `TRANSACTIONS_API_BASE_URL` used the container name (`http://transactions-api:8010`). On the VM it must be `http://localhost:8010`.
 
 ### 5b. Place the LLM config
@@ -195,6 +213,14 @@ systemctl --user restart bank-of-asgard-app
 ---
 
 ## 8. Service management
+
+The units only let each service write to `.demo-logs/` (`ReadWritePaths`), and the deploy scripts create that directory. These are `systemctl --user` units, and some sandboxing options are ignored in user units on some systemd versions, so check what actually applies:
+
+```bash
+systemd-analyze --user security bank-of-asgard-agent
+```
+
+Lockfiles aren't committed, so after a `git pull` that changes dependencies, run `npm install && npm audit fix` in `app/` and `server/` on the VM.
 
 ```bash
 # Status

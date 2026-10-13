@@ -25,6 +25,15 @@ WELCOME_MESSAGE = (
     "What can I help you with today?"
 )
 
+# Longest chat message the agents accept when calling an LLM provider directly. With
+# gateway.enabled the WSO2 AI Gateway enforces request limits itself, so the services only
+# apply this when it's off — a public demo shouldn't let one message push an arbitrarily
+# large prompt (and LLM bill) straight to the provider.
+MAX_USER_MESSAGE_CHARS = 4000
+MESSAGE_TOO_LONG_REPLY = (
+    f"That message is too long — please keep it under {MAX_USER_MESSAGE_CHARS} characters."
+)
+
 _BASE_PROMPT = f"""You are the Asgard Assistant for Bank of Asgard, serving customers across the nine realms. You handle two types of requests:
 1. General banking — branch/agency locations, products, services (no login required).
 2. Account-specific — transaction history, spending analysis (requires authorisation).

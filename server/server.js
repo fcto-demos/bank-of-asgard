@@ -17,6 +17,7 @@
  */
 
 import express from "express";
+import rateLimit from "express-rate-limit";
 import cors from "cors";
 import axios from "axios";
 import pino from "pino";
@@ -26,12 +27,15 @@ import { fileURLToPath } from "url";
 
 import { getAccessToken, getOrganizationToken, requireBearer } from "./middleware/auth.js";
 import { addUserToAdminRole, addUserToRole, assignUserToOrgRole, changeUserOrgRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getRoleIdByName, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
-import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, USER_STORE_NAME, TRANSACTIONS_ROLE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
+import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, TRUST_PROXY, USER_STORE_NAME, TRANSACTIONS_ROLE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Repo root — same file transactions-agent/app/audit_log.py and savings-goals-agent/
 // audit_log.py both append to.
 const TOKEN_AUDIT_LOG_PATH = path.join(__dirname, "..", ".demo-logs", "token-audit.jsonl");
+// /token-audit only reads the newest part of the log, so its cost stays bounded no matter
+// how large the file has grown (the writers also rotate it — see audit_log.py).
+const TOKEN_AUDIT_TAIL_BYTES = 5 * 1024 * 1024;
 
 const corsOptions = {
   origin: [VITE_REACT_APP_CLIENT_BASE_URL],
@@ -47,10 +51,28 @@ const corsOptions = {
 
 const app = express();
 
+// Behind the DigitalOcean load balancer every request arrives from the LB's address, so
+// rate limits need the client IP from X-Forwarded-For. Only trust that header when told
+// to (TRUST_PROXY=1): reachable directly, a client could set it to anything.
+if (TRUST_PROXY) {
+  app.set("trust proxy", TRUST_PROXY);
+}
+
 const logger = pino({
   level: process.env.LOG_LEVEL || "debug",
+  // The debug request log below includes bodies — keep sign-up/password-change
+  // passwords of public visitors out of the journal.
+  redact: ["body.password", "body.currentPassword", "body.newPassword"],
 });
 
+// Public demo: cap how fast one client can hit the server overall, and much harder on
+// the routes that create IDP users or spend the geolocation API key.
+const limiterDefaults = { standardHeaders: "draft-8", legacyHeaders: false };
+const generalLimiter = rateLimit({ ...limiterDefaults, windowMs: 60 * 1000, limit: 300 });
+const signupLimiter = rateLimit({ ...limiterDefaults, windowMs: 60 * 60 * 1000, limit: 10 });
+const riskLimiter = rateLimit({ ...limiterDefaults, windowMs: 60 * 1000, limit: 30 });
+
+app.use(generalLimiter);
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 app.use(express.json());
@@ -134,7 +156,7 @@ async function createUser(userData) {
   return response;
 };
 
-app.post("/signup", async (req, res) => {
+app.post("/signup", signupLimiter, async (req, res) => {
   try {
     const response = await createUser(req.body);
     res.json({ message: "User registered successfully", data: response.data });
@@ -243,7 +265,7 @@ app.post("/business-signup", async (req, res) => {
 
 
 // IP geolocation request
-app.post("/risk", async (req, res) => {
+app.post("/risk", riskLimiter, async (req, res) => {
   try {
     let { ip, country } = req.body;
 
@@ -527,6 +549,21 @@ app.get("/transactions-summary", requireBearer, async (req, res) => {
   }
 });
 
+/** Read at most the last `maxBytes` of a file, dropping the first (possibly cut) line. */
+function readTail(filePath, maxBytes) {
+  const { size } = fs.statSync(filePath);
+  const start = Math.max(0, size - maxBytes);
+  const buffer = Buffer.alloc(size - start);
+  const fd = fs.openSync(filePath, "r");
+  try {
+    fs.readSync(fd, buffer, 0, buffer.length, start);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const text = buffer.toString("utf-8");
+  return start === 0 ? text : text.slice(text.indexOf("\n") + 1);
+}
+
 // Internal demo-only tool — no auth, not linked from the app nav. Serves the token
 // audit trail written by transactions-agent/app/audit_log.py and
 // savings-goals-agent/audit_log.py, for the /tokenflow page.
@@ -535,7 +572,7 @@ app.get("/token-audit", (req, res) => {
 
   let lines;
   try {
-    lines = fs.readFileSync(TOKEN_AUDIT_LOG_PATH, "utf-8").split("\n");
+    lines = readTail(TOKEN_AUDIT_LOG_PATH, TOKEN_AUDIT_TAIL_BYTES).split("\n");
   } catch (error) {
     if (error.code === "ENOENT") {
       return res.json([]);

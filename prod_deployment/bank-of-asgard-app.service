@@ -26,7 +26,9 @@ SyslogIdentifier=bank-of-asgard-app
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/home/boa/bank-of-asgard
+# Only the shared audit/demo logs are writable — a compromised service can't rewrite
+# its own or another service's code/venv. Leading '-' = don't fail if it's missing.
+ReadWritePaths=-/home/boa/bank-of-asgard/.demo-logs
 
 [Install]
 WantedBy=default.target

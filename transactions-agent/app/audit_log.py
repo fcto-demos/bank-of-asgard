@@ -29,6 +29,9 @@ _session_id: ContextVar[str | None] = ContextVar("session_id", default=None)
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _AUDIT_LOG_PATH = _REPO_ROOT / ".demo-logs" / "token-audit.jsonl"
+# Rotated to token-audit.jsonl.1 past this size, so a long-running public demo can't
+# grow it without bound (the server's /token-audit reads it on every request).
+_AUDIT_LOG_MAX_BYTES = 20 * 1024 * 1024
 
 
 def _load_actor_names() -> dict[str, str]:
@@ -167,6 +170,10 @@ def emit_token_event(
 
     try:
         _AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if _AUDIT_LOG_PATH.exists() and _AUDIT_LOG_PATH.stat().st_size > _AUDIT_LOG_MAX_BYTES:
+            # Several processes append here; if two rotate at once the loser just
+            # replaces .1 with a near-empty file — acceptable for a demo trail.
+            _AUDIT_LOG_PATH.replace(_AUDIT_LOG_PATH.with_name(_AUDIT_LOG_PATH.name + ".1"))
         with open(_AUDIT_LOG_PATH, "a") as f:
             f.write(json.dumps(record) + "\n")
     except Exception as exc:

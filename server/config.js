@@ -34,8 +34,14 @@ export const VITE_REACT_APP_CLIENT_BASE_URL =
 export const USER_STORE_NAME = process.env.USER_STORE_NAME || "PRIMARY";
 export const TRANSACTIONS_ROLE_NAME = process.env.TRANSACTIONS_ROLE_NAME || "Read_Transactions";
 export const TRANSACTIONS_API_URL = process.env.TRANSACTIONS_API_URL || "http://localhost:8010";
+// Express "trust proxy" setting — set to 1 when running behind a single load balancer so
+// rate limiting sees the real client IP. Unset = don't trust X-Forwarded-For.
+const trustProxy = (process.env.TRUST_PROXY || "").trim();
+export const TRUST_PROXY = /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy || undefined;
 
-// Added to compress self signed cert validation
+// IDP certificate checks are off by default so a self-signed local IS works out of the
+// box. Set SSL_VERIFY=true when the IDP has a real certificate (e.g. a public deployment),
+// so the client secret sent to its token endpoint can't be intercepted.
 export const agent = new https.Agent({
-  rejectUnauthorized: false, // Disable SSL certificate validation
+  rejectUnauthorized: process.env.SSL_VERIFY === "true",
 });

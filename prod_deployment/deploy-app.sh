@@ -22,6 +22,9 @@ echo "      Build complete → dist/"
 # ── 2. Install service file ───────────────────────────────────────────────────
 echo ""
 echo "[2/4] Installing systemd user service..."
+# The units only allow writes to .demo-logs (ReadWritePaths) — create it up front so
+# the services can write their audit logs on a fresh VM.
+mkdir -p "$PROJECT_ROOT/.demo-logs"
 mkdir -p "$SYSTEMD_USER_DIR"
 cp "$SERVICE_FILE" "$SYSTEMD_USER_DIR/${SERVICE_NAME}.service"
 systemctl --user daemon-reload

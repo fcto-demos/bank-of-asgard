@@ -20,7 +20,9 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.audit_log import register_actor_name
 from app.gateway import GatewayTokenManager, GatewayBearerAuth
-from app.prompt import agent_system_prompt, WELCOME_MESSAGE
+from app.prompt import (
+    MAX_USER_MESSAGE_CHARS, MESSAGE_TOO_LONG_REPLY, WELCOME_MESSAGE, agent_system_prompt,
+)
 from app.tools import (
     get_my_transactions, get_agencies as _get_agencies,
     get_my_profile, update_my_profile,
@@ -268,6 +270,14 @@ state_mapping: Dict[str, str] = {}
 # state -> scopes requested for that OBO auth, so /callback can tailor the
 # "authorisation complete" message to the action the user authorised.
 auth_request_scopes: Dict[str, list] = {}
+
+
+def _drop_pending_auth(session_id: str) -> None:
+    """Forget consent requests a closed session never completed — otherwise every
+    abandoned OBO prompt leaves a state entry behind for the life of the process."""
+    for state in [st for st, sid in state_mapping.items() if sid == session_id]:
+        state_mapping.pop(state, None)
+        auth_request_scopes.pop(state, None)
 websocket_connections: Dict[str, WebSocket] = {}
 
 
@@ -319,6 +329,11 @@ async def run_agent(assistant: AssistantAgent, websocket: WebSocket):
         if user_input.strip().lower() == "exit":
             await websocket.close()
             break
+
+        # The gateway enforces request limits when enabled — see MAX_USER_MESSAGE_CHARS.
+        if not _use_gateway and len(user_input) > MAX_USER_MESSAGE_CHARS:
+            await websocket.send_json(TextResponse(content=MESSAGE_TOO_LONG_REPLY).model_dump())
+            continue
 
         try:
             response = await assistant.on_messages(
@@ -451,6 +466,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     finally:
         auth_managers.pop(session_id, None)
         websocket_connections.pop(session_id, None)
+        _drop_pending_auth(session_id)
 
 
 @app.get("/callback")

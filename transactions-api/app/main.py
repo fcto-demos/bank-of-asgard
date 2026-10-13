@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Security, HTTPException
+from fastapi import FastAPI, Security
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.dependencies import validate_token, TokenData
@@ -16,6 +16,11 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# validate_token only checks the issuer when JWT_ISSUER is set — without it, a token from
+# any issuer whose key happens to be in the JWKS would be accepted.
+if not os.getenv("JWT_ISSUER"):
+    logger.warning("JWT_ISSUER is not set — token issuer is NOT being verified")
 
 app = FastAPI(
     title="Bank of Asgard — Transactions API",

@@ -234,6 +234,10 @@ def get_agencies(town: str) -> list[dict]:
 
 
 if __name__ == "__main__":
-    logger.info("Starting Agencies MCP server on port 8012 (IDP: %s)", IDP_BASE_URL)
+    # BIND_HOST defaults to all interfaces so containers (Docker, Agent Manager) stay
+    # reachable; native/VM launches (start-demo.sh, systemd) set 127.0.0.1 so the port
+    # isn't exposed on a public host.
+    bind_host = os.environ.get("BIND_HOST", "0.0.0.0")  # noqa: S104
+    logger.info("Starting Agencies MCP server on %s:8012 (IDP: %s)", bind_host, IDP_BASE_URL)
     app = mcp.http_app(transport="sse", middleware=[Middleware(BearerAuthMiddleware)])
-    uvicorn.run(app, host="0.0.0.0", port=8012)  # noqa: S104
+    uvicorn.run(app, host=bind_host, port=8012)
