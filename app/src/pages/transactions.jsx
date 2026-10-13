@@ -18,7 +18,7 @@ import ShieldIcon from "@mui/icons-material/Shield";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ChatComponent from "../components/transactions/ChatComponent";
 import ResizableChatColumn from "../components/transactions/ResizableChatColumn";
-import { environmentConfig } from "../util/environment-util";
+import { ASSISTANT_TITLE, environmentConfig } from "../util/environment-util";
 import { ROUTES } from "../constants/app-constants";
 
 const GOLD = "#997029";
@@ -121,7 +121,7 @@ const TransactionsPage = () => {
             variant="h5"
             sx={{ color: GOLD, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", fontSize: "1.1rem" }}
           >
-            Asgard Assistant
+            {ASSISTANT_TITLE}
           </Typography>
           <Box sx={{ ml: "auto", display: "flex", alignItems: "center", gap: 1 }}>
             <ShieldIcon sx={{ color: secured ? GOLD : "#bbb", fontSize: 20 }} />
@@ -170,7 +170,6 @@ const TransactionsPage = () => {
             <ChatComponent
               sessionId={sessionId}
               secured={secured}
-              title="Asgard Assistant"
               placeholder="Ask about your transactions..."
             />
           </ResizableChatColumn>
@@ -192,7 +191,7 @@ const TransactionsPage = () => {
                 How it works
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                The Asgard Assistant uses AI to help you understand your
+                {environmentConfig.AGENT_NAME}, the Asgard Assistant, uses AI to help you understand your
                 financial activity. Ask questions in plain language:
               </Typography>
               <Box component="ul" sx={{ pl: 2, m: 0 }}>

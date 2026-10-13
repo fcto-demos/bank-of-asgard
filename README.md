@@ -25,7 +25,7 @@ All LLM calls are proxied through the WSO2 AI Gateway. Users management and agen
 The following products are used in the context of this demo
 
 - WSO2 Identity Platform (on-prem or SaaS) for Agentic Identity, MCP identity and access control.
-- WSO2 AI Gateway (4.6 or 4.7 versions) for LLM governance and AI guardrails
+- WSO2 AI Gateway for LLM governance and AI guardrails
 - WSO2 Agent Manager for agent observability, governance and hosting
 - WSO2 Moesif for AI and API Analytics
 
@@ -47,7 +47,7 @@ The following products are used in the context of this demo
 
 ## Identity provider
 
-The following instructions have been last tested in July 2026 on the SaaS Identity Platform (https://console.asgardeo.io) and WSO2 Identity Server **7.2** (VM).
+The following instructions have been last tested in September 2026 against the SaaS Identity Platform (https://console.asgardeo.io) and WSO2 Identity Server **7.2** (VM).
 
 # Identity Provider Setup
 
@@ -335,6 +335,7 @@ The chosen width is remembered per browser via `localStorage`, so it survives re
      ],
    
      TRANSACTIONS_AGENT_URL: "ws://localhost:8011", // Adjust if you change the ports
+     // AGENT_NAME: "Saga",  // assistant name shown in the UI (default: Saga) — match AGENT_NAME in transactions-agent/.env
      AWS_BRANDING: false,  // uncomment to show "Powered by AWS" logos
    
    	DEMO_USERS: {
@@ -399,9 +400,19 @@ USER_STORE_NAME="PRIMARY"
 # Name of the IS role assigned to new users on signup to grant access to transactions.
 # Default is "Read_Transactions". Override if your role has a different name.
 # TRANSACTIONS_ROLE_NAME="Read_Transactions"
+
+# Set to 1 behind a load balancer so rate limiting sees each
+# visitor's real IP. Leave unset when the server is reached directly.
+# TRUST_PROXY=1
+
+# Verify the IDP's TLS certificate. Off by default so a self-signed local IS works.
+# SSL_VERIFY=true
+
+# Log level (default: debug). Request bodies are logged at debug, with passwords redacted.
+# LOG_LEVEL=info
 ```
 
-
+The server rate-limits every client to 300 requests a minute, `/signup` to 10 an hour and `/risk` to 30 a minute. It also logs request bodies at debug level with passwords redacted, and `/token-audit` reads only the newest 5 MB of the audit log.
 
 ### Agencies MCP Server
 
@@ -475,6 +486,10 @@ TAX_AGENT_URL="http://localhost:8014/prepare-return"
 
 # Transactions API URL
 TRANSACTIONS_API_BASE_URL="http://localhost:8010"
+
+# Assistant persona name (Norse mythology theme) — used in the welcome greeting
+# ("I am <name>, your friendly assistant") and the system prompt. Default: Saga.
+# AGENT_NAME=Saga
 
 # LLM API keys — provide the key for the provider set in llm_config.yaml
 # Not required when gateway.enabled: true in llm_config.yaml
@@ -821,7 +836,9 @@ The Savings agent's own count stops at the cap, though: at the default it makes 
 
 When the Savings agent runs in Agent Manager instead of locally, `start-demo.sh` doesn't reach it: set `DEMO_VERSION=v2` (and optionally `DEMO_MAX_ITERATIONS`) as environment variables on its deployment.
 
-Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page's transaction list) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs.
+Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page's transaction list) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs. Each service also rotates it to `token-audit.jsonl.1` once it passes 20 MB, so a long-running demo can't grow it without bound.
+
+The demo scripts bind the MCP, Savings and Tax services to `127.0.0.1` (they read `BIND_HOST`, which defaults to `0.0.0.0` so containers and Agent Manager deployments stay reachable). Run with `BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh` if something off-host, such as a container, must reach them.
 
 ### Running with Docker / Podman (alternative)
 
@@ -862,3 +879,13 @@ podman compose logs -f bank-transactions-agent
 podman compose down
 ```
 
+## Running on a public host
+
+The demo can stay online publicly, but only the frontend (5173), the Node server (3002) and the agent WebSocket (8011) should be reachable, and only through the load balancer. [docs/prod-setup.md](docs/prod-setup.md) has the full VM setup. In short:
+
+- **Firewall:** allow inbound traffic to 5173, 3002 and 8011 from the load balancer only, and SSH from your own IP. Every other port must stay closed.
+- **Internal services:** the systemd units bind `transactions-api` (8010) and the MCP server (8012) to `127.0.0.1`. The Savings and Tax services follow `BIND_HOST`, which `start-demo.sh` sets to `127.0.0.1`.
+- **Node server `.env`:** set `TRUST_PROXY=1` so rate limits apply per visitor, and `SSL_VERIFY=true` when the IDP has a real certificate.
+- **`transactions-api` `.env`:** set `JWT_ISSUER`. The API logs a warning at startup when it isn't set, because it then doesn't verify the token issuer.
+- **systemd units:** each service may write only to `.demo-logs/`, so a compromised service can't rewrite another service's code or venv.
+- **LLM traffic:** the WSO2 AI Gateway enforces request limits. With `gateway.enabled: false`, the agents instead reject chat messages longer than 4,000 characters.

@@ -15,6 +15,7 @@ window.config = {
     "http://wso2.org/claims/dob",
   ],
   TRANSACTIONS_AGENT_URL: "ws://localhost:8011",
+  // AGENT_NAME: "Saga",  // assistant name shown in the UI — match AGENT_NAME in transactions-agent/.env
   // AWS_BRANDING: true,  // uncomment to show "Powered by AWS" logos
   // Optional: pre-fill registration forms with demo data.
   // Remove or set to null to disable pre-filling.

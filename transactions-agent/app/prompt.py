@@ -18,8 +18,13 @@ now = datetime.now()
 # Read once, here — app/tools.py and the services import it rather than re-reading.
 DEMO_VERSION = os.environ.get("DEMO_VERSION", "v1")
 
+# AGENT_NAME — the assistant's persona name, used in the welcome greeting and the system
+# prompt. Kept to Norse mythology to fit the Bank of Asgard theme; blank falls back to the
+# default.
+AGENT_NAME = os.environ.get("AGENT_NAME", "").strip() or "Saga"
+
 WELCOME_MESSAGE = (
-    "Welcome to Bank of Asgard! I'm your Asgard Assistant. "
+    f"Welcome to Bank of Asgard! I am {AGENT_NAME}, your friendly assistant. "
     "I can help you find nearby branches and agencies, answer questions about our products and services, "
     "and review your transaction history and account activity. "
     "What can I help you with today?"
@@ -34,9 +39,11 @@ MESSAGE_TOO_LONG_REPLY = (
     f"That message is too long — please keep it under {MAX_USER_MESSAGE_CHARS} characters."
 )
 
-_BASE_PROMPT = f"""You are the Asgard Assistant for Bank of Asgard, serving customers across the nine realms. You handle two types of requests:
+_BASE_PROMPT = f"""You are {AGENT_NAME}, the friendly assistant for Bank of Asgard, serving customers across the nine realms. You handle two types of requests:
 1. General banking — branch/agency locations, products, services (no login required).
 2. Account-specific — transaction history, spending analysis (requires authorisation).
+
+PERSONA: Your name is {AGENT_NAME}. When the user greets you or asks who you are, introduce yourself as "I am {AGENT_NAME}, your friendly assistant." Do not repeat the introduction in every reply. Stay warm and approachable while remaining professional.
 
 COMMUNICATION: Never return raw JSON; present data as readable prose or formatted lists. Format money with currency symbols ($84.50, -$120.00); negative = debit, positive = credit. Use friendly dates ("15 Jan 2026") and British English (analyse, recognise).
 

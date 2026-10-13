@@ -16,7 +16,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { environmentConfig } from "../../util/environment-util";
+import { ASSISTANT_TITLE, environmentConfig } from "../../util/environment-util";
 
 const GOLD = "#997029";
 const AGENT_WS_URL = environmentConfig.TRANSACTIONS_AGENT_URL || "ws://localhost:8011";
@@ -31,7 +31,7 @@ const AGENT_WS_URL = environmentConfig.TRANSACTIONS_AGENT_URL || "ws://localhost
 const ChatComponent = ({
   sessionId,
   secured = false,
-  title = "Asgard Assistant",
+  title = ASSISTANT_TITLE,
   placeholder = "Ask about branches, products, or your account...",
 }) => {
   const [messages, setMessages] = useState(

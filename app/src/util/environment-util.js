@@ -33,8 +33,16 @@ export const environmentConfig = {
   IDENTITY_VERIFICATION_CLAIMS: window.config && window.config.IDENTITY_VERIFICATION_CLAIMS,
   TRANSACTIONS_AGENT_URL: window.config && window.config.TRANSACTIONS_AGENT_URL,
   DEMO_USERS: window.config && window.config.DEMO_USERS,
-  AWS_BRANDING: window.config && window.config.AWS_BRANDING === true
+  AWS_BRANDING: window.config && window.config.AWS_BRANDING === true,
+  // Assistant persona name — keep in sync with AGENT_NAME in transactions-agent/.env,
+  // which sets the name the agent introduces itself with.
+  AGENT_NAME: (window.config && window.config.AGENT_NAME) || "Saga"
 };
+
+/**
+ * Display title for the AI assistant, e.g. "Saga · Asgard Assistant".
+ */
+export const ASSISTANT_TITLE = `${environmentConfig.AGENT_NAME} · Asgard Assistant`;
 
 /**
  * Checks if a feature is enabled or not based on the DISABLED_FEATURES array.

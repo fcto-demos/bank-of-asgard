@@ -31,6 +31,7 @@ interface Window {
     IDENTITY_VERIFICATION_CLAIMS: string[];
     TRANSACTIONS_AGENT_URL: string;
     AWS_BRANDING?: boolean;
+    AGENT_NAME?: string;
     DEMO_USERS?: {
       personal?: {
         firstName?: string;

@@ -22,7 +22,7 @@ import { ROUTES } from "../../../constants/app-constants";
 import { useContext, useEffect, useState } from "react";
 import { BankAccountContext } from "../../../context/bank-account-provider";
 import { useAsgardeo } from "@asgardeo/react";
-import { environmentConfig } from "../../../util/environment-util";
+import { ASSISTANT_TITLE, environmentConfig } from "../../../util/environment-util";
 
 const BankAccountCard = () => {
   const initialCreditCardState = {
@@ -171,13 +171,13 @@ const BankAccountCard = () => {
           )}
 
           <hr />
-          <h5>Asgard Assistant</h5>
+          <h5>{ASSISTANT_TITLE}</h5>
           <p style={{ fontSize: "14px", color: "#666", marginBottom: "10px" }}>
             Review your transaction history and get AI-powered spending insights.
           </p>
           <div className="form-buttons">
             <button className="edit-button" onClick={() => navigate(ROUTES.TRANSACTIONS)}>
-              Open Asgard Assistant
+              Chat with {environmentConfig.AGENT_NAME}
             </button>
           </div>
         </div>

@@ -168,11 +168,11 @@ const PersonalBankingPage = ({ setSiteSection }) => {
                   What you can ask
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  The Asgard Assistant can help with general questions and your personal account:
+                  {environmentConfig.AGENT_NAME}, the Asgard Assistant, can help with general questions and your personal account:
                 </Typography>
                 <Box component="ul" sx={{ pl: 2, m: 0 }}>
                   {[
-                    "Find branches near London",
+                    "Find branches near Stockholm",
                     "What agencies are close to Paris?",
                     "Show me my last 5 transactions",
                     "How much did I spend last month?",
