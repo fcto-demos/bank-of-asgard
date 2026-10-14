@@ -479,13 +479,20 @@ async def _suggest_goal_v1(req: SuggestGoalRequest, prompt_input: dict) -> dict:
         SystemMessage(content=SAVINGS_GOAL_PROMPT),
         HumanMessage(content=json.dumps(prompt_input)),
     ])
+    # .text flattens Anthropic's list-of-blocks content into a plain string (as in v2);
+    # the model also sometimes wraps the JSON in a ```json fence despite the prompt.
+    text = response.text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    goal_name, message = "Savings Goal", text
     try:
-        parsed = json.loads(response.content)
-        goal_name = parsed.get("goal_name", "Savings Goal")
-        message = parsed.get("message", response.content)
-    except (json.JSONDecodeError, TypeError):
-        goal_name = "Savings Goal"
-        message = response.content
+        parsed = json.loads(text)
+        if isinstance(parsed.get("goal_name"), str) and parsed["goal_name"]:
+            goal_name = parsed["goal_name"]
+        if isinstance(parsed.get("message"), str) and parsed["message"]:
+            message = parsed["message"]
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
 
     return {
         "status": "ok",
