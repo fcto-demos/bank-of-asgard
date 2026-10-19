@@ -24,6 +24,11 @@ package-lock.json
 .env.bak
 **/config.js.bak
 
+# Gateway installer (gateway-setup/): per-machine settings, issued API keys, .env backups
+gateway-setup/gateway.env
+gateway-setup/out/
+*.gateway.bak
+
 # Python virtual environments
 venv/
 __pycache__/

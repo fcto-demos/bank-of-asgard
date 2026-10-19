@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
 from app.audit_log import register_actor_name
-from app.gateway import GatewayTokenManager, GatewayBearerAuth
+from app.gateway import MESSAGE_KIND_HEADER, GatewayAuth, build_gateway_auths, guardrail_reason, message_kind
 from app.prompt import (
     MAX_USER_MESSAGE_CHARS, MESSAGE_TOO_LONG_REPLY, WELCOME_MESSAGE, agent_system_prompt,
 )
@@ -213,28 +213,30 @@ _default_models = {
 _bedrock_region = os.environ.get("AWS_DEFAULT_REGION", "eu-north-1")
 
 
-def _build_gateway_model(gw_url: str, token_manager: GatewayTokenManager):
+def _build_gateway_model(gw_url: str, gw_auth: GatewayAuth):
     """Build a Strands model client routed via the WSO2 API Gateway."""
     if llm_provider == 'bedrock':
         # Use BedrockModel with the Converse API format over the gateway.
-        # SigV4 signing is disabled; the gateway OAuth bearer token is injected
-        # via a botocore before-send event so it's always fresh at request time.
+        # SigV4 signing is disabled; the gateway credential (OAuth bearer token or
+        # API key) is injected via a botocore before-send event so it's always
+        # fresh at request time.
         logger.info(
             "Building Bedrock Converse gateway model (endpoint=%s, model=%s)",
             gw_url, llm_model or _default_models["bedrock"],
         )
 
-        def _inject_bearer(request, **__):  # noqa: ANN003
+        def _inject_auth(request, **__):  # noqa: ANN003
             # _stream() runs in asyncio.to_thread — use run_coroutine_threadsafe
             # to fetch a fresh token from the main event loop.
             if _main_loop and _main_loop.is_running():
-                token = asyncio.run_coroutine_threadsafe(
-                    token_manager.get_token(), _main_loop
+                headers = asyncio.run_coroutine_threadsafe(
+                    gw_auth.auth_headers(), _main_loop
                 ).result(timeout=10)
             else:
-                token = token_manager.cached_token or ""
-            if token:
-                request.headers['Authorization'] = f'Bearer {token}'
+                headers = gw_auth.cached_auth_headers()
+            for name, value in headers.items():
+                request.headers[name] = value
+            request.headers[MESSAGE_KIND_HEADER] = message_kind(request.body)
 
         model = BedrockModel(
             endpoint_url=gw_url,
@@ -247,17 +249,17 @@ def _build_gateway_model(gw_url: str, token_manager: GatewayTokenManager):
             max_tokens=4096,
             streaming=False,
         )
-        model.client.meta.events.register('before-send.bedrock-runtime.*', _inject_bearer)
+        model.client.meta.events.register('before-send.bedrock-runtime.*', _inject_auth)
         return model
     elif llm_provider == 'anthropic':
-        http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager), verify=_ssl_verify)
+        http_client = httpx.AsyncClient(auth=gw_auth, verify=_ssl_verify)
         return AnthropicModel(
             client_args={"base_url": gw_url, "api_key": "unused", "http_client": http_client},
             model_id=llm_model or _default_models["anthropic"],
             max_tokens=4096,
         )
     else:
-        http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager), verify=_ssl_verify)
+        http_client = httpx.AsyncClient(auth=gw_auth, verify=_ssl_verify)
         gw_openai_client = openai.AsyncOpenAI(
             base_url=gw_url,
             api_key="unused",
@@ -271,14 +273,9 @@ def _build_gateway_model(gw_url: str, token_manager: GatewayTokenManager):
 
 if _use_gateway:
     logger.info("LLM routing via WSO2 API Gateway (provider=%s)", llm_provider)
-    _gw_token_manager = GatewayTokenManager(
-        token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
-        client_id=os.environ["GATEWAY_CLIENT_ID"],
-        client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
-        ssl_verify=_ssl_verify,
-    )
-    model_client = _build_gateway_model(os.environ["GATEWAY_BASE_URL"], _gw_token_manager)
-    model_client_secured = _build_gateway_model(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_token_manager)
+    _gw_auth, _gw_auth_secured = build_gateway_auths(_ssl_verify)
+    model_client = _build_gateway_model(os.environ["GATEWAY_BASE_URL"], _gw_auth)
+    model_client_secured = _build_gateway_model(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_auth_secured)
     logger.info("Gateway base URL: %s", os.environ["GATEWAY_BASE_URL"])
     logger.info("Gateway secured URL: %s", os.environ["GATEWAY_BASE_URL_SECURED"])
 else:
@@ -375,16 +372,10 @@ def _describe_guardrail(msg: dict) -> str:
 
 def _handle_httpx_error(cause: httpx.HTTPStatusError) -> str | None:
     status = cause.response.status_code
-    if status == 446:
-        logger.warning("Guardrail triggered (446): %s", cause.response.text)
-        try:
-            data = cause.response.json()
-            msg = data.get("description") or data.get("message") or data.get("detail")
-            if isinstance(msg, dict):
-                msg = msg.get("actionReason") or msg.get("action") or str(msg)
-            return msg or cause.response.text or "Your request was blocked by an AI guardrail policy."
-        except Exception:
-            return cause.response.text or "Your request was blocked by an AI guardrail policy."
+    reason = guardrail_reason(status, cause.response.text)
+    if reason:
+        logger.warning("Guardrail triggered (%s): %s", status, cause.response.text)
+        return reason
     if status == 429:
         logger.warning("Rate limit hit (429): %s", cause.response.text)
         return "I'm currently busy — the AI service is at capacity. Please try again in a moment."
@@ -393,21 +384,20 @@ def _handle_httpx_error(cause: httpx.HTTPStatusError) -> str | None:
 
 def _handle_botocore_error(cause: botocore.exceptions.ClientError) -> str | None:
     status = cause.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-    if status == 446:
-        logger.warning("Guardrail triggered (446) via Bedrock: %s", cause.response)
+    error = cause.response.get("Error", {})
+    msg = error.get("Message") or error.get("message") or ""
+    if isinstance(msg, str):
         try:
-            error = cause.response.get("Error", {})
-            msg = error.get("Message") or error.get("message") or ""
-            if isinstance(msg, str):
-                try:
-                    msg = json.loads(msg)
-                except Exception:  # noqa: S110
-                    pass
-            if isinstance(msg, dict):
-                return _describe_guardrail(msg)
-            return msg or "Your request was blocked by an AI guardrail policy."
-        except Exception:
-            return "Your request was blocked by an AI guardrail policy."
+            msg = json.loads(msg)
+        except Exception:  # noqa: S110
+            pass
+    # 446 on APIM 4.x; any 4xx carrying GUARDRAIL_INTERVENED on the WSO2 AI Gateway
+    intervened = isinstance(msg, dict) and msg.get("action") == "GUARDRAIL_INTERVENED"
+    if status == 446 or (isinstance(status, int) and 400 <= status < 500 and intervened):
+        logger.warning("Guardrail triggered (%s) via Bedrock: %s", status, cause.response)
+        if isinstance(msg, dict):
+            return _describe_guardrail(msg)
+        return msg or "Your request was blocked by an AI guardrail policy."
     if status == 429:
         logger.warning("Rate limit hit (429) via Bedrock")
         return "I'm currently busy — the AI service is at capacity. Please try again in a moment."

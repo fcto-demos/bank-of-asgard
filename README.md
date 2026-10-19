@@ -498,12 +498,19 @@ OPENAI_API_KEY=<OPENAI_API_KEY>
 # ANTHROPIC_API_KEY=<ANTHROPIC_API_KEY>
 # MISTRAL_API_KEY=<MISTRAL_API_KEY>
 
-# WSO2 API Gateway (only when gateway.enabled: true in llm_config.yaml)
+# WSO2 API Gateway (only when gateway.enabled: true in llm_config.yaml) —
+# gateway-setup/provision.py --write-env fills these in, see "Using WSO2 AI Gateway"
 # GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
 # GATEWAY_BASE_URL_SECURED=<GATEWAY_BASE_URL_SECURED>
+# GATEWAY_AUTH_MODE=oauth                     # oauth (default) | apikey
+# oauth:
 # GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
 # GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
 # GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
+# apikey (the AI Gateway issues one key per LLM proxy):
+# GATEWAY_API_KEY=<V1_KEY>
+# GATEWAY_API_KEY_SECURED=<V2_KEY>            # defaults to GATEWAY_API_KEY
+# GATEWAY_API_KEY_HEADER=X-API-Key
 
 # Agencies MCP Server — dedicated public OAuth2 application registered in IS with
 # access to the MCP server resource. Uses the same native auth + PKCE flow as the
@@ -514,8 +521,9 @@ MCP_CLIENT_ID=MCP_123
 # Direct endpoint (default, no gateway routing):
 AGENCIES_MCP_URL=http://localhost:8012/sse
 
-# Gateway-routed endpoint (optional — set MCP_GATEWAY_ENABLED=true and provide the gateway SSE URL):
-# MCP_GATEWAY_URL=https://<GATEWAY_HOST>/agencies/sse
+# Gateway-routed endpoint (optional — set MCP_GATEWAY_ENABLED=true and provide the gateway URL;
+# a URL ending in /mcp uses Streamable HTTP, anything else SSE):
+# MCP_GATEWAY_URL=https://<GATEWAY_HOST>/boa-agencies/mcp
 # MCP_GATEWAY_ENABLED=true
 # MCP_GATEWAY_SCOPE=agencies_read    # optional: OAuth scope to request when obtaining the MCP bearer token
 
@@ -625,6 +633,7 @@ EXPECTED_AUDIENCE=TAX_123
 # Gateway credentials — same pattern as the Savings Goals Agent (always the v1/unsecured
 # endpoint: this service never sees raw user chat input, only structured aggregates).
 # GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
+# GATEWAY_AUTH_MODE=oauth   # or apikey + GATEWAY_API_KEY
 # GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
 # GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
 # GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
@@ -673,11 +682,32 @@ Supported by all five services — `transactions-agent/{langchain,autogen,strand
 
 # Using WSO2 AI Gateway (recommended )
 
+### Automated install on an existing WSO2 AI Gateway
+
+If you run a WSO2 AI Gateway (1.2+) managed by AI Workspace, [gateway-setup/](gateway-setup/README.md) provisions everything for you. That covers:
+- the LLM proxies: v1 passthrough, and v2 with guardrails (request size, prompt injection, semantic topic guard, content safety, date-of-birth redaction);
+- one application and API key per agent;
+- the agencies MCP proxy and the transactions REST API.
+
+They can be deployed to separate LLM, MCP and API gateways, in the project of your choice. It also writes each agent's gateway settings:
+
+```bash
+export ADMIN_PASSWORD='...'
+./gateway-setup/provision.py --list-targets     # find project and gateway ids, fill gateway-setup/gateway.env
+./gateway-setup/provision.py --check            # read-only pre-flight
+./gateway-setup/provision.py --write-env        # install, verify, update the agents' .env files
+BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh langchain   # gateways in containers must reach the services
+```
+
+Prerequisites (the gateway image's policies, `config.toml` settings, network), options and teardown are in [gateway-setup/README.md](gateway-setup/README.md). The rest of this section describes the manual setup, e.g. for an APIM 4.x gateway.
+
 ### LLM APIs
 
 Change the configuration to route LLM calls via a gateway instead of a direct API key - The demo allows to switch between GATEWAY_BASE_URL and GATEWAY_BASE_URL_SECURED. Typically you want to expose a V1 and v2 of the same LLM API, one in passthrough mode (no guardrails) and one with guardrails, typically semantic analysis, content safety, content length guards.
 
 Then create two applications from dev portal (one for transactions agent, another one for savings agents) subscribe to the two APIs, and use CLIENTID/SECRET of this app as GATEWAY_CLIENT_ID/GATEWAY_CLIENT_SECRET.
+
+Guardrail blocks are recognised both as APIM 4.x's HTTP 446 and as the AI Gateway's 4xx with a `GUARDRAIL_INTERVENED` body; the user sees the guardrail's reason.
 
 ```yaml
 # llm_config.yaml
@@ -710,9 +740,9 @@ GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
 GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
 ```
 
-#### API key instead of OAuth (Savings Goals Agent only)
+#### API key instead of OAuth
 
-The Savings Goals Agent is the one service designed to run at a third party, which may be issued a **gateway API key** rather than OAuth client credentials it would have to hold and rotate. Set `GATEWAY_AUTH_MODE` in `savings-goals-agent/.env`:
+Every service can present a **gateway API key** instead of OAuth client credentials: the WSO2 AI Gateway issues keys per LLM proxy, and the Savings Goals Agent may run at a third party that can't hold client credentials. Set `GATEWAY_AUTH_MODE=apikey` with `GATEWAY_API_KEY` in the service's `.env`. The transactions agent calls two proxies, so it also takes `GATEWAY_API_KEY_SECURED` for v2 (it falls back to `GATEWAY_API_KEY`). For example:
 
 ```YAML
 # savings-goals-agent/.env
@@ -722,7 +752,7 @@ GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
 # GATEWAY_API_KEY_HEADER=X-API-Key   # default; override if your gateway expects another header
 ```
 
-The mode defaults to `oauth`, so existing deployments are unaffected and the other agents remain OAuth-only. In `apikey` mode `GATEWAY_CLIENT_ID`, `GATEWAY_CLIENT_SECRET` and `GATEWAY_TOKEN_ENDPOINT` are unused — there is no token endpoint, no refresh and nothing cached, just the key on each request.
+The mode defaults to `oauth`, so existing deployments are unaffected. In `apikey` mode `GATEWAY_CLIENT_ID`, `GATEWAY_CLIENT_SECRET` and `GATEWAY_TOKEN_ENDPOINT` are unused — there is no token endpoint, no refresh and nothing cached, just the key on each request.
 
 Calls still go through the gateway in both modes; only the credential presented changes. The key itself is never logged — the audit trail records a short hash of it, the same fingerprint treatment a bearer token gets, so you can still follow which credential made which call. An unrecognised mode, or `apikey` with no `GATEWAY_API_KEY`, fails at startup rather than surfacing as a 401 on the first LLM call.
 
@@ -753,12 +783,20 @@ Both headers are expected to carry a `Bearer <token>` value; whichever is presen
 
 ### Agencies MCP Server
 
-You can proxy the Agencies MCP server via the publisher console:
+The agencies MCP server serves both MCP transports on port 8012, behind the same bearer-token check:
+- `/sse`: legacy SSE, used for direct calls (`AGENCIES_MCP_URL`).
+- `/mcp`: Streamable HTTP, spec 2025-06-18, which is what the WSO2 AI Gateway's MCP proxy speaks.
 
-- **Backend URL**: `http://host.containers.internal:8012/sse`
+The agent picks its transport from the URL: Streamable HTTP when the path ends in `/mcp`, otherwise SSE.
+
+On the WSO2 AI Gateway, `gateway-setup/provision.py` creates the MCP proxy (upstream `http://host.docker.internal:8012/mcp`) and sets `MCP_GATEWAY_URL` / `MCP_GATEWAY_ENABLED` for you. On another gateway, proxy it via the publisher console:
+
+- **Backend URL**: `http://host.containers.internal:8012/sse` (or `/mcp` for Streamable HTTP)
 - Enable **OAuth2 protection** so the agent must present a bearer token
-- Set the resulting gateway-managed SSE URL as `MCP_GATEWAY_URL` in `transactions-agent/.env` and set `MCP_GATEWAY_ENABLED=true`
+- Set the resulting gateway-managed URL as `MCP_GATEWAY_URL` in `transactions-agent/.env` and set `MCP_GATEWAY_ENABLED=true`
 - If the gateway requires a specific scope, set it as `MCP_TOKEN_SCOPE`
+
+Either way the services run natively on your machine while the gateway runs in a container, so start them with `BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh …`. The default `127.0.0.1` is unreachable from a container.
 
 When `MCP_GATEWAY_ENABLED` is unset or `false`, the agent connects directly to `AGENCIES_MCP_URL` (useful for local dev without the gateway).
 

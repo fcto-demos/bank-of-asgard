@@ -32,7 +32,7 @@ from pydantic import BaseModel, PrivateAttr
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from audit_log import emit_token_event, register_actor_name, set_transaction
-from gateway import GatewayTokenManager, GatewayBearerAuth
+from gateway import GatewayTokenManager, GatewayBearerAuth, GatewayApiKeyAuth
 from tax_rules import assess
 
 load_dotenv()
@@ -58,14 +58,14 @@ class GatewayChatAnthropic(ChatAnthropic):
 
     ChatAnthropic builds its own internal httpx client and does not expose http_client
     as a constructor parameter (passing it gets silently absorbed into model_kwargs and
-    never used). This subclass overrides _async_client to inject our GatewayBearerAuth
-    handler so tokens are refreshed transparently on each request. Copied from
+    never used). This subclass overrides _async_client to inject our gateway auth
+    handler (bearer token refreshed on each request, or a static API key). Copied from
     savings-goals-agent/server.py's identical subclass.
     """
 
-    _gw_auth: GatewayBearerAuth = PrivateAttr()
+    _gw_auth: httpx.Auth = PrivateAttr()
 
-    def __init__(self, *, gw_auth: GatewayBearerAuth, **data):
+    def __init__(self, *, gw_auth: httpx.Auth, **data):
         super().__init__(**data)
         self._gw_auth = gw_auth
 
@@ -239,15 +239,38 @@ _default_models = {
     "mistral": "mistral-small-latest",
 }
 
-if _use_gateway:
-    logger.info("LLM routing via WSO2 API Gateway (provider=%s, v1/unsecured)", _llm_provider)
-    _gw_token_manager = GatewayTokenManager(
+def _build_gateway_auth() -> httpx.Auth:
+    """Pick how this agent authenticates to the LLM gateway (same switch as
+    savings-goals-agent/server.py): GATEWAY_AUTH_MODE=oauth (default) uses client
+    credentials, GATEWAY_AUTH_MODE=apikey presents GATEWAY_API_KEY. An unknown mode or a
+    missing key fails at startup rather than producing 401s on the first LLM call."""
+    mode = os.environ.get("GATEWAY_AUTH_MODE", "oauth").strip().lower()
+    if mode == "apikey":
+        api_key = os.environ.get("GATEWAY_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "GATEWAY_AUTH_MODE=apikey but GATEWAY_API_KEY is not set — "
+                "set the key, or use GATEWAY_AUTH_MODE=oauth."
+            )
+        header_name = os.environ.get("GATEWAY_API_KEY_HEADER", "X-API-Key")
+        logger.info("Gateway auth: API key (header %r)", header_name)
+        return GatewayApiKeyAuth(api_key, header_name=header_name)
+    if mode != "oauth":
+        raise ValueError(
+            f"GATEWAY_AUTH_MODE={mode!r} is not recognised — use 'oauth' or 'apikey'."
+        )
+    logger.info("Gateway auth: OAuth2 client credentials")
+    return GatewayBearerAuth(GatewayTokenManager(
         token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
         client_id=os.environ["GATEWAY_CLIENT_ID"],
         client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
         ssl_verify=SSL_VERIFY,
-    )
-    _gw_auth = GatewayBearerAuth(_gw_token_manager)
+    ))
+
+
+if _use_gateway:
+    logger.info("LLM routing via WSO2 API Gateway (provider=%s, v1/unsecured)", _llm_provider)
+    _gw_auth = _build_gateway_auth()
     if _llm_provider == "anthropic":
         llm = GatewayChatAnthropic(
             model=_llm_model or _default_models["anthropic"],

@@ -19,7 +19,7 @@ PORT_MCP=8012
 PORT_SAVINGS=8013
 PORT_TAX=8014
 
-# Native launches bind the standalone Python services (MCP, savings, tax) to localhost
+# Native launches bind the standalone Python services (API, MCP, savings, tax) to localhost
 # only — on a public VM their ports would otherwise be reachable directly. Override with
 # BIND_HOST=0.0.0.0 if something off-host (e.g. a container) must reach them.
 export BIND_HOST="${BIND_HOST:-127.0.0.1}"
@@ -321,7 +321,7 @@ section "Starting transactions-api (port $PORT_API)"
 
 TXAPI_PY="$ROOT/transactions-api/venv/bin/python"
 [[ -f "$TXAPI_PY" ]] || die "transactions-api venv not found — run: cd transactions-api && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
-(cd "$ROOT/transactions-api" && "$TXAPI_PY" -m uvicorn app.main:app --port "$PORT_API" \
+(cd "$ROOT/transactions-api" && "$TXAPI_PY" -m uvicorn app.main:app --host "$BIND_HOST" --port "$PORT_API" \
     > "$LOG_DIR/transactions-api.log" 2>&1) &
 echo "transactions-api:$!" >> "$PID_FILE"
 

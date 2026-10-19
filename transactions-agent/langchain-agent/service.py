@@ -31,7 +31,7 @@ from pydantic import BaseModel, PrivateAttr
 from starlette.websockets import WebSocketDisconnect
 
 from app.audit_log import register_actor_name, set_session, set_transaction
-from app.gateway import GatewayTokenManager, GatewayBearerAuth
+from app.gateway import GatewayAuth, build_gateway_auths, guardrail_reason
 from app.prompt import (
     DEMO_VERSION, MAX_USER_MESSAGE_CHARS, MESSAGE_TOO_LONG_REPLY, WELCOME_MESSAGE,
     agent_system_prompt,
@@ -68,12 +68,12 @@ class GatewayChatAnthropic(ChatAnthropic):
 
     ChatAnthropic builds its own internal httpx client and does not expose http_client
     as a constructor parameter. This subclass overrides _async_client to inject our
-    GatewayBearerAuth handler so tokens are refreshed transparently on each request.
+    gateway auth handler (bearer token refreshed on each request, or a static API key).
     """
 
-    _gw_auth: GatewayBearerAuth = PrivateAttr()
+    _gw_auth: GatewayAuth = PrivateAttr()
 
-    def __init__(self, *, gw_auth: GatewayBearerAuth, **data):
+    def __init__(self, *, gw_auth: GatewayAuth, **data):
         super().__init__(**data)
         self._gw_auth = gw_auth
 
@@ -278,9 +278,8 @@ _default_models = {
 _ANTHROPIC_CACHE_CONTROL = {"cache_control": {"type": "ephemeral"}}
 
 
-def _build_gateway_llm(gw_base_url: str, token_manager: GatewayTokenManager):
+def _build_gateway_llm(gw_base_url: str, gw_auth: GatewayAuth):
     """Build a LangChain LLM routed via the WSO2 API Gateway at the given base URL."""
-    gw_auth = GatewayBearerAuth(token_manager)
     if llm_provider == 'anthropic':
         return GatewayChatAnthropic(
             model=llm_model or _default_models["anthropic"],
@@ -302,19 +301,14 @@ _GATEWAY_URL_PREFIXES: tuple[str, ...] = ()
 
 if _use_gateway:
     logger.info("LLM routing via WSO2 API Gateway (provider=%s)", llm_provider)
-    _gw_token_manager = GatewayTokenManager(
-        token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
-        client_id=os.environ["GATEWAY_CLIENT_ID"],
-        client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
-        ssl_verify=_ssl_verify,
-    )
-    llm = _build_gateway_llm(os.environ["GATEWAY_BASE_URL"], _gw_token_manager)
-    llm_secured = _build_gateway_llm(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_token_manager)
+    _gw_auth, _gw_auth_secured = build_gateway_auths(_ssl_verify)
+    llm = _build_gateway_llm(os.environ["GATEWAY_BASE_URL"], _gw_auth)
+    llm_secured = _build_gateway_llm(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_auth_secured)
     logger.info("Gateway base URL: %s", os.environ["GATEWAY_BASE_URL"])
     logger.info("Gateway secured URL: %s", os.environ["GATEWAY_BASE_URL_SECURED"])
-    # 446 (guardrail) is a status only the WSO2 AI Gateway returns — never the IDP or
-    # any other service. _extract_gateway_error uses this to make sure it only treats a
-    # 446/429 as a gateway error when the failing request actually targeted the gateway.
+    # A guardrail block (446, or a 4xx carrying GUARDRAIL_INTERVENED) only ever comes from
+    # the WSO2 AI Gateway — never the IDP or any other service. _extract_gateway_error uses
+    # this to only treat it (and 429) as a gateway error when the request targeted the gateway.
     _GATEWAY_URL_PREFIXES = (os.environ["GATEWAY_BASE_URL"], os.environ["GATEWAY_BASE_URL_SECURED"])
 else:
     match llm_provider:
@@ -714,16 +708,10 @@ def _extract_gateway_error(e: Exception) -> str | None:
             cause = getattr(cause, "__cause__", None) or getattr(cause, "__context__", None)
             continue
 
-        if status == 446:
-            logger.warning("Guardrail triggered (446): %s", body)
-            try:
-                data = parsed if parsed is not None else json.loads(body)
-                msg = data.get("message") or data.get("detail")
-                if isinstance(msg, dict):
-                    msg = msg.get("actionReason") or msg.get("action") or str(msg)
-                return msg or body or "Your request was blocked by an AI guardrail policy."
-            except Exception:
-                return body or "Your request was blocked by an AI guardrail policy."
+        reason = guardrail_reason(status, parsed if parsed is not None else body)
+        if reason:
+            logger.warning("Guardrail triggered (%s): %s", status, body)
+            return reason
         if status == 429:
             logger.warning("Rate limit hit (429): %s", body)
             return "I'm currently busy — the AI service is at capacity. Please try again in a moment."
