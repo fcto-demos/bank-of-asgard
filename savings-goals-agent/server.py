@@ -50,6 +50,18 @@ INBOUND_API_KEY_HEADER = os.environ.get("INBOUND_API_KEY_HEADER", "X-API-Key")
 # whatever their fronting proxy actually uses.
 FORWARDED_AUTH_HEADER = os.environ.get("FORWARDED_AUTH_HEADER", "x-forwarded-authorization")
 
+# Trust the layer in front of this service (Agent Manager's gateway validates the JWT
+# before forwarding it) instead of re-validating here. A bearer token must still be
+# present, and its claims are still logged and audited, but the JWKS is never fetched —
+# so the pod needs no egress to the IDP. Off by default; only enable it when the agent is
+# reachable solely through that validating layer, since any Bearer value is accepted.
+SKIP_TOKEN_VALIDATION = os.environ.get("SKIP_TOKEN_VALIDATION", "false").lower() == "true"
+if SKIP_TOKEN_VALIDATION:
+    logger.warning(
+        "SKIP_TOKEN_VALIDATION=true: bearer JWTs are NOT signature/audience-checked here — "
+        "relying on the upstream gateway having validated them"
+    )
+
 # The resource label "savings_agent" (used as a destination in transactions-agent's
 # auth_manager.py) and this service's own name both refer to the same real entity —
 # register the synonym so they don't fragment into separate actors in the audit trail.
@@ -119,12 +131,8 @@ def _invalidate_jwks_cache() -> None:
     _jwks_cache = None
 
 
-def _validate_token(token: str) -> None:
-    """Validate a JWT bearer token against the IDP's JWKS. Raises on failure.
-
-    Retries once with a fresh JWKS fetch if all cached keys fail, to handle
-    IDP key rotation without requiring a process restart.
-    """
+def _log_token_claims(token: str) -> None:
+    """Log and audit the token's claims without verifying it. Never raises."""
     try:
         unverified = pyjwt.decode(token, options={"verify_signature": False})
         logger.info(
@@ -144,6 +152,14 @@ def _validate_token(token: str) -> None:
     except Exception as peek_err:
         logger.warning("Could not decode token for inspection: %s", peek_err)
 
+
+def _validate_token(token: str) -> None:
+    """Validate a JWT bearer token against the IDP's JWKS. Raises on failure.
+
+    Retries once with a fresh JWKS fetch if all cached keys fail, to handle
+    IDP key rotation without requiring a process restart.
+    """
+    _log_token_claims(token)
     logger.info("Expected audience: %r", EXPECTED_AUDIENCE)
 
     last_err: Exception | None = None
@@ -179,7 +195,8 @@ def _validate_token(token: str) -> None:
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     """Validates every request except /health against either a bearer JWT or, if
     INBOUND_API_KEY is set, a static API key — either credential is accepted, neither is
-    required over the other. No SSE/streaming responses on this service, so
+    required over the other. With SKIP_TOKEN_VALIDATION, a bearer token only has to be
+    present, not valid. No SSE/streaming responses on this service, so
     BaseHTTPMiddleware (unlike the agencies MCP server) is fine here."""
 
     async def dispatch(self, request: Request, call_next):
@@ -207,6 +224,9 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             auth = request.headers.get(FORWARDED_AUTH_HEADER, "")
         if auth.startswith("Bearer "):
             token = auth[len("Bearer "):]
+            if SKIP_TOKEN_VALIDATION:
+                _log_token_claims(token)
+                return await call_next(request)
             try:
                 _validate_token(token)
                 return await call_next(request)

@@ -781,6 +781,17 @@ The Savings Goals Agent looks for the inbound bearer JWT on the standard `Author
 
 Both headers are expected to carry a `Bearer <token>` value; whichever is present and well-formed first wins, and the token is validated the same way regardless of which header it came from.
 
+#### Skipping token validation behind a validating gateway (Savings Goals Agent only)
+
+When the Savings Goals Agent sits behind a gateway that already validates the bearer JWT (for example Agent Manager's gateway), it can trust that layer instead of re-validating the token itself. This is useful when the agent's pod has no network egress to the IDP — on an OpenChoreo data plane, Cilium policies can block it, and the JWKS fetch then times out (`token validation failed: timed out`). Set `SKIP_TOKEN_VALIDATION` in `savings-goals-agent/.env` (or as an env var on the deployment):
+
+```YAML
+# savings-goals-agent/.env
+SKIP_TOKEN_VALIDATION=true
+```
+
+A `Bearer` token must still be present on `Authorization` or the forwarded header, and its claims are still logged and recorded in the audit trail, but its signature, audience and expiry are not checked and the JWKS is never fetched. Off by default. Only enable it when the agent is reachable solely through the validating gateway — anyone who can reach the agent directly could otherwise call it with any `Bearer` value.
+
 ### Agencies MCP Server
 
 The agencies MCP server serves both MCP transports on port 8012, behind the same bearer-token check:
