@@ -208,6 +208,13 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/health":
             return await call_next(request)
 
+        # Debug: dump every inbound header with its full value, credentials included —
+        # to see what the fronting gateway actually forwards. Remove once diagnosed.
+        logger.info(
+            "Inbound %s %s headers: %s",
+            request.method, request.url.path, request.headers.items(),
+        )
+
         if INBOUND_API_KEY:
             presented = request.headers.get(INBOUND_API_KEY_HEADER)
             if presented and secrets.compare_digest(presented, INBOUND_API_KEY):
