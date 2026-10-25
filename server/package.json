@@ -22,8 +22,8 @@
     "axios": "1.20.0",
     "cors": "2.8.6",
     "dotenv": "16.6.1",
-    "express": "4.22.1",
-    "express-rate-limit": "8.7.0",
+    "express": "4.22.3",
+    "express-rate-limit": "8.7.1",
     "pino": "9.14.0"
   }
 }

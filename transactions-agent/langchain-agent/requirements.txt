@@ -31,15 +31,13 @@ anyio==4.14.2
     #   watchfiles
 asgardeo==0.2.3
     # via asgardeo-ai
-asgardeo-ai==0.2.2
+asgardeo-ai==0.2.4
     # via -r requirements.in
 attrs==26.1.0
     # via
     #   aiohttp
     #   jsonschema
     #   referencing
-authlib==1.6.12
-    # via -r requirements.in
 cachetools==5.5.2
     # via -r requirements.in
 certifi==2026.10.23
@@ -56,10 +54,9 @@ click==8.4.1
     # via uvicorn
 colorama==0.4.6
     # via traceloop-sdk
-cryptography==50.0.0
+cryptography==50.0.2
     # via
     #   -r requirements.in
-    #   authlib
     #   pyjwt
 cuid==0.4
     # via traceloop-sdk
@@ -145,20 +142,20 @@ langchain-protocol==0.0.17
     # via
     #   langchain-core
     #   langgraph-sdk
-langgraph==1.2.5
+langgraph==1.2.17
     # via
     #   -r requirements.in
     #   langchain
-langgraph-checkpoint==4.1.1
+langgraph-checkpoint==4.3.0
     # via
     #   -r requirements.in
     #   langgraph
     #   langgraph-prebuilt
-langgraph-prebuilt==1.1.0
+langgraph-prebuilt==1.1.1
     # via
     #   -r requirements.in
     #   langgraph
-langgraph-sdk==0.4.4
+langgraph-sdk==0.4.9
     # via
     #   -r requirements.in
     #   langgraph
@@ -471,7 +468,7 @@ protobuf==6.33.6
     #   opentelemetry-proto
 pycparser==3.0
     # via cffi
-pydantic==2.13.0
+pydantic==2.14.1
     # via
     #   -r requirements.in
     #   anthropic
@@ -485,7 +482,7 @@ pydantic==2.13.0
     #   openai
     #   pydantic-settings
     #   traceloop-sdk
-pydantic-core==2.46.0
+pydantic-core==2.50.1
     # via pydantic
 pydantic-settings==2.14.2
     # via mcp
@@ -493,12 +490,12 @@ pyjwt[crypto]==2.15.1
     # via
     #   -r requirements.in
     #   mcp
-python-dotenv==1.2.2
+python-dotenv==1.2.4
     # via
     #   -r requirements.in
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.31
+python-multipart==0.0.32
     # via
     #   -r requirements.in
     #   mcp
@@ -513,7 +510,7 @@ referencing==0.37.0
     #   jsonschema-specifications
 regex==2026.5.9
     # via tiktoken
-requests==2.33.0
+requests==2.34.2
     # via
     #   -r requirements.in
     #   langsmith
@@ -551,7 +548,7 @@ tqdm==4.68.3
     # via openai
 traceloop-sdk==0.62.3
     # via amp-instrumentation
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   anthropic
     #   fastapi
@@ -568,7 +565,7 @@ typing-extensions==4.15.0
     #   pydantic
     #   pydantic-core
     #   typing-inspection
-typing-inspection==0.4.2
+typing-inspection==0.4.4
     # via
     #   fastapi
     #   mcp
