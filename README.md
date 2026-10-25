@@ -33,7 +33,7 @@ The following products are used in the context of this demo
 
 | Component | Runtime / Tool | Min version |
 |-----------|---------------|-------------|
-| React frontend | Node.js + npm | Node 20+ |
+| React frontend | Node.js + npm | Node 22.12+ (required by Mermaid 12) |
 | Node/Express server | Node.js + npm | Node 20+ |
 | Transactions API | Python + pip | Python 3.13+ |
 | Transactions Agent (plus subagents, Langchain only) | Python + pip | Python 3.13+ |

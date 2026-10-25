@@ -44,6 +44,9 @@ const FAILURE = "#c0392b";      // failed hops (crosshead + tinted band)
 mermaid.initialize({
   startOnLoad: false,
   theme: "base",
+  // Mermaid 12 defaults sequence diagrams to the "neo" look (different actor geometry,
+  // shading and spacing) — pin the classic look the palette and themeCSS below were tuned for.
+  look: "classic",
   fontFamily: '"Inter", "Segoe UI", Roboto, system-ui, sans-serif',
   themeVariables: {
     primaryColor: CREAM,

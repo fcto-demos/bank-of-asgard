@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inside Our Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100vw; height: 100vh; overflow: hidden; background: #060b09; }
+body { -webkit-font-smoothing: antialiased; }
+
+/* ---------- Inside our agents: one hologram + its `agent get` per agent ----------
+   Same visual language as the "Staff Insights" anatomy slide in apiaddicts26
+   (an-* classes), laid out as three columns: hologram on top, CLI sheet below. */
+.devscan-slide {
+  --an-green: #7dffa8; --an-mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  position: fixed; inset: 0; overflow: hidden; color: #d8f5e4; background: #060b09;
+}
+.devscan-slide::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 5;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(125,255,168,.022) 3px 4px);
+}
+.ds-fit { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.ds-canvas { width: 1920px; height: 1080px; flex-shrink: 0; position: relative; transform-origin: center center; }
+
+.an-header { position: absolute; left: 72px; right: 72px; top: 50px; display: flex; align-items: flex-end; justify-content: space-between; }
+.an-kicker { color: var(--an-green); font: 700 13px var(--an-mono); letter-spacing: .32em; }
+.an-title { margin: 12px 0 0; color: #e8fff1; font: 800 56px/1 'Inter', sans-serif; letter-spacing: -.03em; }
+.an-title span { color: var(--an-green); text-shadow: 0 0 26px rgba(125,255,168,.3); }
+.an-status { padding-bottom: 4px; color: #6f8a7c; font: 500 13.5px/1.75 var(--an-mono); text-align: right; }
+.an-dot { display: inline-block; width: 8px; height: 8px; margin-right: 9px; border-radius: 50%; background: var(--an-green); box-shadow: 0 0 9px rgba(125,255,168,.8); vertical-align: 1px; }
+.an-dot.is-off { background: #ff8b72; box-shadow: 0 0 9px rgba(255,139,114,.7); }
+.an-rule { position: absolute; left: 72px; right: 72px; top: 160px; height: 1px; background: linear-gradient(90deg, rgba(125,255,168,.4), rgba(125,255,168,.1) 60%, transparent); }
+
+/* Three columns, separated by faint vertical rules. */
+.an-grid { position: absolute; left: 72px; right: 72px; top: 196px; bottom: 40px; display: grid; grid-template-columns: repeat(3, 1fr); column-gap: 72px; }
+.an-sep { position: absolute; top: 0; bottom: 0; width: 1px; background: linear-gradient(transparent, rgba(125,255,168,.14) 18%, rgba(125,255,168,.14) 82%, transparent); }
+.an-sep--1 { left: calc((100% - 144px) / 3 + 36px); }
+.an-sep--2 { left: calc((100% - 144px) / 3 * 2 + 108px); }
+
+.an-card { position: relative; display: grid; grid-template-rows: 410px 1fr; row-gap: 30px; min-width: 0; opacity: 0; transform: translateY(16px); }
+.devscan-slide.an-on .an-card { animation: anIn .8s cubic-bezier(.16,1,.3,1) var(--an-delay) both; }
+@keyframes anIn { to { opacity: 1; transform: none; } }
+
+/* Hologram: role chip, frame corners, light cone, floor ring (or monitor radar), scanline, and a rune instead of a 3D model. */
+.an-holo { position: relative; }
+.an-role { position: absolute; z-index: 3; left: 50%; top: 0; transform: translateX(-50%); padding: 3px 11px; border: 1px solid rgba(125,255,168,.38); border-radius: 999px; background: rgba(6,11,9,.72); color: var(--an-green); font: 700 10.5px var(--an-mono); letter-spacing: .2em; white-space: nowrap; }
+.an-corner { position: absolute; top: 30px; width: 16px; height: 16px; border-top: 1.5px solid rgba(125,255,168,.5); }
+.an-corner--l { left: 60px; border-left: 1.5px solid rgba(125,255,168,.5); }
+.an-corner--r { right: 60px; border-right: 1.5px solid rgba(125,255,168,.5); }
+.an-beam { position: absolute; left: 50%; bottom: 40px; width: 240px; height: 74%; margin-left: -120px; background: linear-gradient(to top, rgba(125,255,168,.15), rgba(125,255,168,.04) 65%, transparent); clip-path: polygon(0 100%, 100% 100%, 80% 0, 20% 0); filter: blur(3px); }
+.an-ring { position: absolute; left: 50%; bottom: 22px; width: 240px; height: 38px; margin-left: -120px; border: 1.5px solid rgba(125,255,168,.62); border-radius: 50%; box-shadow: 0 0 18px rgba(125,255,168,.3), inset 0 0 14px rgba(125,255,168,.22); }
+.an-ring i { position: absolute; inset: 8px 38px; border: 1px dashed rgba(125,255,168,.55); border-radius: 50%; }
+.an-float { position: absolute; left: 50%; top: 58px; width: 210px; height: 230px; margin-left: -105px; animation: anFloat 4.6s ease-in-out calc(var(--an-delay) * -3) infinite alternate; }
+@keyframes anFloat { from { transform: translateY(3px); } to { transform: translateY(-7px); } }
+.an-emblem { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 12px rgba(125,255,168,.45)); }
+.an-emblem .halo { fill: none; stroke: rgba(125,255,168,.35); stroke-width: 1.2; stroke-dasharray: 3 7; transform-origin: 105px 115px; animation: anSpin 40s linear infinite; }
+.an-emblem .shield { fill: rgba(125,255,168,.05); stroke: rgba(125,255,168,.6); stroke-width: 1.5; }
+.an-emblem .rune { fill: none; stroke: var(--an-green); stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; }
+@keyframes anSpin { to { transform: rotate(360deg); } }
+.an-scanline { position: absolute; left: 70px; right: 70px; top: 30px; height: 2px; background: linear-gradient(90deg, transparent, rgba(125,255,168,.9), transparent); box-shadow: 0 0 12px rgba(125,255,168,.6); animation: anScan 3.4s linear infinite; }
+@keyframes anScan { 0% { transform: translateY(0); opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { transform: translateY(300px); opacity: 0; } }
+
+/* Monitor radar as the hologram's floor: one axis per evaluator, mean score (0–1). */
+.an-card.has-radar .an-ring { display: none; }
+.an-radar { position: absolute; left: 50%; bottom: -26px; width: 380px; height: 169px; margin-left: -190px; overflow: visible; pointer-events: none; }
+.an-radar-grid { fill: none; stroke: rgba(125,255,168,.22); stroke-width: 1; }
+.an-radar-rim { fill: rgba(125,255,168,.04); stroke: rgba(125,255,168,.62); stroke-width: 1.5; filter: drop-shadow(0 0 8px rgba(125,255,168,.35)); }
+.an-radar-shape { fill: rgba(35,255,118,.2); stroke: var(--an-green); stroke-width: 2; filter: drop-shadow(0 0 6px rgba(125,255,168,.7)); transform-box: fill-box; transform-origin: center; animation: anRadarGrow .9s cubic-bezier(.16,1,.3,1) both; }
+@keyframes anRadarGrow { from { transform: scale(0); } to { transform: scale(1); } }
+.an-radar-label { fill: rgba(125,255,168,.82); font: 700 8.5px 'SF Mono', Menlo, monospace; }
+.an-radar-score { fill: var(--an-green); font-weight: 800; }
+.an-radar-avg { fill: var(--an-green); font: 800 24px 'Inter', sans-serif; paint-order: stroke; stroke: #060b09; stroke-width: 5px; stroke-linejoin: round; filter: drop-shadow(0 0 6px rgba(125,255,168,.6)); }
+.an-radar.is-alert .an-radar-avg { fill: #ff4b4b; filter: drop-shadow(0 0 6px rgba(255,75,75,.6)); }
+.an-radar.is-alert { animation: anRadarAlert 1s steps(2, jump-none) infinite; }
+.an-radar.is-alert .an-radar-grid { stroke: rgba(255,75,75,.3); }
+.an-radar.is-alert .an-radar-rim { fill: rgba(255,75,75,.06); stroke: rgba(255,75,75,.75); }
+.an-radar.is-alert .an-radar-shape { fill: rgba(255,60,60,.24); stroke: #ff4b4b; }
+.an-radar.is-alert .an-radar-label { fill: rgba(255,120,120,.9); }
+.an-radar.is-alert .an-radar-score { fill: #ff4b4b; }
+@keyframes anRadarAlert { from { opacity: 1; } to { opacity: .25; } }
+
+/* CLI without a window: typed command, description as a comment, key/value sheet. */
+.an-cli { min-width: 0; padding: 0 8px; font-family: var(--an-mono); }
+.an-name { min-height: 30px; margin-bottom: 14px; overflow: hidden; color: #e8fff1; font: 800 30px/1 'Inter', sans-serif; letter-spacing: -.02em; white-space: nowrap; text-overflow: ellipsis; text-shadow: 0 0 18px rgba(125,255,168,.25); }
+.an-cmd { white-space: nowrap; font: 700 16.5px var(--an-mono); }
+.an-prompt { color: #2f9c63; }
+.an-command { color: #c9ffdd; text-shadow: 0 0 8px rgba(125,255,168,.35); }
+.an-cursor { display: inline-block; width: 9px; height: 18px; margin-left: 3px; background: var(--an-green); vertical-align: -3px; box-shadow: 0 0 8px rgba(125,255,168,.7); animation: dsCursorBlink .9s steps(1,end) infinite; }
+@keyframes dsCursorBlink { 0%,47% { opacity: 1; } 48%,100% { opacity: 0; } }
+.an-desc { margin: 10px 0 18px; min-height: 40px; color: #4f7b62; font-size: 14px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.an-rows { display: grid; grid-template-columns: 96px 1fr; row-gap: 9px; margin: 0; font-size: 14.5px; line-height: 1.35; }
+.an-rows dt { color: #5d8a72; }
+.an-rows dd { margin: 0; overflow: hidden; color: #d4f5e2; white-space: nowrap; text-overflow: ellipsis; }
+.an-rows .an-dot { width: 7px; height: 7px; margin-right: 8px; }
+.an-fetched { margin-top: 18px; color: #4a6a59; font-size: 12px; }
+.an-desc, .an-rows dt, .an-rows dd, .an-fetched { opacity: 0; transform: translateX(-4px); transition: opacity .25s ease, transform .25s ease; }
+.an-desc.on, .an-rows dt.on, .an-rows dd.on, .an-fetched.on { opacity: 1; transform: none; }
+.an-card.is-error .an-desc { color: #ff8b72; }
+
+.an-hint { position: absolute; right: 72px; bottom: 14px; color: #34503f; font: 500 11px var(--an-mono); letter-spacing: .08em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .an-float, .an-scanline, .an-cursor, .an-emblem .halo, .an-radar-shape, .an-radar.is-alert { animation: none; }
+  .devscan-slide.an-on .an-card { animation: none; opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="slide devscan-slide" data-slide="0" data-nav-label="Inside our agents">
+  <div class="ds-fit">
+    <div class="ds-canvas">
+      <header class="an-header">
+        <div>
+          <div class="an-kicker">INSIDE OUR AGENTS</div>
+          <h2 class="an-title">Bank of <span>Asgard</span></h2>
+        </div>
+        <div class="an-status" aria-live="polite">
+          <div><i class="an-dot"></i>agentManager · <span data-an-active>…/3 active</span></div>
+          <div data-an-host>querying…</div>
+        </div>
+      </header>
+      <div class="an-rule"></div>
+
+      <!-- One column per agent. data-agent is the agent's name in Agent Manager: the
+           lookup key for /api/agent?name= (serve.py → agent_info.py → amctl).
+           data-nickname is the name shown on the slide for that agent; left empty,
+           the slide shows the agent's display name from Agent Manager. -->
+      <div class="an-grid">
+        <i class="an-sep an-sep--1" aria-hidden="true"></i><i class="an-sep an-sep--2" aria-hidden="true"></i>
+
+        <section class="an-card" data-agent="transactionagent" data-nickname="Saga" style="--an-delay:.1s">
+          <div class="an-holo" aria-hidden="true">
+            <span class="an-role">COORDINATOR</span>
+            <i class="an-corner an-corner--l"></i><i class="an-corner an-corner--r"></i>
+            <div class="an-beam"></div>
+            <div class="an-ring"><i></i></div>
+            <!-- Ansuz ᚨ: Odin's rune, speech and counsel. -->
+            <div class="an-float"><svg class="an-emblem" viewBox="0 0 210 230">
+              <circle class="halo" cx="105" cy="115" r="102"/>
+              <path class="shield" d="M105 18 L180 52 V122 C180 168 146 198 105 214 C64 198 30 168 30 122 V52 Z"/>
+              <path class="rune" d="M88 62 V170 M88 66 L128 96 M88 100 L128 130"/>
+            </svg></div>
+            <div class="an-scanline"></div>
+          </div>
+          <div class="an-cli">
+            <div class="an-name"></div>
+            <div class="an-cmd"><span class="an-prompt">agentManager&gt;</span> <span class="an-command"></span><i class="an-cursor"></i></div>
+            <div class="an-desc"></div>
+            <dl class="an-rows"></dl>
+            <div class="an-fetched"></div>
+          </div>
+        </section>
+
+        <section class="an-card" data-agent="savingsagent" data-nickname="Picsou" style="--an-delay:.5s">
+          <div class="an-holo" aria-hidden="true">
+            <span class="an-role">SAVINGS EXPERT</span>
+            <i class="an-corner an-corner--l"></i><i class="an-corner an-corner--r"></i>
+            <div class="an-beam"></div>
+            <div class="an-ring"><i></i></div>
+            <!-- Fehu ᚠ: wealth. -->
+            <div class="an-float"><svg class="an-emblem" viewBox="0 0 210 230">
+              <circle class="halo" cx="105" cy="115" r="102"/>
+              <path class="shield" d="M105 18 L180 52 V122 C180 168 146 198 105 214 C64 198 30 168 30 122 V52 Z"/>
+              <path class="rune" d="M88 62 V170 M88 102 L128 72 M88 136 L128 106"/>
+            </svg></div>
+            <div class="an-scanline"></div>
+          </div>
+          <div class="an-cli">
+            <div class="an-name"></div>
+            <div class="an-cmd"><span class="an-prompt">agentManager&gt;</span> <span class="an-command"></span><i class="an-cursor"></i></div>
+            <div class="an-desc"></div>
+            <dl class="an-rows"></dl>
+            <div class="an-fetched"></div>
+          </div>
+        </section>
+
+        <section class="an-card" data-agent="tax-agent" data-nickname="Penible" style="--an-delay:.9s">
+          <div class="an-holo" aria-hidden="true">
+            <span class="an-role">TAXES EXPERT</span>
+            <i class="an-corner an-corner--l"></i><i class="an-corner an-corner--r"></i>
+            <div class="an-beam"></div>
+            <div class="an-ring"><i></i></div>
+            <!-- Tiwaz ᛏ: Týr's rune, law and justice. -->
+            <div class="an-float"><svg class="an-emblem" viewBox="0 0 210 230">
+              <circle class="halo" cx="105" cy="115" r="102"/>
+              <path class="shield" d="M105 18 L180 52 V122 C180 168 146 198 105 214 C64 198 30 168 30 122 V52 Z"/>
+              <path class="rune" d="M105 62 V170 M105 62 L72 98 M105 62 L138 98"/>
+            </svg></div>
+            <div class="an-scanline"></div>
+          </div>
+          <div class="an-cli">
+            <div class="an-name"></div>
+            <div class="an-cmd"><span class="an-prompt">agentManager&gt;</span> <span class="an-command"></span><i class="an-cursor"></i></div>
+            <div class="an-desc"></div>
+            <dl class="an-rows"></dl>
+            <div class="an-fetched"></div>
+          </div>
+        </section>
+      </div>
+      <div class="an-hint">R · replay</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------------------
+  // LIVE DATA — each column's sheet is read from Agent Manager with amctl on every
+  // run (serve.py → agent_info.py). Needs ./start-presentation.sh: opened as a
+  // file, every column shows the error.
+  // ---------------------------------------------------------------------------
+
+  // Used only while an agent has no description in Agent Manager. Copy from each
+  // agent's description.md in fcto-demos/bank-of-asgard.
+  var DESCRIPTIONS = {
+    'transactionagent': 'Coordinator: banking chat, transaction review and spending analysis; delegates savings goals and tax prep over A2A.',
+    'savingsagent': 'Turns money a customer could stop spending into a named savings goal with 1-, 5- and 10-year projections.',
+    'tax-agent': 'Ministry of Finance: drafts an Asgard income tax assessment from per-category spend totals and published reliefs.'
+  };
+
+  // The first run shows each agent's past-traces monitor; every later run (R), its
+  // future-traces one.
+  function loadAgentSheet(name, monitor) {
+    return fetch('api/agent?name=' + encodeURIComponent(name) + '&monitor=' + monitor, { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .catch(function (e) { return { status: 'error', error: 'presentation server not responding (' + e.message + ')' }; });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Canvas fit: the slide is drawn at 1920×1080 and scaled to the window.
+  // ---------------------------------------------------------------------------
+  function fitCanvas() {
+    document.querySelectorAll('.ds-canvas').forEach(function (canvas) {
+      var box = canvas.closest('.ds-fit');
+      var s = Math.min(box.clientWidth / 1920, box.clientHeight / 1080);
+      canvas.style.transform = 'scale(' + (s || 1) + ')';
+    });
+  }
+  window.addEventListener('resize', fitCanvas);
+  fitCanvas();
+
+  // ---------------------------------------------------------------------------
+  // Holo blip: short sine that drops in pitch, played per typed character.
+  // ---------------------------------------------------------------------------
+  var audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      try { audioCtx = new Ctx(); } catch (e) { return null; }
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  ['keydown', 'pointerdown'].forEach(function (evt) {
+    document.addEventListener(evt, ensureAudio, { once: true, capture: true });
+  });
+  function playHoloBlip() {
+    var ctx = audioCtx;
+    if (!ctx || ctx.state !== 'running') return;
+    var t = ctx.currentTime, f = 1500 + Math.random() * 500;
+    var osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(f, t);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.75, t + 0.05);
+    var gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.035, t + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.08);
+  }
+
+  // ---------------------------------------------------------------------------
+  // The slide: each column enters in turn, types its `agent get`, and paints the
+  // sheet row by row when its data arrives.
+  // ---------------------------------------------------------------------------
+  var AN_ENTER_MS = [100, 500, 900];
+  var AN_ROW_MS = 80;
+  var AN_RADAR_ALERT = 0.8;
+  var anTimers = [];
+  var anRun = 0;
+  var anStarts = 0;
+
+  function resetAnatomy(slide) {
+    anRun++;
+    anTimers.forEach(clearTimeout);
+    anTimers = [];
+    slide.classList.remove('an-on');
+    slide.querySelectorAll('.an-command, .an-desc, .an-rows, .an-fetched').forEach(function (el) { el.textContent = ''; });
+    slide.querySelectorAll('.an-desc, .an-fetched').forEach(function (el) { el.classList.remove('on'); });
+    slide.querySelectorAll('.an-card').forEach(function (card) {
+      card.classList.remove('is-error', 'has-radar');
+      card.querySelector('.an-name').textContent = card.getAttribute('data-nickname') || '';
+    });
+    slide.querySelectorAll('.an-radar').forEach(function (el) { el.remove(); });
+    slide.querySelector('[data-an-active]').textContent = '…/' + slide.querySelectorAll('.an-card').length + ' active';
+    slide.querySelector('[data-an-host]').textContent = 'querying…';
+  }
+
+  function startAnatomy(slide) {
+    resetAnatomy(slide);
+    var run = anRun;
+    var cards = Array.prototype.slice.call(slide.querySelectorAll('.an-card'));
+    var monitor = anStarts++ ? 'future' : 'past';
+    var queries = cards.map(function (card) { return loadAgentSheet(card.getAttribute('data-agent'), monitor); });
+    Promise.all(queries).then(function (all) {
+      if (run !== anRun) return;
+      var live = all.filter(function (d) { return d.status === 'live'; });
+      var first = function (key) { return (live.filter(function (d) { return d[key]; })[0] || {})[key]; };
+      slide.querySelector('[data-an-active]').textContent =
+        live.filter(function (d) { return d.active; }).length + '/' + all.length + ' active';
+      slide.querySelector('[data-an-host]').textContent = live.length
+        ? [first('host') || 'Agent Manager', first('llm')].filter(Boolean).join(' · ') + ' · ' + monitor + ' monitors'
+        : 'Agent Manager not responding';
+    });
+    void slide.offsetWidth;
+    slide.classList.add('an-on');
+    cards.forEach(function (card, i) {
+      anTimers.push(setTimeout(function () { typeCommand(card, queries[i], run); }, AN_ENTER_MS[i] || 0));
+    });
+  }
+
+  function typeCommand(card, query, run) {
+    var command = card.querySelector('.an-command');
+    var text = 'agent get ' + card.getAttribute('data-agent');
+    var index = 0;
+    (function typeCharacter() {
+      if (run !== anRun) return;
+      command.textContent = text.slice(0, ++index);
+      playHoloBlip();
+      if (index < text.length) { anTimers.push(setTimeout(typeCharacter, 28)); return; }
+      query.then(function (data) { if (run === anRun) paintCard(card, data, run); });
+    })();
+  }
+
+  // Monitor radar: with 3+ evaluators, each mean score (0–1) is drawn as the
+  // hologram's floor, flattened in perspective (RY/R), with the overall score in
+  // the middle. Names are escaped.
+  function paintRadar(card, radar) {
+    if (!radar || radar.length < 3) return;
+    var cx = 135, cy = 66, R = 92, RY = 28, n = radar.length;
+    function pt(i, r) {
+      var a = -Math.PI / 2 + i * 2 * Math.PI / n;
+      return [cx + r * Math.cos(a), cy + r * Math.sin(a) * RY / R];
+    }
+    function poly(r) { return radar.map(function (_, i) { return pt(i, r(i)).map(function (v) { return v.toFixed(1); }).join(','); }).join(' '); }
+    function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    var svg = '<ellipse class="an-radar-rim" cx="' + cx + '" cy="' + cy + '" rx="' + R + '" ry="' + RY + '"/>';
+    [0.33, 0.66].forEach(function (k) { svg += '<polygon class="an-radar-grid" points="' + poly(function () { return R * k; }) + '"/>'; });
+    radar.forEach(function (_, i) { var p = pt(i, R); svg += '<line class="an-radar-grid" x1="' + cx + '" y1="' + cy + '" x2="' + p[0].toFixed(1) + '" y2="' + p[1].toFixed(1) + '"/>'; });
+    svg += '<polygon class="an-radar-shape" points="' + poly(function (i) { return R * Math.max(0.04, Math.min(1, radar[i].score || 0)); }) + '"/>';
+    radar.forEach(function (e, i) {
+      var p = pt(i, R + 10);
+      var anchor = Math.abs(p[0] - cx) < 12 ? 'middle' : p[0] > cx ? 'start' : 'end';
+      var y = p[1] < cy - 4 ? p[1] - 13 : p[1] > cy + 4 ? p[1] + 9 : p[1] - 3;
+      var x = p[0].toFixed(1);
+      svg += '<text class="an-radar-label" text-anchor="' + anchor + '"><tspan x="' + x + '" y="' + y.toFixed(1) + '">' + esc(e.name) +
+        '</tspan><tspan class="an-radar-score" x="' + x + '" dy="10">' + (e.score == null ? 'n/a' : Math.round(e.score * 100)) + '</tspan></text>';
+    });
+    // Overall score, as Agent Manager's UI computes it: the mean of the evaluators
+    // that have a score. It, not the lowest evaluator, decides green or red.
+    var scored = radar.filter(function (e) { return e.score != null; });
+    var avg = scored.length ? scored.reduce(function (s, e) { return s + e.score; }, 0) / scored.length : null;
+    if (avg != null) {
+      svg += '<text class="an-radar-avg" text-anchor="middle" x="' + cx + '" y="' + (cy + 8) + '">' + Math.round(avg * 100) + '</text>';
+    }
+    var el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    var alert = avg != null && avg < AN_RADAR_ALERT;
+    el.setAttribute('class', 'an-radar' + (alert ? ' is-alert' : ''));
+    el.setAttribute('viewBox', '0 0 270 120');
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = svg;
+    var holo = card.querySelector('.an-holo');
+    holo.insertBefore(el, holo.querySelector('.an-beam'));
+    card.classList.add('has-radar');
+  }
+
+  // Built with textContent so nothing from the API is ever read as HTML.
+  function paintCard(card, data, run) {
+    var desc = card.querySelector('.an-desc');
+    var rows = card.querySelector('.an-rows');
+    var fetched = card.querySelector('.an-fetched');
+    var items = [desc];
+    if (data.status === 'error') {
+      card.classList.add('is-error');
+      desc.textContent = '# error: ' + data.error;
+    } else {
+      if (!card.getAttribute('data-nickname')) card.querySelector('.an-name').textContent = data.displayName || data.agent;
+      var description = data.description || DESCRIPTIONS[card.getAttribute('data-agent')] || 'no description in Agent Manager';
+      desc.textContent = '# ' + description;
+      desc.title = description;
+      data.rows.forEach(function (row) {
+        var dt = document.createElement('dt');
+        var dd = document.createElement('dd');
+        dt.textContent = row[0];
+        if (row[0] === 'status') {
+          var dot = document.createElement('i');
+          dot.className = 'an-dot' + (data.active ? '' : ' is-off');
+          dd.appendChild(dot);
+        }
+        dd.appendChild(document.createTextNode(row[1]));
+        dd.title = row[1];
+        rows.appendChild(dt);
+        rows.appendChild(dd);
+        items.push([dt, dd]);
+      });
+      paintRadar(card, data.radar);
+      fetched.textContent = 'live · ' + data.taken + ' · ' + data.took + ' s';
+      items.push(fetched);
+    }
+    items.forEach(function (item, i) {
+      anTimers.push(setTimeout(function () {
+        if (run !== anRun) return;
+        [].concat(item).forEach(function (el) { el.classList.add('on'); });
+      }, i * AN_ROW_MS));
+    });
+  }
+
+  var slide = document.querySelector('.devscan-slide');
+  startAnatomy(slide);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'r' || e.key === 'R') startAnatomy(slide);
+  });
+})();
+</script>
+</body>
+</html>
