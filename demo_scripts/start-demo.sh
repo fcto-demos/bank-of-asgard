@@ -49,7 +49,10 @@ show_help() {
     echo "                     Requires: amp-instrumentation installed in both agent venvs"
     echo "                               AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in transactions-agent/.env"
     echo "                               AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in savings-goals-agent/.env"
-    echo "  --v1 | --v2        Demo-only regression toggle for tracing/eval demos (default: v1)"
+    echo "  --http-tracing     With --amp, langchain only: also emit OTel HTTP client spans for"
+    echo "                     httpx calls (stable HTTP semconv) and propagate traceparent."
+    echo "                     Off by default — Agent Manager doesn't consume these spans yet."
+    echo "  --v1 | --v2       Demo-only regression toggle for tracing/eval demos (default: v1)"
     echo "                     v2 deliberately degrades token usage and latency (bloated system"
     echo "                     prompt + over-fetching GetMyTransactions) to show up in traces,"
     echo "                     and turns the Savings Goals agent rogue: it never proposes a goal"
@@ -67,12 +70,14 @@ show_help() {
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 USE_AMP=false
+HTTP_TRACING=false
 AGENT_ARG=""
 ENV_PROFILE=""
 DEMO_VERSION="v1"
 for arg in "$@"; do
     case "$arg" in
         --amp)          USE_AMP=true ;;
+        --http-tracing) HTTP_TRACING=true ;;
         --env=is)       ENV_PROFILE="is" ;;
         --env=asgardeo) ENV_PROFILE="asgardeo" ;;
         --v1)           DEMO_VERSION="v1" ;;
@@ -135,6 +140,11 @@ elif $AMP_SUPPORTED && ! $USE_AMP; then
     echo ""
     read -rp "  Enable AMP (Agent Manager) instrumentation? [y/N]: " amp_choice
     [[ "$amp_choice" =~ ^[Yy]$ ]] && USE_AMP=true || true
+fi
+
+if $HTTP_TRACING && { ! $USE_AMP || [[ "$AGENT" != "langchain-agent" ]]; }; then
+    warn "--http-tracing needs --amp with the langchain agent. Skipping."
+    HTTP_TRACING=false
 fi
 
 # ── MCP server paths ──────────────────────────────────────────────────────────
@@ -256,6 +266,7 @@ cat > "$ROOT/.demo.context" <<EOF
 AGENT=$AGENT
 AGENT_ARG=$AGENT_ARG
 USE_AMP=$USE_AMP
+HTTP_TRACING=$HTTP_TRACING
 ENV_PROFILE=$ENV_PROFILE
 DEMO_VERSION=$DEMO_VERSION
 EOF
@@ -351,6 +362,10 @@ if $USE_AMP; then
     # service at a CA bundle chosen for a different service's endpoint.
     (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY DEMO_VERSION
      if [[ -n "$AGENT_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$AGENT_OTEL_CERT"; fi
+     # --http-tracing: httpx client spans (service.py) with stable HTTP semconv names. The
+     # opt-in must be set before amp-instrument starts — OTel reads it once, when the first
+     # instrumentor initialises — and it renames Traceloop's requests/urllib3 spans too.
+     if $HTTP_TRACING; then export HTTP_CLIENT_TRACING=true OTEL_SEMCONV_STABILITY_OPT_IN=http; fi
      cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
         --app-dir "$AGENT" --port "$PORT_AGENT" \
         > "$LOG_DIR/agent.log" 2>&1) &

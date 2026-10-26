@@ -4,12 +4,23 @@ import json
 import logging
 import os
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import cached_property
 from pathlib import Path
-from typing import Literal, Dict, List, Any
+from typing import Literal, Dict, Iterator, List, Any
+from urllib.parse import urlsplit
 
 import httpx
+
+# Opt-in (start-demo.sh --http-tracing): HTTP client spans (OTel HTTP semconv) and W3C
+# traceparent injection for every httpx call — the API tools, MCP over SSE and the remote
+# Savings/Tax agents. Off by default because Agent Manager doesn't consume these spans yet.
+# Read from the process environment, not .env: the script also has to set
+# OTEL_SEMCONV_STABILITY_OPT_IN before amp-instrument starts.
+if os.environ.get("HTTP_CLIENT_TRACING", "").lower() == "true":
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    HTTPXClientInstrumentor().instrument()
 
 # Configure logging before asgardeo imports so the patch is in place when its clients are created
 logging.basicConfig(
@@ -24,6 +35,13 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.errors import GraphRecursionError
+from opentelemetry import trace
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_NAME, GEN_AI_OPERATION_NAME, GEN_AI_PROVIDER_NAME, GenAiOperationNameValues,
+)
+from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv.attributes.server_attributes import SERVER_ADDRESS, SERVER_PORT
+from opentelemetry.trace import SpanKind
 from traceloop.sdk import Traceloop
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
@@ -45,7 +63,7 @@ from app.tools import (
 )
 from app.subagents import subscription_detective, spending_health
 from app.tax import DeductionSummary, format_summary, summarize_deductible_spend
-from tool import SecureLangChainTool
+from tool import SecureLangChainTool, ToolKind
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
 
 from asgardeo_ai import AgentConfig
@@ -361,6 +379,47 @@ async def _analyze_spending_health(token: OAuthToken) -> str:
     return await spending_health.analyze(_spending_health_graph, result["transactions"])
 
 
+_tracer = trace.get_tracer(__name__)
+
+# gen_ai.provider.name for the two remote agents: the organisation hosting each one. A
+# custom value — the GenAI semconv's well-known providers are hosted-agent platforms.
+_SAVINGS_AGENT_PROVIDER = "bank_of_asgard"
+_TAX_AGENT_PROVIDER = "ministry_of_finance"
+
+
+@contextmanager
+def _invoke_remote_agent_span(agent_name: str, provider: str, url: str) -> Iterator[None]:
+    """`invoke_agent {agent_name}` CLIENT span around a call to an agent in another process.
+
+    The OTel GenAI convention for remote agent invocation — it is what lets a trace tell
+    SuggestSavingsGoal/PrepareTaxReturn apart from API tools (plain HTTP spans) and the
+    in-process sub-agents (INTERNAL invoke_agent spans from the LangGraph instrumentation).
+    The httpx span for the actual request nests under it."""
+    target = urlsplit(url)
+    attributes: dict = {
+        GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
+        GEN_AI_PROVIDER_NAME: provider,
+        GEN_AI_AGENT_NAME: agent_name,
+    }
+    if target.hostname:
+        attributes[SERVER_ADDRESS] = target.hostname
+        attributes[SERVER_PORT] = target.port or (443 if target.scheme == "https" else 80)
+    with _tracer.start_as_current_span(
+        f"{GenAiOperationNameValues.INVOKE_AGENT.value} {agent_name}",
+        kind=SpanKind.CLIENT,
+        attributes=attributes,
+    ) as span:
+        try:
+            yield
+        except Exception as e:
+            span.set_attribute(
+                ERROR_TYPE,
+                str(e.response.status_code) if isinstance(e, httpx.HTTPStatusError)
+                else type(e).__qualname__,
+            )
+            raise
+
+
 async def _suggest_savings_goal(
     token: OAuthToken,
     subscription_summary: str,
@@ -379,8 +438,9 @@ async def _suggest_savings_goal(
     agents were involved.
 
     transaction_id (the Coordinator's session_id) is forwarded so the Savings Agent
-    can tag its own spans with the same Traceloop association property, since OTEL
-    context doesn't cross this process boundary on its own."""
+    can tag its own spans with the same Traceloop association property: the httpx
+    instrumentation now sends a traceparent header, but the Savings Agent does not yet
+    extract it to join this trace."""
     headers = {"Authorization": f"Bearer {token.access_token}"}
     # Also sent as a header (not just in the body) so the Savings Agent's bearer-auth
     # middleware — which runs before the body is parsed — can tag its own
@@ -396,10 +456,11 @@ async def _suggest_savings_goal(
     }
     try:
         async with httpx.AsyncClient(verify=_ssl_verify) as client:
-            response = await client.post(
-                SAVINGS_AGENT_URL, headers=headers, json=payload, timeout=_SAVINGS_AGENT_TIMEOUT,
-            )
-            response.raise_for_status()
+            with _invoke_remote_agent_span("Savings Agent", _SAVINGS_AGENT_PROVIDER, SAVINGS_AGENT_URL):
+                response = await client.post(
+                    SAVINGS_AGENT_URL, headers=headers, json=payload, timeout=_SAVINGS_AGENT_TIMEOUT,
+                )
+                response.raise_for_status()
             result = response.json()
     except httpx.TransportError as e:
         # Timeout or unreachable — hand it back to the model rather than failing the turn.
@@ -453,6 +514,7 @@ class _CappedSavingsTool(SecureLangChainTool):
         self._session_context = session_context
 
     async def _arun(self, *args: Any, run_manager=None, **kwargs: Any) -> Any:
+        self._label_trace_span()  # also on refused calls, which never reach super()._arun
         self._session_context["savings_calls"] += 1
         if self._session_context["savings_calls"] > DEMO_MAX_ITERATIONS:
             logger.warning(
@@ -508,8 +570,9 @@ async def _prepare_tax_return(
         sorted(summary["qualifying_spend"]),
     )
     async with httpx.AsyncClient(verify=_ssl_verify) as client:
-        response = await client.post(TAX_AGENT_URL, headers=headers, json=payload, timeout=30.0)
-        response.raise_for_status()
+        with _invoke_remote_agent_span("Tax Agent", _TAX_AGENT_PROVIDER, TAX_AGENT_URL):
+            response = await client.post(TAX_AGENT_URL, headers=headers, json=payload, timeout=30.0)
+            response.raise_for_status()
         result = response.json()
     a = result["assessment"]
     return (
@@ -565,6 +628,7 @@ def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) ->
             "only — it does not send anything to the ministry."
         ),
         name="SummarizeDeductibleExpenses",
+        kind=ToolKind.API,
         auth=AuthSchema(auth_manager, AuthConfig(
             scopes=TAX_SCOPES,
             token_type=OAuthTokenType.OBO_TOKEN,
@@ -592,6 +656,7 @@ def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) ->
             "from the previous step, so never ask the user for them or for a tax ID."
         ),
         name="PrepareTaxReturn",
+        kind=ToolKind.AGENT,
         auth=AuthSchema(tax_auth_manager, AuthConfig(
             scopes=[],
             token_type=OAuthTokenType.AGENT_TOKEN,
@@ -938,6 +1003,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "spending history, or account activity."
         ),
         name="GetMyTransactions",
+        kind=ToolKind.API,
         auth=AuthSchema(auth_manager, AuthConfig(
             scopes=["read_transactions"],
             token_type=OAuthTokenType.OBO_TOKEN,
@@ -951,6 +1017,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         get_my_profile,
         description=GET_MY_PROFILE_DESCRIPTION,
         name="GetMyProfile",
+        kind=ToolKind.API,
         auth=AuthSchema(auth_manager, PROFILE_AUTH_CONFIG)
     )
 
@@ -958,6 +1025,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         update_my_profile,
         description=UPDATE_MY_PROFILE_DESCRIPTION,
         name="UpdateMyProfile",
+        kind=ToolKind.API,
         auth=AuthSchema(auth_manager, UPDATE_PROFILE_AUTH_CONFIG)
     )
 
@@ -972,6 +1040,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "or asks what they're being charged for repeatedly."
         ),
         name="AnalyzeSubscriptions",
+        kind=ToolKind.SUBAGENT,
         auth=AuthSchema(auth_manager, AuthConfig(
             scopes=["read_transactions"],
             token_type=OAuthTokenType.OBO_TOKEN,
@@ -987,6 +1056,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "check-up or asks how their spending has changed recently."
         ),
         name="AnalyzeSpendingHealth",
+        kind=ToolKind.SUBAGENT,
         auth=AuthSchema(auth_manager, AuthConfig(
             scopes=["read_transactions"],
             token_type=OAuthTokenType.OBO_TOKEN,
@@ -1010,6 +1080,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "phone numbers, or available services near a city."
         ),
         name="GetAgencies",
+        kind=ToolKind.MCP,
         auth=AuthSchema(mcp_auth_manager, AuthConfig(
             scopes=[],
             token_type=OAuthTokenType.AGENT_TOKEN,
@@ -1039,6 +1110,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "and a friendly recommendation message."
         ),
         name="SuggestSavingsGoal",
+        kind=ToolKind.AGENT,
         auth=AuthSchema(savings_auth_manager, AuthConfig(
             scopes=[],
             token_type=OAuthTokenType.AGENT_TOKEN,
@@ -1070,10 +1142,13 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # never finish.
     tools.extend(tax_tools)
 
+    # name= becomes gen_ai.agent.name on the LangGraph instrumentation's invoke_agent span
+    # (otherwise the generic "LangGraph"); run_name names the LangChain workflow span.
     graph = create_agent(
         active_llm,
         tools,
         system_prompt=agent_system_prompt + _COORDINATOR_ADDENDUM,
+        name="banking_assistant",
     ).with_config(run_name="banking_assistant")
 
     chat_history: List = []

@@ -178,6 +178,8 @@ case "$SERVICE" in
         [[ -n "$AGENT" ]]    || die "AGENT not set in .demo.context — re-run start-demo.sh"
         [[ -n "$USE_AMP" ]]  || die "USE_AMP not set in .demo.context — re-run start-demo.sh"
         AMP_LABEL=$( [[ "$USE_AMP" == "true" ]] && echo "AMP enabled" || echo "AMP disabled" )
+        HTTP_TRACING="${HTTP_TRACING:-false}"
+        [[ "$HTTP_TRACING" == "true" ]] && AMP_LABEL="$AMP_LABEL + HTTP tracing"
         DEMO_VERSION="${DEMO_VERSION:-v1}"
         section "Restarting $AGENT_ARG (port $PORT_AGENT)"
         ok "Framework: $AGENT_ARG  |  $AMP_LABEL  |  Demo version: $DEMO_VERSION"
@@ -203,6 +205,8 @@ case "$SERVICE" in
             fi
             (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY DEMO_VERSION
              if [[ -n "$AGENT_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$AGENT_OTEL_CERT"; fi
+             # --http-tracing (from .demo.context): see start-demo.sh for why both are exported here.
+             if [[ "$HTTP_TRACING" == "true" ]]; then export HTTP_CLIENT_TRACING=true OTEL_SEMCONV_STABILITY_OPT_IN=http; fi
              cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" \
                 "$AMP_INSTRUMENT" "$UVICORN" service:app \
                 --app-dir "$AGENT" --port "$PORT_AGENT" \

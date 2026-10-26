@@ -1,8 +1,10 @@
 import inspect
 import logging
+from enum import Enum
 from typing import Any, Callable, Optional, get_type_hints
 
 from langchain_core.tools import BaseTool
+from opentelemetry import trace
 from pydantic import PrivateAttr, create_model
 
 from auth.auth_schema import AuthSchema
@@ -11,6 +13,16 @@ from asgardeo.models import OAuthToken
 logger = logging.getLogger(__name__)
 
 TOKEN_FIELD = "token"  # noqa: S105
+
+
+class ToolKind(str, Enum):
+    """What a tool calls. Shown as a prefix on the tool's trace span name only — the name
+    the LLM sees (and gen_ai.tool.name) stays unprefixed."""
+
+    API = "API"
+    MCP = "MCP"
+    AGENT = "Agent"
+    SUBAGENT = "SubAgent"
 
 
 class SecureLangChainTool(BaseTool):
@@ -23,6 +35,7 @@ class SecureLangChainTool(BaseTool):
 
     _func: Callable[..., Any] = PrivateAttr()
     _auth: Optional[AuthSchema] = PrivateAttr(default=None)
+    _kind: ToolKind = PrivateAttr()
 
     def __init__(
         self,
@@ -30,6 +43,8 @@ class SecureLangChainTool(BaseTool):
         description: str,
         name: Optional[str] = None,
         auth: Optional[AuthSchema] = None,
+        *,
+        kind: ToolKind,
     ):
         sig = inspect.signature(func)
         hints = get_type_hints(func)
@@ -68,11 +83,24 @@ class SecureLangChainTool(BaseTool):
         )
         self._func = func
         self._auth = auth
+        self._kind = kind
+
+    def _label_trace_span(self) -> None:
+        """Prefix this tool's kind onto its execute_tool span (e.g. "execute_tool [MCP]
+        GetAgencies") so traces show what each tool calls at a glance.
+
+        While the tool runs, the current span is the one the LangChain instrumentation
+        opened for it; it is only renamed if it still carries that exact name, so no other
+        span can ever be relabelled. No-op when tracing is off."""
+        span = trace.get_current_span()
+        if span.is_recording() and getattr(span, "name", None) == f"execute_tool {self.name}":
+            span.update_name(f"execute_tool [{self._kind.value}] {self.name}")
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError("This tool only supports async execution via _arun.")
 
     async def _arun(self, *args: Any, run_manager=None, **kwargs: Any) -> Any:
+        self._label_trace_span()
         if not self._auth:
             kwargs[TOKEN_FIELD] = ""
             return await self._func(**kwargs)

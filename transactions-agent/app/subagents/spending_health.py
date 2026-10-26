@@ -23,7 +23,10 @@ Be concise and conversational — this will be read directly by the customer."""
 
 def build_graph(llm):
     """Build the Spending Health sub-agent graph. Call once per process."""
-    return create_agent(llm, [], system_prompt=SPENDING_HEALTH_PROMPT).with_config(run_name="spending_health")
+    # name= is the gen_ai.agent.name on this sub-agent's INTERNAL invoke_agent span.
+    return create_agent(
+        llm, [], system_prompt=SPENDING_HEALTH_PROMPT, name="spending_health",
+    ).with_config(run_name="spending_health")
 
 
 def _category_deltas(transactions: list[dict], window_days: int = 45) -> dict:

@@ -579,6 +579,21 @@ AMP_AGENT_API_KEY=<AMP_SAVINGS_AGENT_API_KEY>
 # OTEL_EXPORTER_OTLP_CERTIFICATE=~/.openchoreo/ca.pem
 ```
 
+### Trace structure (LangChain agent)
+
+With AMP on, the LangChain assistant's traces follow the [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (still at *Development* status), so the kind of each tool call is visible from the span under its `execute_tool {tool}` span rather than from a custom attribute:
+
+| Tool kind | Tools | Span under `execute_tool` |
+|-----------|-------|---------------------------|
+| API | `GetMyTransactions`, `GetMyProfile`, `UpdateMyProfile` | HTTP client span (`http.request.method`, `url.full`, `server.address`) — only with `--http-tracing` |
+| MCP | `GetAgencies` | MCP client span from Traceloop's MCP instrumentation (plus the SSE transport's HTTP spans with `--http-tracing`) |
+| In-process sub-agent | `AnalyzeSubscriptions`, `AnalyzeSpendingHealth` | `invoke_agent subscription_detective` / `invoke_agent spending_health`, span kind `INTERNAL` |
+| Remote agent | `SuggestSavingsGoal`, `PrepareTaxReturn` | `invoke_agent Savings Agent` / `invoke_agent Tax Agent`, span kind `CLIENT`, with `gen_ai.provider.name` (`bank_of_asgard` / `ministry_of_finance`) and `server.address`/`server.port` |
+
+To make the kind visible at a glance, each tool's span name also carries it as a prefix — `execute_tool [API] GetMyTransactions`, `execute_tool [MCP] GetAgencies`, `execute_tool [SubAgent] AnalyzeSubscriptions`, `execute_tool [Agent] SuggestSavingsGoal`. Only the span name changes: the name the LLM sees and `gen_ai.tool.name` stay unprefixed, so prompts and eval history are unaffected. The kind is declared per tool (`kind=ToolKind.…` in `langchain-agent/service.py`); `SummarizeDeductibleExpenses` counts as API, since it reads the Transactions API and classifies in-process.
+
+HTTP client spans are **off by default**, because Agent Manager doesn't consume them yet. Turn them on with `./demo_scripts/start-demo.sh langchain --amp --http-tracing` (`restart.sh agent` keeps the setting). The flag exports two variables to the agent process: `HTTP_CLIENT_TRACING=true`, which enables `opentelemetry-instrumentation-httpx` (HTTP client spans plus a W3C `traceparent` header on outgoing calls), and `OTEL_SEMCONV_STABILITY_OPT_IN=http`, which switches HTTP spans — including Traceloop's existing `requests`/`urllib3` ones — to the stable attribute names. Both must be in the environment before `amp-instrument` starts, so set them the same way if you launch the agent by other means (e.g. `environment:` in `docker-compose.amp.yml`). The Savings and Tax agents don't read `traceparent` yet, so their spans still appear as separate traces, correlated by the `transaction_id` association property as before.
+
 ### Self-signed OTLP endpoints
 
 When `AMP_OTEL_ENDPOINT` is an `https` URL served by a private CA — an OpenChoreo cluster such as `https://default-default.agents.local.apis.coach:19443/otel`, for example — the span exporter fails with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` and retries forever. Python's HTTP stack uses the `certifi` bundle and never reads the macOS Keychain, so adding the CA there fixes `curl` and the browser but not the agent.
@@ -611,7 +626,7 @@ openssl s_client -connect default-default.agents.local.apis.coach:19443 </dev/nu
 > >
 > > `EXPECTED_AUDIENCE` here must equal `SAVINGS_AGENT_CLIENT_ID` in `transactions-agent/.env` — same audience-matching requirement as the Agencies MCP Server.
 
-### Tax Agent (Ministry of Finance)
+### Tax Agent
 
 An optional agent that models a **different organisation**: the assistant belongs to the bank, this one belongs to the tax authority. It is skipped by `start-demo.sh` when its venv or `.env` is missing, so the rest of the demo runs unchanged without it.
 
@@ -845,7 +860,7 @@ cd ..
 | Script | Purpose |
 |--------|---------|
 | `demo_scripts/validate.sh` | Pre-flight check — verifies versions, config files, venvs, imports, and port availability - Only runs as part of `start-demo.sh`. |
-| `demo_scripts/start-demo.sh [langchain\|autogen\|strands] [--env=is\|asgardeo] [--amp] [--v1\|--v2]` | Starts the full stack in order; polls each health endpoint before moving on; prompts for agent flavor and agent manager instructions if not specified. <br />Omit `--env` to keep existing `.env` files; pass a profile to back up and switch `.env` files **Note:** When you specify the  `--env` option, files with this environment name are expected to be present (`.env.is` or `.env.asgardeo`). Same is true of the `config.js` files. If a `.env`or `config.js` is already present in the target directory, it will backed up and then overriden. <br />`--v1`/`--v2` is a demo-only toggle (default `v1`) for showing tracing/eval tooling catch a regression: `v2` deliberately bloats the system prompt and over-fetches `GetMyTransactions`, increasing tokens and latency so the difference shows up clearly in traces. It also turns the Savings Goals agent rogue — see [Rogue agent demo (v2)](#rogue-agent-demo-v2). |
+| `demo_scripts/start-demo.sh [langchain\|autogen\|strands] [--env=is\|asgardeo] [--amp] [--http-tracing] [--v1\|--v2]` | Starts the full stack in order; polls each health endpoint before moving on; prompts for agent flavor and agent manager instructions if not specified. <br />Omit `--env` to keep existing `.env` files; pass a profile to back up and switch `.env` files **Note:** When you specify the  `--env` option, files with this environment name are expected to be present (`.env.is` or `.env.asgardeo`). Same is true of the `config.js` files. If a `.env`or `config.js` is already present in the target directory, it will backed up and then overriden. <br />`--v1`/`--v2` is a demo-only toggle (default `v1`) for showing tracing/eval tooling catch a regression: `v2` deliberately bloats the system prompt and over-fetches `GetMyTransactions`, increasing tokens and latency so the difference shows up clearly in traces. It also turns the Savings Goals agent rogue — see [Rogue agent demo (v2)](#rogue-agent-demo-v2). <br />`--http-tracing` (with `--amp`, langchain only) adds OTel HTTP client spans for the agent's outbound calls — off by default because Agent Manager doesn't consume them yet; see [Trace structure (LangChain agent)](#trace-structure-langchain-agent). |
 | `demo_scripts/stop-demo.sh` | Gracefully stops everything started by `start-demo.sh` |
 | `demo_scripts/restart.sh <service>` | Stops and restarts a single service (`transactions-api`, `agent`, `mcp`, `savings`, `tax`, `server`, `frontend`) |
 
