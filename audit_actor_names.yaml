@@ -8,5 +8,8 @@
 transactions_api: Transactions API
 agencies_mcp: Agencies MCP
 savings_agent: Savings Agent
+tax_agent: Tax Agent
+# SummarizeDeductibleExpenses' OBO token: read with tax scopes, sent to the Transactions API.
+tax_authority: Transactions API
 llm_gateway: LLM Gateway
 obo_actor_token: OBO Actor Token

@@ -131,35 +131,57 @@ def _invalidate_jwks_cache() -> None:
     _jwks_cache = None
 
 
-def _log_token_claims(token: str) -> None:
-    """Log and audit the token's claims without verifying it. Never raises."""
+def _token_claims(token: str) -> dict:
+    """Log the token's claims without verifying it, and return them. Never raises."""
     try:
         unverified = pyjwt.decode(token, options={"verify_signature": False})
-        logger.info(
-            "Token claims — aud=%r  sub=%r  iss=%r  exp=%r",
-            unverified.get("aud"),
-            unverified.get("sub"),
-            unverified.get("iss"),
-            unverified.get("exp"),
-        )
-        emit_token_event(
-            service="savings-goals-agent", event="validated_incoming",
-            origin=unverified.get("sub"), destination="savings-goals-agent",
-            access_token=token, client_id=EXPECTED_AUDIENCE,
-            requested_by=unverified.get("sub"), sub=unverified.get("sub"),
-            act=unverified.get("act"), aud=unverified.get("aud"), exp=unverified.get("exp"),
-        )
     except Exception as peek_err:
         logger.warning("Could not decode token for inspection: %s", peek_err)
+        return {}
+    logger.info(
+        "Token claims — aud=%r  sub=%r  iss=%r  exp=%r",
+        unverified.get("aud"),
+        unverified.get("sub"),
+        unverified.get("iss"),
+        unverified.get("exp"),
+    )
+    return unverified
+
+
+def _audit_incoming_token(token: str, claims: dict, event: str, error: str | None = None) -> None:
+    """validated_incoming once the token passed (or failed) this service's own check;
+    accepted_incoming when SKIP_TOKEN_VALIDATION trusts the gateway's check instead. On a
+    rejection the claims are unverified: who the token claims to be from, not who sent it."""
+    emit_token_event(
+        service="savings-goals-agent", event=event,
+        origin=claims.get("sub") or "unknown-caller", destination="savings-goals-agent",
+        access_token=token, client_id=EXPECTED_AUDIENCE,
+        requested_by=claims.get("sub"), sub=claims.get("sub"),
+        act=claims.get("act"), aud=claims.get("aud"), exp=claims.get("exp"),
+        success=error is None, error=error,
+    )
 
 
 def _validate_token(token: str) -> None:
-    """Validate a JWT bearer token against the IDP's JWKS. Raises on failure.
+    """Validate a JWT bearer token and audit the outcome. Raises on failure.
+
+    Audited after the check, so the trail never shows a token as validated before its
+    signature and audience were checked."""
+    claims = _token_claims(token)
+    try:
+        _verify_token(token)
+    except Exception as exc:
+        _audit_incoming_token(token, claims, "validated_incoming", f"{type(exc).__name__}: {exc}"[:200])
+        raise
+    _audit_incoming_token(token, claims, "validated_incoming")
+
+
+def _verify_token(token: str) -> None:
+    """Check the token's signature against the IDP's JWKS, and its audience. Raises on failure.
 
     Retries once with a fresh JWKS fetch if all cached keys fail, to handle
     IDP key rotation without requiring a process restart.
     """
-    _log_token_claims(token)
     logger.info("Expected audience: %r", EXPECTED_AUDIENCE)
 
     last_err: Exception | None = None
@@ -232,7 +254,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         if auth.startswith("Bearer "):
             token = auth[len("Bearer "):]
             if SKIP_TOKEN_VALIDATION:
-                _log_token_claims(token)
+                _audit_incoming_token(token, _token_claims(token), "accepted_incoming")
                 return await call_next(request)
             try:
                 _validate_token(token)

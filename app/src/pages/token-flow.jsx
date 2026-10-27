@@ -107,6 +107,10 @@ const sanitizeLabel = (/** @type {string} */ label) => String(label).replace(/"/
 // the de-dup behavior itself, but it's not an actual hop and just clutters the diagram.
 const DIAGRAM_NOISE_EVENTS = new Set(["dedupe_wait"]);
 
+// Checks the receiving agent runs on a token it was sent. Nothing travels, so they are
+// drawn as a note on that agent rather than as a second arrow after the call itself.
+const LOCAL_EVENTS = new Set(["validated_incoming", "accepted_incoming"]);
+
 // The raw `event` strings from the audit log are terse internal names (e.g. "fresh",
 // "api_call") — fine in JSONL, but cryptic as a diagram label. Map the known vocabulary
 // to human-readable phrases; unknown events fall back to a de-underscored, capitalized
@@ -124,8 +128,12 @@ const EVENT_LABELS = /** @type {Record<string, string>} */ ({
   agent_token_fetch: "Authorization code exchanged (PKCE, no client secret)",
   gateway_token_fetch: "Gateway token requested",
   gateway_token_fresh: "Gateway token obtained (fresh)",
-  validated_incoming: "Incoming token validated",
+  validated_incoming: "Incoming token verified (signature + audience)",
+  accepted_incoming: "Incoming token accepted (verified by the gateway in front)",
   api_call: "API call",
+  agent_call: "Agent call (A2A)",
+  agent_call_failed: "Agent call failed",
+  agent_reply: "Agent reply",
   llm_call: "LLM call",
 });
 
@@ -226,9 +234,17 @@ const buildDiagramText = (/** @type {Array<any>} */ allEvents) => {
     }
 
     const failed = event.success === false;
-    const arrow = failed ? "-x" : "->>";
-    const label = sanitizeLabel(`${hop.label}<br/>${meta.join(" · ")}`);
-    const line = `${origin}${arrow}${destination}: ${label}`;
+    if (event.error) {
+      meta.push(`error ${event.error}`);
+    }
+    let line;
+    if (LOCAL_EVENTS.has(event.event)) {
+      const verdict = failed ? "✕ Incoming token rejected" : `✓ ${hop.label}`;
+      line = `Note over ${destination}: ${sanitizeLabel(`${verdict}<br/>${meta.join(" · ")}`)}`;
+    } else {
+      const arrow = failed ? "-x" : "->>";
+      line = `${origin}${arrow}${destination}: ${sanitizeLabel(`${hop.label}<br/>${meta.join(" · ")}`)}`;
+    }
 
     // Tint the band behind a failed hop so failures are obvious beyond the red crosshead.
     if (failed) {

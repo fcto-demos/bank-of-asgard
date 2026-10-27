@@ -48,7 +48,7 @@ from fastapi import FastAPI, WebSocket, HTTPException
 from pydantic import BaseModel, PrivateAttr
 from starlette.websockets import WebSocketDisconnect
 
-from app.audit_log import register_actor_name, set_session, set_transaction
+from app.audit_log import emit_token_event, register_actor_name, set_session, set_transaction
 from app.gateway import GatewayAuth, build_gateway_auths, guardrail_reason
 from app.prompt import (
     DEMO_VERSION, MAX_USER_MESSAGE_CHARS, MESSAGE_TOO_LONG_REPLY, WELCOME_MESSAGE,
@@ -420,6 +420,37 @@ def _invoke_remote_agent_span(agent_name: str, provider: str, url: str) -> Itera
             raise
 
 
+@contextmanager
+def _audit_agent_call(resource: str, token: OAuthToken) -> Iterator[None]:
+    """Token-audit hops for a call to an agent in another process: `agent_call` as the
+    request leaves, then `agent_reply` (agent -> Coordinator, no token) when it succeeds
+    or `agent_call_failed` when it errors — the A2A counterpart of tools.py's api_call.
+    Logged here, by the caller, because the receiving agent's own events
+    (validated_incoming, its LLM calls) only reach this trail when it runs on this
+    machine: an agent deployed to Agent Manager writes them to its own disk."""
+    audit = {
+        "service": "transactions-agent", "origin": "transactions-agent", "destination": resource,
+        "access_token": token.access_token, "kind": "AGENT_TOKEN", "resource": resource,
+        "requested_by": "transactions-agent",
+    }
+    emit_token_event(event="agent_call", **audit)
+    try:
+        yield
+    except Exception as e:
+        emit_token_event(
+            event="agent_call_failed", success=False,
+            error=(f"HTTP {e.response.status_code}" if isinstance(e, httpx.HTTPStatusError)
+                   else type(e).__qualname__),
+            **audit,
+        )
+        raise
+    emit_token_event(
+        service="transactions-agent", event="agent_reply",
+        origin=resource, destination="transactions-agent",
+        resource=resource, requested_by="transactions-agent",
+    )
+
+
 async def _suggest_savings_goal(
     token: OAuthToken,
     subscription_summary: str,
@@ -456,7 +487,10 @@ async def _suggest_savings_goal(
     }
     try:
         async with httpx.AsyncClient(verify=_ssl_verify) as client:
-            with _invoke_remote_agent_span("Savings Agent", _SAVINGS_AGENT_PROVIDER, SAVINGS_AGENT_URL):
+            with (
+                _invoke_remote_agent_span("Savings Agent", _SAVINGS_AGENT_PROVIDER, SAVINGS_AGENT_URL),
+                _audit_agent_call("savings_agent", token),
+            ):
                 response = await client.post(
                     SAVINGS_AGENT_URL, headers=headers, json=payload, timeout=_SAVINGS_AGENT_TIMEOUT,
                 )
@@ -570,7 +604,10 @@ async def _prepare_tax_return(
         sorted(summary["qualifying_spend"]),
     )
     async with httpx.AsyncClient(verify=_ssl_verify) as client:
-        with _invoke_remote_agent_span("Tax Agent", _TAX_AGENT_PROVIDER, TAX_AGENT_URL):
+        with (
+            _invoke_remote_agent_span("Tax Agent", _TAX_AGENT_PROVIDER, TAX_AGENT_URL),
+            _audit_agent_call("tax_agent", token),
+        ):
             response = await client.post(TAX_AGENT_URL, headers=headers, json=payload, timeout=30.0)
             response.raise_for_status()
         result = response.json()
