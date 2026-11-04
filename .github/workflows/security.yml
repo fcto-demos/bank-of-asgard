@@ -28,6 +28,10 @@ jobs:
             path: transactions-api
           - name: agencies-mcp-server
             path: agencies-mcp-server
+          - name: savings-goals-agent
+            path: savings-goals-agent
+          - name: tax-agent
+            path: tax-agent
 
     steps:
       - uses: actions/checkout@v4
@@ -43,9 +47,22 @@ jobs:
         working-directory: ${{ matrix.path }}
         run: pip-audit -r requirements.txt --progress-spinner off
 
-  frontend-audit:
-    name: Frontend — npm audit
+  npm-audit:
+    name: Node — npm audit (${{ matrix.name }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # app: only shipped (runtime) deps gate the build. Dev-only tooling (ESLint's
+          # minimatch) has open advisories with no upstream fix and never reaches the bundle.
+          - name: app
+            path: app
+            audit-args: --omit=dev
+          - name: server
+            path: server
+            audit-args: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -55,12 +72,12 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        working-directory: app
+        working-directory: ${{ matrix.path }}
         run: npm install
 
-      - name: Audit frontend dependencies
-        working-directory: app
-        run: npm audit --audit-level moderate
+      - name: Audit dependencies
+        working-directory: ${{ matrix.path }}
+        run: npm audit --audit-level moderate ${{ matrix.audit-args }}
 
   trivy-scan:
     name: Trivy — filesystem & secrets scan
