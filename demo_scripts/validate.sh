@@ -16,6 +16,7 @@ PORT_AGENT=8011
 PORT_MCP=8012
 PORT_SAVINGS=8013
 PORT_TAX=8014
+PORT_SLIDES=8027
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -240,6 +241,7 @@ check_port $PORT_API      "transactions-api"
 check_port $PORT_AGENT    "transactions-agent"
 check_port $PORT_MCP      "agencies-mcp-server"
 check_port $PORT_SAVINGS  "savings-goals-agent"
+check_port $PORT_SLIDES   "presentation server — stop agent-manager-chef/start-presentation.sh if it is running"
 # Optional service — only checked when its venv is present (see start-demo.sh).
 [[ -f "$ROOT/tax-agent/venv/bin/python" ]] && check_port $PORT_TAX "tax-agent" || true
 

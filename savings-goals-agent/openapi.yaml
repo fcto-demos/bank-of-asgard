@@ -70,16 +70,21 @@ paths:
         it is never supplied by the model — and ties the call back to whose consented
         data is being delegated, for the shared audit trail.
 
-        `transaction_id` is the Coordinator's session ID, forwarded so this service can
-        tag its spans with the same Traceloop association property; OTEL context does not
-        cross the process boundary on its own. Send it in the `X-Transaction-Id` header
+        `transaction_id` is the Coordinator's per-turn ID. It keys this service's audit
+        events and its per-turn LLM round cap. Send it in the `X-Transaction-Id` header
         as well as the body, so the auth middleware — which runs before the body is
         parsed — can tag its `validated_incoming` audit event with it too.
+
+        Trace correlation uses the standard W3C headers instead: `traceparent` makes this
+        service's spans join the caller's trace, and `baggage` may carry
+        `gen_ai.conversation.id`, which is stamped on every span here.
       security:
         - OAuth2: []
         - ApiKeyAuth: []
       parameters:
         - $ref: '#/components/parameters/TransactionIdHeader'
+        - $ref: '#/components/parameters/TraceparentHeader'
+        - $ref: '#/components/parameters/BaggageHeader'
       requestBody:
         required: true
         description: Sub-agent findings and the monthly amount available to save.
@@ -131,11 +136,31 @@ components:
       in: header
       required: false
       description: |
-        The Coordinator's session ID, used to correlate this service's audit events and
-        traces with the calling session. Read by the auth middleware before the request
-        body is parsed.
+        The Coordinator's per-turn ID, used to correlate this service's audit events with
+        the calling turn. Read by the auth middleware before the request body is parsed.
       schema:
         $ref: '#/components/schemas/TransactionId'
+    TraceparentHeader:
+      name: traceparent
+      in: header
+      required: false
+      description: |
+        W3C Trace Context. When present, this service's spans join the caller's trace.
+      schema:
+        type: string
+        maxLength: 55
+        example: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    BaggageHeader:
+      name: baggage
+      in: header
+      required: false
+      description: |
+        W3C Baggage. If it contains `gen_ai.conversation.id`, that value is stamped on
+        every span this request produces (OpenTelemetry GenAI semantic conventions).
+      schema:
+        type: string
+        maxLength: 8192
+        example: "gen_ai.conversation.id=0b6f3f5e-2c1d-4c57-9a43-1e4c8d7f2a10"
   responses:
     Unauthorized:
       description: |
@@ -198,7 +223,7 @@ components:
   schemas:
     TransactionId:
       type: string
-      description: Correlation ID shared with the calling Coordinator session.
+      description: Audit correlation ID for one turn of the calling Coordinator session.
       pattern: '^[A-Za-z0-9_.:-]{1,100}$'
       minLength: 1
       maxLength: 100

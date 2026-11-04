@@ -4,6 +4,8 @@ import os
 import secrets
 import time
 from collections import OrderedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cached_property
 from pathlib import Path
 
@@ -18,7 +20,10 @@ from fastapi.responses import JSONResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from traceloop.sdk import Traceloop
+from opentelemetry import baggage, propagate
+from opentelemetry.context import attach, detach
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_CONVERSATION_ID
+from traceloop.sdk.tracing import set_conversation_id
 from pydantic import BaseModel, PrivateAttr
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -214,6 +219,26 @@ def _verify_token(token: str) -> None:
     raise last_err or ValueError("Token validation failed")
 
 
+@contextmanager
+def _caller_trace_context(request: Request) -> Iterator[None]:
+    """Join the caller's trace and conversation for the rest of this request.
+
+    The Coordinator sends W3C `traceparent` (so this agent's spans nest under its
+    `invoke_agent Savings Agent` span) and `baggage` carrying gen_ai.conversation.id,
+    which Traceloop then stamps on every span here. Both are optional: without them the
+    request simply starts its own trace."""
+    context = propagate.extract(request.headers)
+    tokens: list = [attach(context)]  # set_conversation_id's token is typed as object
+    conversation_id = baggage.get_baggage(GEN_AI_CONVERSATION_ID, context)
+    if conversation_id:
+        tokens.append(set_conversation_id(str(conversation_id)))
+    try:
+        yield
+    finally:
+        for token in reversed(tokens):
+            detach(token)
+
+
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     """Validates every request except /health against either a bearer JWT or, if
     INBOUND_API_KEY is set, a static API key — either credential is accepted, neither is
@@ -222,6 +247,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
     BaseHTTPMiddleware (unlike the agencies MCP server) is fine here."""
 
     async def dispatch(self, request: Request, call_next):
+        with _caller_trace_context(request):
+            return await self._authenticate(request, call_next)
+
+    async def _authenticate(self, request: Request, call_next):
         # Set from the header (not the body — the body isn't parsed yet at this point)
         # so the validation audit events below are tagged with the right transaction_id.
         set_transaction(request.headers.get("x-transaction-id"))
@@ -483,8 +512,8 @@ class SuggestGoalRequest(BaseModel):
     # Decoded server-side by the Coordinator from the user's OBO token (never LLM-supplied)
     # — ties this call back to whose consented data is being delegated, for audit purposes.
     user_sub: str | None = None
-    # The Coordinator's session_id, forwarded so this agent's spans share the same
-    # Traceloop association property — OTEL context doesn't cross the process boundary.
+    # The Coordinator's per-turn ID: keys the audit log and the round cap (_take_round).
+    # Tracing doesn't use it — see _caller_trace_context.
     transaction_id: str | None = None
 
 
@@ -500,9 +529,6 @@ async def health():
 @app.post("/suggest-goal")
 async def suggest_goal(req: SuggestGoalRequest):
     set_transaction(req.transaction_id)
-
-    if req.transaction_id:
-        Traceloop.set_association_properties({"transaction_id": req.transaction_id})
 
     logger.info ("--> Entering savings agent code")
     projected_balances = project_milestones(req.monthly_recoverable)

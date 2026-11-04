@@ -276,6 +276,7 @@ Leaving `TAX_CONSENT_SCOPE` unset falls back to `read_transactions`: the flow wo
 | `8012` | Agencies MCP Server (FastMCP SSE)    | `agencies-mcp-server/server.py` → port constant, `docker-compose.yml` → port mapping |
 | `8013` | Savings Goals Agent (FastAPI)        | `savings-goals-agent/server.py` → port constant              |
 | `8014` | Tax Agent — Ministry of Finance (FastAPI) | `tax-agent/server.py` → port constant, `transactions-agent/.env` → `TAX_AGENT_URL` |
+| `8027` | Presentation server (Token Flow + Inside our agents pages) | `PORT_SLIDES` in the demo scripts; `agent-manager-chef/start-presentation.sh` takes the port as its first argument |
 
 When changing a port, also update:
 
@@ -592,7 +593,17 @@ With AMP on, the LangChain assistant's traces follow the [OpenTelemetry GenAI se
 
 To make the kind visible at a glance, each tool's span name also carries it as a prefix — `execute_tool [API] GetMyTransactions`, `execute_tool [MCP] GetAgencies`, `execute_tool [SubAgent] AnalyzeSubscriptions`, `execute_tool [Agent] SuggestSavingsGoal`. Only the span name changes: the name the LLM sees and `gen_ai.tool.name` stay unprefixed, so prompts and eval history are unaffected. The kind is declared per tool (`kind=ToolKind.…` in `langchain-agent/service.py`); `SummarizeDeductibleExpenses` counts as API, since it reads the Transactions API and classifies in-process.
 
-HTTP client spans are **off by default**, because Agent Manager doesn't consume them yet. Turn them on with `./demo_scripts/start-demo.sh langchain --amp --http-tracing` (`restart.sh agent` keeps the setting). The flag exports two variables to the agent process: `HTTP_CLIENT_TRACING=true`, which enables `opentelemetry-instrumentation-httpx` (HTTP client spans plus a W3C `traceparent` header on outgoing calls), and `OTEL_SEMCONV_STABILITY_OPT_IN=http`, which switches HTTP spans — including Traceloop's existing `requests`/`urllib3` ones — to the stable attribute names. Both must be in the environment before `amp-instrument` starts, so set them the same way if you launch the agent by other means (e.g. `environment:` in `docker-compose.amp.yml`). The Savings and Tax agents don't read `traceparent` yet, so their spans still appear as separate traces, correlated by the `transaction_id` association property as before.
+HTTP client spans are **off by default**, because Agent Manager doesn't consume them yet. Turn them on with `./demo_scripts/start-demo.sh langchain --amp --http-tracing` (`restart.sh agent` keeps the setting). The flag exports two variables to the agent process: `HTTP_CLIENT_TRACING=true`, which enables `opentelemetry-instrumentation-httpx` (HTTP client spans plus a W3C `traceparent` header on outgoing calls), and `OTEL_SEMCONV_STABILITY_OPT_IN=http`, which switches HTTP spans — including Traceloop's existing `requests`/`urllib3` ones — to the stable attribute names. Both must be in the environment before `amp-instrument` starts, so set them the same way if you launch the agent by other means (e.g. `environment:` in `docker-compose.amp.yml`).
+
+#### Correlation: conversations, turns and remote agents
+
+Correlation uses only standard OpenTelemetry fields, no Traceloop-specific attributes or headers, so any OTel-aware backend can follow it:
+
+- **Conversation:** every span carries `gen_ai.conversation.id`, set to the chat session's ID, so all the turns of one session group together. The LangChain and Strands assistants set it once per WebSocket session.
+- **Turn:** each prompt is its own trace, so the trace ID identifies the turn.
+- **Remote agents:** calls to the Savings and Tax agents always carry a W3C `traceparent` and a W3C `baggage` header (`gen_ai.conversation.id=<session>`), with or without `--http-tracing`. Both agents read them, so their spans join the Coordinator's trace under its `invoke_agent` span and carry the same `gen_ai.conversation.id`.
+
+The `X-Transaction-Id` header and the `transaction_id` field in the body are no longer used for tracing. They hold a per-turn ID that keys the token audit log (the **Token Flow** page) and the Savings Agent's per-turn round cap.
 
 ### Self-signed OTLP endpoints
 
@@ -862,7 +873,7 @@ cd ..
 | `demo_scripts/validate.sh` | Pre-flight check — verifies versions, config files, venvs, imports, and port availability - Only runs as part of `start-demo.sh`. |
 | `demo_scripts/start-demo.sh [langchain\|autogen\|strands] [--env=is\|asgardeo] [--amp] [--http-tracing] [--v1\|--v2]` | Starts the full stack in order; polls each health endpoint before moving on; prompts for agent flavor and agent manager instructions if not specified. <br />Omit `--env` to keep existing `.env` files; pass a profile to back up and switch `.env` files **Note:** When you specify the  `--env` option, files with this environment name are expected to be present (`.env.is` or `.env.asgardeo`). Same is true of the `config.js` files. If a `.env`or `config.js` is already present in the target directory, it will backed up and then overriden. <br />`--v1`/`--v2` is a demo-only toggle (default `v1`) for showing tracing/eval tooling catch a regression: `v2` deliberately bloats the system prompt and over-fetches `GetMyTransactions`, increasing tokens and latency so the difference shows up clearly in traces. It also turns the Savings Goals agent rogue — see [Rogue agent demo (v2)](#rogue-agent-demo-v2). <br />`--http-tracing` (with `--amp`, langchain only) adds OTel HTTP client spans for the agent's outbound calls — off by default because Agent Manager doesn't consume them yet; see [Trace structure (LangChain agent)](#trace-structure-langchain-agent). |
 | `demo_scripts/stop-demo.sh` | Gracefully stops everything started by `start-demo.sh` |
-| `demo_scripts/restart.sh <service>` | Stops and restarts a single service (`transactions-api`, `agent`, `mcp`, `savings`, `tax`, `server`, `frontend`) |
+| `demo_scripts/restart.sh <service>` | Stops and restarts a single service (`transactions-api`, `agent`, `mcp`, `savings`, `tax`, `server`, `frontend`, `presentation`) |
 
 ```bash
 # Verify everything is configured correctly
@@ -887,6 +898,13 @@ cd ..
 ./demo_scripts/stop-demo.sh
 ```
 
+`start-demo.sh` also starts the presentation server from `agent-manager-chef/` (`serve.py`, standard library only, bound to `127.0.0.1`), which serves two pages:
+
+- **Token Flow** — `http://localhost:8027/token-flow.html`: the token audit trail animated. Each hop is a token travelling between systems, coloured by token type (OBO gold, Agent cyan, API key violet). OAuth protocol steps (PKCE challenge, auth code, OBO exchange) are dashed chips, tokens are solid, and a receiving agent's token check shows as a ✓ or ✕ badge on that agent. Pick a transaction, then play, step (← →) or change the speed.
+- **Inside our agents** — `http://localhost:8027/inside-our-agents.html`: each agent's live sheet from Agent Manager, read with `amctl`. It needs a valid session (`amctl login`); without one, each column shows the error.
+
+If you already run `agent-manager-chef/start-presentation.sh` on its own, stop it first, since the pre-flight check fails when port 8027 is taken. To add the server to a demo that was started before it was part of the scripts, run `./demo_scripts/restart.sh presentation`.
+
 #### Rogue agent demo (v2)
 
 With `--v2`, the Savings Goals agent never understands its inputs and keeps asking for more information, whatever it is sent. It's meant for demoing a product that detects rogue agents: excessive tokens, iterations or tool calls. Ask the assistant for a financial check-up (LangChain only — the other implementations don't have `SuggestSavingsGoal`) and the runaway happens in two places:
@@ -900,7 +918,7 @@ The Savings agent's own count stops at the cap, though: at the default it makes 
 
 When the Savings agent runs in Agent Manager instead of locally, `start-demo.sh` doesn't reach it: set `DEMO_VERSION=v2` (and optionally `DEMO_MAX_ITERATIONS`) as environment variables on its deployment.
 
-Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page's transaction list) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs. Each service also rotates it to `token-audit.jsonl.1` once it passes 20 MB, so a long-running demo can't grow it without bound. The savings and tax agents only add their own events (such as `validated_incoming`) when they run on the same machine; a Savings Agent deployed to Agent Manager writes them on its own host. The LangChain coordinator therefore logs each agent-to-agent call itself (`agent_call`, then `agent_reply` when it succeeds or `agent_call_failed` on an error), so the hop shows on the Token Flow page wherever the other agent runs.
+Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs. Each service also rotates it to `token-audit.jsonl.1` once it passes 20 MB, so a long-running demo can't grow it without bound. The savings and tax agents only add their own events (such as `validated_incoming`) when they run on the same machine; a Savings Agent deployed to Agent Manager writes them on its own host. The LangChain coordinator therefore logs each agent-to-agent call itself (`agent_call`, then `agent_reply` when it succeeds or `agent_call_failed` on an error), so the hop shows on the Token Flow page wherever the other agent runs.
 
 The demo scripts bind the MCP, Savings and Tax services to `127.0.0.1` (they read `BIND_HOST`, which defaults to `0.0.0.0` so containers and Agent Manager deployments stay reachable). Run with `BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh` if something off-host, such as a container, must reach them.
 

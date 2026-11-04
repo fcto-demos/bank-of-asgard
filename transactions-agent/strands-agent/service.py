@@ -72,12 +72,12 @@ def _noop_decorator(*_a, **_kw):
 
 try:
     from traceloop.sdk.decorators import agent as _agent_decorator
-    from traceloop.sdk import Traceloop as _Traceloop
-    _HAS_TRACELOOP = True
+    from traceloop.sdk.tracing import set_conversation_id as _set_conversation_id
 except ImportError:
-    _HAS_TRACELOOP = False
-    _Traceloop = None
     _agent_decorator = _noop_decorator
+
+    def _set_conversation_id(conversation_id: str) -> object:
+        return None
 
 
 # IDP configuration
@@ -553,8 +553,8 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     active_model = model_client_secured if secured else model_client
     logger.info("Session %s using %s gateway", session_id, "secured" if secured else "base")
 
-    if _HAS_TRACELOOP and _Traceloop:
-        _Traceloop.set_association_properties({"session_id": session_id})
+    # OTel GenAI gen_ai.conversation.id on every span of this session, across turns.
+    _set_conversation_id(session_id)
 
     banking_assistant = Agent(
         model=active_model,

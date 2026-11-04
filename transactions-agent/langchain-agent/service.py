@@ -35,14 +35,15 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.errors import GraphRecursionError
-from opentelemetry import trace
+from opentelemetry import baggage, propagate, trace
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_AGENT_NAME, GEN_AI_OPERATION_NAME, GEN_AI_PROVIDER_NAME, GenAiOperationNameValues,
+    GEN_AI_AGENT_NAME, GEN_AI_CONVERSATION_ID, GEN_AI_OPERATION_NAME, GEN_AI_PROVIDER_NAME,
+    GenAiOperationNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.server_attributes import SERVER_ADDRESS, SERVER_PORT
 from opentelemetry.trace import SpanKind
-from traceloop.sdk import Traceloop
+from traceloop.sdk.tracing import set_conversation_id
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
 from pydantic import BaseModel, PrivateAttr
@@ -420,6 +421,24 @@ def _invoke_remote_agent_span(agent_name: str, provider: str, url: str) -> Itera
             raise
 
 
+def _trace_context_headers(conversation_id: str | None) -> dict[str, str]:
+    """W3C `traceparent` and `baggage` headers for a call to an agent in another process.
+
+    Built inside _invoke_remote_agent_span, so traceparent points at that span and the
+    remote agent's spans join this trace beneath it. gen_ai.conversation.id rides along as
+    baggage so the remote agent can stamp its own spans with the same conversation.
+    Injected here rather than left to the httpx instrumentation, which is opt-in
+    (--http-tracing); when that is on, it replaces traceparent with its own HTTP client
+    span, one level further down, and leaves the baggage alone."""
+    context = (
+        baggage.set_baggage(GEN_AI_CONVERSATION_ID, conversation_id) if conversation_id
+        else None
+    )
+    headers: dict[str, str] = {}
+    propagate.inject(headers, context=context)
+    return headers
+
+
 @contextmanager
 def _audit_agent_call(resource: str, token: OAuthToken) -> Iterator[None]:
     """Token-audit hops for a call to an agent in another process: `agent_call` as the
@@ -458,6 +477,7 @@ async def _suggest_savings_goal(
     monthly_recoverable: float,
     user_sub: str | None = None,
     transaction_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> str:
     """Call the standalone Savings Goals agent service with findings from the other
     two sub-agents and return its recommendation. A real cross-process agent call —
@@ -468,10 +488,10 @@ async def _suggest_savings_goal(
     call back to whose consented data the Coordinator is delegating, not just which
     agents were involved.
 
-    transaction_id (the Coordinator's session_id) is forwarded so the Savings Agent
-    can tag its own spans with the same Traceloop association property: the httpx
-    instrumentation now sends a traceparent header, but the Savings Agent does not yet
-    extract it to join this trace."""
+    transaction_id (this turn's ID) keys the Savings Agent's audit events and its per-turn
+    round cap. Tracing uses the standard headers instead: traceparent joins its spans to
+    this trace, and conversation_id (the session) travels as gen_ai.conversation.id
+    baggage — see _trace_context_headers."""
     headers = {"Authorization": f"Bearer {token.access_token}"}
     # Also sent as a header (not just in the body) so the Savings Agent's bearer-auth
     # middleware — which runs before the body is parsed — can tag its own
@@ -492,7 +512,8 @@ async def _suggest_savings_goal(
                 _audit_agent_call("savings_agent", token),
             ):
                 response = await client.post(
-                    SAVINGS_AGENT_URL, headers=headers, json=payload, timeout=_SAVINGS_AGENT_TIMEOUT,
+                    SAVINGS_AGENT_URL, headers=headers | _trace_context_headers(conversation_id),
+                    json=payload, timeout=_SAVINGS_AGENT_TIMEOUT,
                 )
                 response.raise_for_status()
             result = response.json()
@@ -580,13 +601,15 @@ async def _prepare_tax_return(
     summary: dict,
     user_sub: str | None = None,
     transaction_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> str:
     """Send the per-category totals to the Ministry of Finance's Tax Agent.
 
     The cross-organisation hop. `summary` comes from session state rather than from the
     model, so the figures the ministry receives are exactly the ones computed in
     app/tax.py — the LLM cannot restate, round, or invent them. Note what is sent: gross
-    income and one total per relief category, and nothing else."""
+    income and one total per relief category, and nothing else. transaction_id and
+    conversation_id play the same roles as in _suggest_savings_goal."""
     headers = {"Authorization": f"Bearer {token.access_token}"}
     # Also sent as a header (not just in the body) so the Tax Agent's bearer-auth
     # middleware — which runs before the body is parsed — can tag its own
@@ -608,7 +631,10 @@ async def _prepare_tax_return(
             _invoke_remote_agent_span("Tax Agent", _TAX_AGENT_PROVIDER, TAX_AGENT_URL),
             _audit_agent_call("tax_agent", token),
         ):
-            response = await client.post(TAX_AGENT_URL, headers=headers, json=payload, timeout=30.0)
+            response = await client.post(
+                TAX_AGENT_URL, headers=headers | _trace_context_headers(conversation_id),
+                json=payload, timeout=30.0,
+            )
             response.raise_for_status()
         result = response.json()
     a = result["assessment"]
@@ -650,6 +676,7 @@ def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) ->
             token, summary,
             user_sub=session_context["user_sub"],
             transaction_id=session_context["transaction_id"],
+            conversation_id=session_context["conversation_id"],
         )
 
     # SummarizeDeductibleExpenses runs bank-side under the CITIZEN's consent (OBO), with
@@ -926,13 +953,13 @@ async def run_agent(
             await websocket.send_json(TextResponse(content=MESSAGE_TOO_LONG_REPLY).model_dump())
             continue
 
-        # Fresh transaction_id per turn — each prompt gets its own trace instead of
-        # every turn in the session sharing one ID and accumulating the whole history.
+        # Fresh transaction_id per turn — the audit-log key that groups one prompt's token
+        # hops on the Token Flow page. (Traces need no ID of their own: each turn is its own
+        # trace, and gen_ai.conversation.id groups the session's turns.)
         turn_id = str(uuid.uuid4())
         if session_context is not None:
             session_context["transaction_id"] = turn_id
             session_context["savings_calls"] = 0
-        Traceloop.set_association_properties({"transaction_id": turn_id})
         set_transaction(turn_id)
 
         try:
@@ -980,6 +1007,8 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     """WebSocket endpoint for the Transaction Assistant chat."""
     session_id = str(uuid.uuid4())
     set_session(session_id)
+    # OTel GenAI gen_ai.conversation.id on every span of this session, across turns.
+    set_conversation_id(session_id)
 
     async def message_handler(message: AuthRequestMessage):
         """Send OBO auth request to the frontend over this session's WebSocket."""
@@ -999,14 +1028,15 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # Captures the end user's identity (decoded from the OBO token, never LLM-supplied)
     # the first time an OBO-authenticated tool runs, so SuggestSavingsGoal's call to the
     # standalone Savings Agent can be traced back to whose consented data is involved.
-    # transaction_id is refreshed per turn in run_agent (not per session) so each prompt
-    # gets its own trace instead of accumulating the whole conversation under one ID.
-    # tax_summary holds the aggregates computed by SummarizeDeductibleExpenses so that
+    # transaction_id is refreshed per turn in run_agent (not per session) so the audit log
+    # groups each prompt's hops separately; conversation_id is the session, forwarded to
+    # the remote agents as gen_ai.conversation.id baggage. tax_summary holds the aggregates computed by SummarizeDeductibleExpenses so that
     # PrepareTaxReturn sends the figures that were actually computed from the user's
     # transactions, rather than whatever the model paraphrased back into its arguments.
     # savings_calls counts SuggestSavingsGoal calls this turn for _CappedSavingsTool.
     session_context: dict = {
-        "user_sub": None, "transaction_id": None, "tax_summary": None, "savings_calls": 0,
+        "user_sub": None, "transaction_id": None, "conversation_id": session_id,
+        "tax_summary": None, "savings_calls": 0,
     }
 
     async def _analyze_subscriptions_traced(token: OAuthToken) -> str:
@@ -1027,6 +1057,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             token, subscription_summary, spending_summary, monthly_recoverable,
             user_sub=session_context["user_sub"],
             transaction_id=session_context["transaction_id"],
+            conversation_id=session_context["conversation_id"],
         )
 
     # Wire the transactions tool with OBO token auth

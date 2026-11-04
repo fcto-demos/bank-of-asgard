@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # start-demo.sh — Bank of Asgard full-stack demo launcher
 # Starts: transactions-api → selected agent → agencies-mcp-server → server → frontend
+#         → presentation server (Token Flow + Inside our agents pages)
 # Logs go to .demo-logs/  PIDs tracked in .demo.pids
 
 set -euo pipefail
@@ -18,6 +19,7 @@ PORT_AGENT=8011
 PORT_MCP=8012
 PORT_SAVINGS=8013
 PORT_TAX=8014
+PORT_SLIDES=8027
 
 # Native launches bind the standalone Python services (API, MCP, savings, tax) to localhost
 # only — on a public VM their ports would otherwise be reachable directly. Override with
@@ -476,6 +478,19 @@ echo "frontend:$!" >> "$PID_FILE"
 
 wait_for_http "http://localhost:$PORT_FRONTEND" "frontend" 90
 
+# ── Start presentation server (agent-manager-chef) ────────────────────────────
+# Serves the animated Token Flow page (reads .demo-logs/token-audit.jsonl) and the
+# "Inside our agents" slide (reads Agent Manager through amctl). Standard library only,
+# bound to 127.0.0.1 by serve.py itself.
+section "Starting presentation server (port $PORT_SLIDES)"
+
+(cd "$ROOT/agent-manager-chef" && python3 serve.py "$PORT_SLIDES" \
+    > "$LOG_DIR/presentation.log" 2>&1) &
+echo "presentation:$!" >> "$PID_FILE"
+check_launched "$!" "presentation server" "$LOG_DIR/presentation.log"
+
+wait_for_http "http://localhost:$PORT_SLIDES/token-flow.html" "presentation"
+
 # ── Remove error trap now that everything is up ───────────────────────────────
 trap - ERR INT TERM
 
@@ -491,6 +506,8 @@ echo -e "  ${BOLD}Agent ($AGENT_ARG)${NC}           ws://localhost:$PORT_AGENT"
 echo -e "  ${BOLD}Agencies MCP${NC}         sse://localhost:$PORT_MCP"
 echo -e "  ${BOLD}Savings Goals agent${NC} http://localhost:$PORT_SAVINGS"
 $TAX_ENABLED && echo -e "  ${BOLD}Tax agent ${NC} http://localhost:$PORT_TAX" || true
+echo -e "  ${BOLD}Token Flow${NC}           http://localhost:$PORT_SLIDES/token-flow.html"
+echo -e "  ${BOLD}Inside our agents${NC}    http://localhost:$PORT_SLIDES/inside-our-agents.html  (needs an amctl session)"
 echo -e "  ${BOLD}LLM${NC}                  $LLM_PROVIDER / $LLM_MODEL${LLM_VIA}"
 echo -e "  ${BOLD}IDP environment${NC}      ${ENV_PROFILE:-existing}"
 [[ "$AGENT" == "strands-agent" ]] && echo -e "  ${BOLD}AWS branding${NC}         enabled" || echo -e "  ${BOLD}AWS branding${NC}         disabled"
@@ -505,5 +522,6 @@ echo -e "    ${BLUE}$LOG_DIR/savings.log${NC}"
 $TAX_ENABLED && echo -e "    ${BLUE}$LOG_DIR/tax.log${NC}" || true
 echo -e "    ${BLUE}$LOG_DIR/server.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/frontend.log${NC}"
+echo -e "    ${BLUE}$LOG_DIR/presentation.log${NC}"
 echo -e "  To stop: ${BLUE}./demo_scripts/stop-demo.sh${NC}"
 echo ""

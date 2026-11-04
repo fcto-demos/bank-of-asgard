@@ -13,6 +13,8 @@ import json
 import logging
 import os
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cached_property
 from pathlib import Path
 
@@ -27,7 +29,10 @@ from fastapi.responses import JSONResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from traceloop.sdk import Traceloop
+from opentelemetry import baggage, propagate
+from opentelemetry.context import attach, detach
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_CONVERSATION_ID
+from traceloop.sdk.tracing import set_conversation_id
 from pydantic import BaseModel, PrivateAttr
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -184,11 +189,35 @@ def _verify_token(token: str) -> None:
     raise last_err or ValueError("Token validation failed")
 
 
+@contextmanager
+def _caller_trace_context(request: Request) -> Iterator[None]:
+    """Join the caller's trace and conversation for the rest of this request.
+
+    The Coordinator sends W3C `traceparent` (so this agent's spans nest under its
+    `invoke_agent Tax Agent` span) and `baggage` carrying gen_ai.conversation.id, which
+    Traceloop then stamps on every span here. Both are optional: without them the
+    request simply starts its own trace."""
+    context = propagate.extract(request.headers)
+    tokens: list = [attach(context)]  # set_conversation_id's token is typed as object
+    conversation_id = baggage.get_baggage(GEN_AI_CONVERSATION_ID, context)
+    if conversation_id:
+        tokens.append(set_conversation_id(str(conversation_id)))
+    try:
+        yield
+    finally:
+        for token in reversed(tokens):
+            detach(token)
+
+
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     """Validates the Authorization header on every request. No SSE/streaming responses
     on this service, so BaseHTTPMiddleware (unlike the agencies MCP server) is fine here."""
 
     async def dispatch(self, request: Request, call_next):
+        with _caller_trace_context(request):
+            return await self._authenticate(request, call_next)
+
+    async def _authenticate(self, request: Request, call_next):
         # Set from the header (not the body — the body isn't parsed yet at this point)
         # so _validate_token's audit event is tagged with the right transaction_id too.
         set_transaction(request.headers.get("x-transaction-id"))
@@ -396,8 +425,8 @@ class PrepareReturnRequest(BaseModel):
     # Decoded server-side by the Coordinator from the user's OBO token (never LLM-supplied)
     # — ties this call back to whose consented data is being delegated, for audit purposes.
     user_sub: str | None = None
-    # The Coordinator's session_id, forwarded so this agent's spans share the same
-    # Traceloop association property — OTEL context doesn't cross the process boundary.
+    # The Coordinator's per-turn ID, for the audit log. Tracing doesn't use it — see
+    # _caller_trace_context.
     transaction_id: str | None = None
 
 
@@ -413,9 +442,6 @@ async def health():
 @app.post("/prepare-return")
 async def prepare_return(req: PrepareReturnRequest):
     set_transaction(req.transaction_id)
-
-    if req.transaction_id:
-        Traceloop.set_association_properties({"transaction_id": req.transaction_id})
 
     assessment = assess(req.gross_income, req.qualifying_spend)
 

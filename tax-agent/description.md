@@ -61,7 +61,7 @@ Bearer JWT, validated on every route except `/health`. The token's RS256 signatu
 
 In A2A terms: a `securityScheme` of type `oauth2` with the `clientCredentials` flow and an empty `scopes` object.
 
-Callers should forward `X-Transaction-Id` for audit and trace correlation; it is accepted in the body as well. `user_sub` identifies the citizen whose consented data is being delegated and is recorded for audit only.
+Callers should forward `X-Transaction-Id` for audit correlation; it is accepted in the body as well. For tracing, send the standard W3C `traceparent` header and a `baggage` header carrying `gen_ai.conversation.id`; this agent's spans then join the caller's trace and conversation. `user_sub` identifies the citizen whose consented data is being delegated and is recorded for audit only.
 
 ## Data minimisation — worth stating on the card
 

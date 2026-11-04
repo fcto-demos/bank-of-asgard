@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # restart.sh — stop and restart a single Bank of Asgard service
 # Usage: ./demo_scripts/restart.sh <service>
-# Services: transactions-api | agent | mcp | savings | tax | server | frontend
+# Services: transactions-api | agent | mcp | savings | tax | server | frontend | presentation
 
 set -euo pipefail
 
@@ -18,6 +18,7 @@ PORT_SAVINGS=8013
 PORT_TAX=8014
 PORT_SERVER=3002
 PORT_FRONTEND=5173
+PORT_SLIDES=8027
 
 # Native launches bind the standalone Python services (API, MCP, savings, tax) to localhost
 # only — on a public VM their ports would otherwise be reachable directly. Override with
@@ -38,7 +39,7 @@ show_help() {
     echo ""
     echo -e "${BOLD}Usage:${NC} ./demo_scripts/restart.sh <service>"
     echo ""
-    echo -e "  ${BOLD}service${NC}   transactions-api | agent | mcp | savings | tax | server | frontend"
+    echo -e "  ${BOLD}service${NC}   transactions-api | agent | mcp | savings | tax | server | frontend | presentation"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
     echo "  ./demo_scripts/restart.sh agent"
@@ -341,8 +342,20 @@ case "$SERVICE" in
         LOG_FILE="$LOG_DIR/frontend.log"
         ;;
 
+    presentation)
+        section "Restarting presentation server (port $PORT_SLIDES)"
+        stop_service "presentation"
+        free_port $PORT_SLIDES
+        (cd "$ROOT/agent-manager-chef" && python3 serve.py "$PORT_SLIDES" \
+            > "$LOG_DIR/presentation.log" 2>&1) &
+        register_pid "presentation" "$!"
+        check_launched "$!" "presentation"
+        wait_for_http "http://localhost:$PORT_SLIDES/token-flow.html" "presentation"
+        LOG_FILE="$LOG_DIR/presentation.log"
+        ;;
+
     *)
-        die "Unknown service '$SERVICE'. Choose: transactions-api, agent, mcp, savings, server, frontend"
+        die "Unknown service '$SERVICE'. Choose: transactions-api, agent, mcp, savings, tax, server, frontend, presentation"
         ;;
 esac
 

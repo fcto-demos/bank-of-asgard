@@ -51,7 +51,7 @@ The only configured caller is the Bank of Asgard Coordinator, which presents an 
 
 Optionally, if `INBOUND_API_KEY` is set, a caller may instead present that value on the `X-API-Key` header (configurable via `INBOUND_API_KEY_HEADER`) — this is an alternative to the bearer JWT above, not a replacement, and is checked with a constant-time comparison. It exists for third-party callers that can't be issued OAuth client credentials for this agent. Left unset (the default), only bearer JWTs are accepted. In A2A terms this adds a second `securityScheme` of type `apiKey` (`in: header`, `name: X-API-Key`); either scheme independently satisfies the request.
 
-Callers should forward `X-Transaction-Id` so this agent's audit events and traces correlate with the calling session; the field is also accepted in the request body. `user_sub` identifies whose consented data is being delegated and is decoded by the caller from the user's OBO token — it is recorded for audit and never used to fetch anything.
+Callers should forward `X-Transaction-Id` so this agent's audit events correlate with the calling turn; the field is also accepted in the request body. For tracing, send the standard W3C `traceparent` header, so this agent's spans join the caller's trace, and a `baggage` header carrying `gen_ai.conversation.id`. `user_sub` identifies whose consented data is being delegated and is decoded by the caller from the user's OBO token — it is recorded for audit and never used to fetch anything.
 
 ## What a caller actually gets back
 
