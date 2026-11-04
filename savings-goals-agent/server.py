@@ -4,6 +4,8 @@ import os
 import secrets
 import time
 from collections import OrderedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cached_property
 from pathlib import Path
 
@@ -18,7 +20,10 @@ from fastapi.responses import JSONResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from traceloop.sdk import Traceloop
+from opentelemetry import baggage, propagate
+from opentelemetry.context import attach, detach
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_CONVERSATION_ID
+from traceloop.sdk.tracing import set_conversation_id
 from pydantic import BaseModel, PrivateAttr
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -49,6 +54,18 @@ INBOUND_API_KEY_HEADER = os.environ.get("INBOUND_API_KEY_HEADER", "X-API-Key")
 # original credential under a different name). Overridable so deployments can point it at
 # whatever their fronting proxy actually uses.
 FORWARDED_AUTH_HEADER = os.environ.get("FORWARDED_AUTH_HEADER", "x-forwarded-authorization")
+
+# Trust the layer in front of this service (Agent Manager's gateway validates the JWT
+# before forwarding it) instead of re-validating here. A bearer token must still be
+# present, and its claims are still logged and audited, but the JWKS is never fetched —
+# so the pod needs no egress to the IDP. Off by default; only enable it when the agent is
+# reachable solely through that validating layer, since any Bearer value is accepted.
+SKIP_TOKEN_VALIDATION = os.environ.get("SKIP_TOKEN_VALIDATION", "false").lower() == "true"
+if SKIP_TOKEN_VALIDATION:
+    logger.warning(
+        "SKIP_TOKEN_VALIDATION=true: bearer JWTs are NOT signature/audience-checked here — "
+        "relying on the upstream gateway having validated them"
+    )
 
 # The resource label "savings_agent" (used as a destination in transactions-agent's
 # auth_manager.py) and this service's own name both refer to the same real entity —
@@ -119,31 +136,57 @@ def _invalidate_jwks_cache() -> None:
     _jwks_cache = None
 
 
+def _token_claims(token: str) -> dict:
+    """Log the token's claims without verifying it, and return them. Never raises."""
+    try:
+        unverified = pyjwt.decode(token, options={"verify_signature": False})
+    except Exception as peek_err:
+        logger.warning("Could not decode token for inspection: %s", peek_err)
+        return {}
+    logger.info(
+        "Token claims — aud=%r  sub=%r  iss=%r  exp=%r",
+        unverified.get("aud"),
+        unverified.get("sub"),
+        unverified.get("iss"),
+        unverified.get("exp"),
+    )
+    return unverified
+
+
+def _audit_incoming_token(token: str, claims: dict, event: str, error: str | None = None) -> None:
+    """validated_incoming once the token passed (or failed) this service's own check;
+    accepted_incoming when SKIP_TOKEN_VALIDATION trusts the gateway's check instead. On a
+    rejection the claims are unverified: who the token claims to be from, not who sent it."""
+    emit_token_event(
+        service="savings-goals-agent", event=event,
+        origin=claims.get("sub") or "unknown-caller", destination="savings-goals-agent",
+        access_token=token, client_id=EXPECTED_AUDIENCE,
+        requested_by=claims.get("sub"), sub=claims.get("sub"),
+        act=claims.get("act"), aud=claims.get("aud"), exp=claims.get("exp"),
+        success=error is None, error=error,
+    )
+
+
 def _validate_token(token: str) -> None:
-    """Validate a JWT bearer token against the IDP's JWKS. Raises on failure.
+    """Validate a JWT bearer token and audit the outcome. Raises on failure.
+
+    Audited after the check, so the trail never shows a token as validated before its
+    signature and audience were checked."""
+    claims = _token_claims(token)
+    try:
+        _verify_token(token)
+    except Exception as exc:
+        _audit_incoming_token(token, claims, "validated_incoming", f"{type(exc).__name__}: {exc}"[:200])
+        raise
+    _audit_incoming_token(token, claims, "validated_incoming")
+
+
+def _verify_token(token: str) -> None:
+    """Check the token's signature against the IDP's JWKS, and its audience. Raises on failure.
 
     Retries once with a fresh JWKS fetch if all cached keys fail, to handle
     IDP key rotation without requiring a process restart.
     """
-    try:
-        unverified = pyjwt.decode(token, options={"verify_signature": False})
-        logger.info(
-            "Token claims — aud=%r  sub=%r  iss=%r  exp=%r",
-            unverified.get("aud"),
-            unverified.get("sub"),
-            unverified.get("iss"),
-            unverified.get("exp"),
-        )
-        emit_token_event(
-            service="savings-goals-agent", event="validated_incoming",
-            origin=unverified.get("sub"), destination="savings-goals-agent",
-            access_token=token, client_id=EXPECTED_AUDIENCE,
-            requested_by=unverified.get("sub"), sub=unverified.get("sub"),
-            act=unverified.get("act"), aud=unverified.get("aud"), exp=unverified.get("exp"),
-        )
-    except Exception as peek_err:
-        logger.warning("Could not decode token for inspection: %s", peek_err)
-
     logger.info("Expected audience: %r", EXPECTED_AUDIENCE)
 
     last_err: Exception | None = None
@@ -176,13 +219,38 @@ def _validate_token(token: str) -> None:
     raise last_err or ValueError("Token validation failed")
 
 
+@contextmanager
+def _caller_trace_context(request: Request) -> Iterator[None]:
+    """Join the caller's trace and conversation for the rest of this request.
+
+    The Coordinator sends W3C `traceparent` (so this agent's spans nest under its
+    `invoke_agent Savings Agent` span) and `baggage` carrying gen_ai.conversation.id,
+    which Traceloop then stamps on every span here. Both are optional: without them the
+    request simply starts its own trace."""
+    context = propagate.extract(request.headers)
+    tokens: list = [attach(context)]  # set_conversation_id's token is typed as object
+    conversation_id = baggage.get_baggage(GEN_AI_CONVERSATION_ID, context)
+    if conversation_id:
+        tokens.append(set_conversation_id(str(conversation_id)))
+    try:
+        yield
+    finally:
+        for token in reversed(tokens):
+            detach(token)
+
+
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     """Validates every request except /health against either a bearer JWT or, if
     INBOUND_API_KEY is set, a static API key — either credential is accepted, neither is
-    required over the other. No SSE/streaming responses on this service, so
+    required over the other. With SKIP_TOKEN_VALIDATION, a bearer token only has to be
+    present, not valid. No SSE/streaming responses on this service, so
     BaseHTTPMiddleware (unlike the agencies MCP server) is fine here."""
 
     async def dispatch(self, request: Request, call_next):
+        with _caller_trace_context(request):
+            return await self._authenticate(request, call_next)
+
+    async def _authenticate(self, request: Request, call_next):
         # Set from the header (not the body — the body isn't parsed yet at this point)
         # so the validation audit events below are tagged with the right transaction_id.
         set_transaction(request.headers.get("x-transaction-id"))
@@ -190,6 +258,13 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         # and the response exposes nothing — same exemption as tax-agent/server.py.
         if request.url.path == "/health":
             return await call_next(request)
+
+        # Debug: dump every inbound header with its full value, credentials included —
+        # to see what the fronting gateway actually forwards. Remove once diagnosed.
+        logger.info(
+            "Inbound %s %s headers: %s",
+            request.method, request.url.path, request.headers.items(),
+        )
 
         if INBOUND_API_KEY:
             presented = request.headers.get(INBOUND_API_KEY_HEADER)
@@ -207,6 +282,9 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             auth = request.headers.get(FORWARDED_AUTH_HEADER, "")
         if auth.startswith("Bearer "):
             token = auth[len("Bearer "):]
+            if SKIP_TOKEN_VALIDATION:
+                _audit_incoming_token(token, _token_claims(token), "accepted_incoming")
+                return await call_next(request)
             try:
                 _validate_token(token)
                 return await call_next(request)
@@ -434,8 +512,8 @@ class SuggestGoalRequest(BaseModel):
     # Decoded server-side by the Coordinator from the user's OBO token (never LLM-supplied)
     # — ties this call back to whose consented data is being delegated, for audit purposes.
     user_sub: str | None = None
-    # The Coordinator's session_id, forwarded so this agent's spans share the same
-    # Traceloop association property — OTEL context doesn't cross the process boundary.
+    # The Coordinator's per-turn ID: keys the audit log and the round cap (_take_round).
+    # Tracing doesn't use it — see _caller_trace_context.
     transaction_id: str | None = None
 
 
@@ -451,9 +529,6 @@ async def health():
 @app.post("/suggest-goal")
 async def suggest_goal(req: SuggestGoalRequest):
     set_transaction(req.transaction_id)
-
-    if req.transaction_id:
-        Traceloop.set_association_properties({"transaction_id": req.transaction_id})
 
     logger.info ("--> Entering savings agent code")
     projected_balances = project_milestones(req.monthly_recoverable)

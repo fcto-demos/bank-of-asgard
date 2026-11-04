@@ -33,7 +33,7 @@ The following products are used in the context of this demo
 
 | Component | Runtime / Tool | Min version |
 |-----------|---------------|-------------|
-| React frontend | Node.js + npm | Node 20+ |
+| React frontend | Node.js + npm | Node 22.12+ (required by Mermaid 12) |
 | Node/Express server | Node.js + npm | Node 20+ |
 | Transactions API | Python + pip | Python 3.13+ |
 | Transactions Agent (plus subagents, Langchain only) | Python + pip | Python 3.13+ |
@@ -276,6 +276,7 @@ Leaving `TAX_CONSENT_SCOPE` unset falls back to `read_transactions`: the flow wo
 | `8012` | Agencies MCP Server (FastMCP SSE)    | `agencies-mcp-server/server.py` → port constant, `docker-compose.yml` → port mapping |
 | `8013` | Savings Goals Agent (FastAPI)        | `savings-goals-agent/server.py` → port constant              |
 | `8014` | Tax Agent — Ministry of Finance (FastAPI) | `tax-agent/server.py` → port constant, `transactions-agent/.env` → `TAX_AGENT_URL` |
+| `8027` | Presentation server (Token Flow + Inside our agents pages) | `PORT_SLIDES` in the demo scripts; `agent-manager-chef/start-presentation.sh` takes the port as its first argument |
 
 When changing a port, also update:
 
@@ -498,12 +499,19 @@ OPENAI_API_KEY=<OPENAI_API_KEY>
 # ANTHROPIC_API_KEY=<ANTHROPIC_API_KEY>
 # MISTRAL_API_KEY=<MISTRAL_API_KEY>
 
-# WSO2 API Gateway (only when gateway.enabled: true in llm_config.yaml)
+# WSO2 API Gateway (only when gateway.enabled: true in llm_config.yaml) —
+# gateway-setup/provision.py --write-env fills these in, see "Using WSO2 AI Gateway"
 # GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
 # GATEWAY_BASE_URL_SECURED=<GATEWAY_BASE_URL_SECURED>
+# GATEWAY_AUTH_MODE=oauth                     # oauth (default) | apikey
+# oauth:
 # GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
 # GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
 # GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
+# apikey (the AI Gateway issues one key per LLM proxy):
+# GATEWAY_API_KEY=<V1_KEY>
+# GATEWAY_API_KEY_SECURED=<V2_KEY>            # defaults to GATEWAY_API_KEY
+# GATEWAY_API_KEY_HEADER=X-API-Key
 
 # Agencies MCP Server — dedicated public OAuth2 application registered in IS with
 # access to the MCP server resource. Uses the same native auth + PKCE flow as the
@@ -514,8 +522,9 @@ MCP_CLIENT_ID=MCP_123
 # Direct endpoint (default, no gateway routing):
 AGENCIES_MCP_URL=http://localhost:8012/sse
 
-# Gateway-routed endpoint (optional — set MCP_GATEWAY_ENABLED=true and provide the gateway SSE URL):
-# MCP_GATEWAY_URL=https://<GATEWAY_HOST>/agencies/sse
+# Gateway-routed endpoint (optional — set MCP_GATEWAY_ENABLED=true and provide the gateway URL;
+# a URL ending in /mcp uses Streamable HTTP, anything else SSE):
+# MCP_GATEWAY_URL=https://<GATEWAY_HOST>/boa-agencies/mcp
 # MCP_GATEWAY_ENABLED=true
 # MCP_GATEWAY_SCOPE=agencies_read    # optional: OAuth scope to request when obtaining the MCP bearer token
 
@@ -571,6 +580,31 @@ AMP_AGENT_API_KEY=<AMP_SAVINGS_AGENT_API_KEY>
 # OTEL_EXPORTER_OTLP_CERTIFICATE=~/.openchoreo/ca.pem
 ```
 
+### Trace structure (LangChain agent)
+
+With AMP on, the LangChain assistant's traces follow the [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (still at *Development* status), so the kind of each tool call is visible from the span under its `execute_tool {tool}` span rather than from a custom attribute:
+
+| Tool kind | Tools | Span under `execute_tool` |
+|-----------|-------|---------------------------|
+| API | `GetMyTransactions`, `GetMyProfile`, `UpdateMyProfile` | HTTP client span (`http.request.method`, `url.full`, `server.address`) — only with `--http-tracing` |
+| MCP | `GetAgencies` | MCP client span from Traceloop's MCP instrumentation (plus the SSE transport's HTTP spans with `--http-tracing`) |
+| In-process sub-agent | `AnalyzeSubscriptions`, `AnalyzeSpendingHealth` | `invoke_agent subscription_detective` / `invoke_agent spending_health`, span kind `INTERNAL` |
+| Remote agent | `SuggestSavingsGoal`, `PrepareTaxReturn` | `invoke_agent Savings Agent` / `invoke_agent Tax Agent`, span kind `CLIENT`, with `gen_ai.provider.name` (`bank_of_asgard` / `ministry_of_finance`) and `server.address`/`server.port` |
+
+To make the kind visible at a glance, each tool's span name also carries it as a prefix — `execute_tool [API] GetMyTransactions`, `execute_tool [MCP] GetAgencies`, `execute_tool [SubAgent] AnalyzeSubscriptions`, `execute_tool [Agent] SuggestSavingsGoal`. Only the span name changes: the name the LLM sees and `gen_ai.tool.name` stay unprefixed, so prompts and eval history are unaffected. The kind is declared per tool (`kind=ToolKind.…` in `langchain-agent/service.py`); `SummarizeDeductibleExpenses` counts as API, since it reads the Transactions API and classifies in-process.
+
+HTTP client spans are **off by default**, because Agent Manager doesn't consume them yet. Turn them on with `./demo_scripts/start-demo.sh langchain --amp --http-tracing` (`restart.sh agent` keeps the setting). The flag exports two variables to the agent process: `HTTP_CLIENT_TRACING=true`, which enables `opentelemetry-instrumentation-httpx` (HTTP client spans plus a W3C `traceparent` header on outgoing calls), and `OTEL_SEMCONV_STABILITY_OPT_IN=http`, which switches HTTP spans — including Traceloop's existing `requests`/`urllib3` ones — to the stable attribute names. Both must be in the environment before `amp-instrument` starts, so set them the same way if you launch the agent by other means (e.g. `environment:` in `docker-compose.amp.yml`).
+
+#### Correlation: conversations, turns and remote agents
+
+Correlation uses only standard OpenTelemetry fields, no Traceloop-specific attributes or headers, so any OTel-aware backend can follow it:
+
+- **Conversation:** every span carries `gen_ai.conversation.id`, set to the chat session's ID, so all the turns of one session group together. The LangChain and Strands assistants set it once per WebSocket session.
+- **Turn:** each prompt is its own trace, so the trace ID identifies the turn.
+- **Remote agents:** calls to the Savings and Tax agents always carry a W3C `traceparent` and a W3C `baggage` header (`gen_ai.conversation.id=<session>`), with or without `--http-tracing`. Both agents read them, so their spans join the Coordinator's trace under its `invoke_agent` span and carry the same `gen_ai.conversation.id`.
+
+The `X-Transaction-Id` header and the `transaction_id` field in the body are no longer used for tracing. They hold a per-turn ID that keys the token audit log (the **Token Flow** page) and the Savings Agent's per-turn round cap.
+
 ### Self-signed OTLP endpoints
 
 When `AMP_OTEL_ENDPOINT` is an `https` URL served by a private CA — an OpenChoreo cluster such as `https://default-default.agents.local.apis.coach:19443/otel`, for example — the span exporter fails with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` and retries forever. Python's HTTP stack uses the `certifi` bundle and never reads the macOS Keychain, so adding the CA there fixes `curl` and the browser but not the agent.
@@ -603,7 +637,7 @@ openssl s_client -connect default-default.agents.local.apis.coach:19443 </dev/nu
 > >
 > > `EXPECTED_AUDIENCE` here must equal `SAVINGS_AGENT_CLIENT_ID` in `transactions-agent/.env` — same audience-matching requirement as the Agencies MCP Server.
 
-### Tax Agent (Ministry of Finance)
+### Tax Agent
 
 An optional agent that models a **different organisation**: the assistant belongs to the bank, this one belongs to the tax authority. It is skipped by `start-demo.sh` when its venv or `.env` is missing, so the rest of the demo runs unchanged without it.
 
@@ -625,6 +659,7 @@ EXPECTED_AUDIENCE=TAX_123
 # Gateway credentials — same pattern as the Savings Goals Agent (always the v1/unsecured
 # endpoint: this service never sees raw user chat input, only structured aggregates).
 # GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
+# GATEWAY_AUTH_MODE=oauth   # or apikey + GATEWAY_API_KEY
 # GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
 # GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
 # GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
@@ -673,11 +708,32 @@ Supported by all five services — `transactions-agent/{langchain,autogen,strand
 
 # Using WSO2 AI Gateway (recommended )
 
+### Automated install on an existing WSO2 AI Gateway
+
+If you run a WSO2 AI Gateway (1.2+) managed by AI Workspace, [gateway-setup/](gateway-setup/README.md) provisions everything for you. That covers:
+- the LLM proxies: v1 passthrough, and v2 with guardrails (request size, prompt injection, semantic topic guard, content safety, date-of-birth redaction);
+- one application and API key per agent;
+- the agencies MCP proxy and the transactions REST API.
+
+They can be deployed to separate LLM, MCP and API gateways, in the project of your choice. It also writes each agent's gateway settings:
+
+```bash
+export ADMIN_PASSWORD='...'
+./gateway-setup/provision.py --list-targets     # find project and gateway ids, fill gateway-setup/gateway.env
+./gateway-setup/provision.py --check            # read-only pre-flight
+./gateway-setup/provision.py --write-env        # install, verify, update the agents' .env files
+BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh langchain   # gateways in containers must reach the services
+```
+
+Prerequisites (the gateway image's policies, `config.toml` settings, network), options and teardown are in [gateway-setup/README.md](gateway-setup/README.md). The rest of this section describes the manual setup, e.g. for an APIM 4.x gateway.
+
 ### LLM APIs
 
 Change the configuration to route LLM calls via a gateway instead of a direct API key - The demo allows to switch between GATEWAY_BASE_URL and GATEWAY_BASE_URL_SECURED. Typically you want to expose a V1 and v2 of the same LLM API, one in passthrough mode (no guardrails) and one with guardrails, typically semantic analysis, content safety, content length guards.
 
 Then create two applications from dev portal (one for transactions agent, another one for savings agents) subscribe to the two APIs, and use CLIENTID/SECRET of this app as GATEWAY_CLIENT_ID/GATEWAY_CLIENT_SECRET.
+
+Guardrail blocks are recognised both as APIM 4.x's HTTP 446 and as the AI Gateway's 4xx with a `GUARDRAIL_INTERVENED` body; the user sees the guardrail's reason.
 
 ```yaml
 # llm_config.yaml
@@ -710,9 +766,9 @@ GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
 GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
 ```
 
-#### API key instead of OAuth (Savings Goals Agent only)
+#### API key instead of OAuth
 
-The Savings Goals Agent is the one service designed to run at a third party, which may be issued a **gateway API key** rather than OAuth client credentials it would have to hold and rotate. Set `GATEWAY_AUTH_MODE` in `savings-goals-agent/.env`:
+Every service can present a **gateway API key** instead of OAuth client credentials: the WSO2 AI Gateway issues keys per LLM proxy, and the Savings Goals Agent may run at a third party that can't hold client credentials. Set `GATEWAY_AUTH_MODE=apikey` with `GATEWAY_API_KEY` in the service's `.env`. The transactions agent calls two proxies, so it also takes `GATEWAY_API_KEY_SECURED` for v2 (it falls back to `GATEWAY_API_KEY`). For example:
 
 ```YAML
 # savings-goals-agent/.env
@@ -722,7 +778,7 @@ GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
 # GATEWAY_API_KEY_HEADER=X-API-Key   # default; override if your gateway expects another header
 ```
 
-The mode defaults to `oauth`, so existing deployments are unaffected and the other agents remain OAuth-only. In `apikey` mode `GATEWAY_CLIENT_ID`, `GATEWAY_CLIENT_SECRET` and `GATEWAY_TOKEN_ENDPOINT` are unused — there is no token endpoint, no refresh and nothing cached, just the key on each request.
+The mode defaults to `oauth`, so existing deployments are unaffected. In `apikey` mode `GATEWAY_CLIENT_ID`, `GATEWAY_CLIENT_SECRET` and `GATEWAY_TOKEN_ENDPOINT` are unused — there is no token endpoint, no refresh and nothing cached, just the key on each request.
 
 Calls still go through the gateway in both modes; only the credential presented changes. The key itself is never logged — the audit trail records a short hash of it, the same fingerprint treatment a bearer token gets, so you can still follow which credential made which call. An unrecognised mode, or `apikey` with no `GATEWAY_API_KEY`, fails at startup rather than surfacing as a 401 on the first LLM call.
 
@@ -751,14 +807,33 @@ The Savings Goals Agent looks for the inbound bearer JWT on the standard `Author
 
 Both headers are expected to carry a `Bearer <token>` value; whichever is present and well-formed first wins, and the token is validated the same way regardless of which header it came from.
 
+#### Skipping token validation behind a validating gateway (Savings Goals Agent only)
+
+When the Savings Goals Agent sits behind a gateway that already validates the bearer JWT (for example Agent Manager's gateway), it can trust that layer instead of re-validating the token itself. This is useful when the agent's pod has no network egress to the IDP — on an OpenChoreo data plane, Cilium policies can block it, and the JWKS fetch then times out (`token validation failed: timed out`). Set `SKIP_TOKEN_VALIDATION` in `savings-goals-agent/.env` (or as an env var on the deployment):
+
+```YAML
+# savings-goals-agent/.env
+SKIP_TOKEN_VALIDATION=true
+```
+
+A `Bearer` token must still be present on `Authorization` or the forwarded header, and its claims are still logged and recorded in the audit trail, but its signature, audience and expiry are not checked and the JWKS is never fetched. Off by default. Only enable it when the agent is reachable solely through the validating gateway — anyone who can reach the agent directly could otherwise call it with any `Bearer` value.
+
 ### Agencies MCP Server
 
-You can proxy the Agencies MCP server via the publisher console:
+The agencies MCP server serves both MCP transports on port 8012, behind the same bearer-token check:
+- `/sse`: legacy SSE, used for direct calls (`AGENCIES_MCP_URL`).
+- `/mcp`: Streamable HTTP, spec 2025-06-18, which is what the WSO2 AI Gateway's MCP proxy speaks.
 
-- **Backend URL**: `http://host.containers.internal:8012/sse`
+The agent picks its transport from the URL: Streamable HTTP when the path ends in `/mcp`, otherwise SSE.
+
+On the WSO2 AI Gateway, `gateway-setup/provision.py` creates the MCP proxy (upstream `http://host.docker.internal:8012/mcp`) and sets `MCP_GATEWAY_URL` / `MCP_GATEWAY_ENABLED` for you. On another gateway, proxy it via the publisher console:
+
+- **Backend URL**: `http://host.containers.internal:8012/sse` (or `/mcp` for Streamable HTTP)
 - Enable **OAuth2 protection** so the agent must present a bearer token
-- Set the resulting gateway-managed SSE URL as `MCP_GATEWAY_URL` in `transactions-agent/.env` and set `MCP_GATEWAY_ENABLED=true`
+- Set the resulting gateway-managed URL as `MCP_GATEWAY_URL` in `transactions-agent/.env` and set `MCP_GATEWAY_ENABLED=true`
 - If the gateway requires a specific scope, set it as `MCP_TOKEN_SCOPE`
+
+Either way the services run natively on your machine while the gateway runs in a container, so start them with `BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh …`. The default `127.0.0.1` is unreachable from a container.
 
 When `MCP_GATEWAY_ENABLED` is unset or `false`, the agent connects directly to `AGENCIES_MCP_URL` (useful for local dev without the gateway).
 
@@ -796,9 +871,9 @@ cd ..
 | Script | Purpose |
 |--------|---------|
 | `demo_scripts/validate.sh` | Pre-flight check — verifies versions, config files, venvs, imports, and port availability - Only runs as part of `start-demo.sh`. |
-| `demo_scripts/start-demo.sh [langchain\|autogen\|strands] [--env=is\|asgardeo] [--amp] [--v1\|--v2]` | Starts the full stack in order; polls each health endpoint before moving on; prompts for agent flavor and agent manager instructions if not specified. <br />Omit `--env` to keep existing `.env` files; pass a profile to back up and switch `.env` files **Note:** When you specify the  `--env` option, files with this environment name are expected to be present (`.env.is` or `.env.asgardeo`). Same is true of the `config.js` files. If a `.env`or `config.js` is already present in the target directory, it will backed up and then overriden. <br />`--v1`/`--v2` is a demo-only toggle (default `v1`) for showing tracing/eval tooling catch a regression: `v2` deliberately bloats the system prompt and over-fetches `GetMyTransactions`, increasing tokens and latency so the difference shows up clearly in traces. It also turns the Savings Goals agent rogue — see [Rogue agent demo (v2)](#rogue-agent-demo-v2). |
+| `demo_scripts/start-demo.sh [langchain\|autogen\|strands] [--env=is\|asgardeo] [--amp] [--http-tracing] [--v1\|--v2]` | Starts the full stack in order; polls each health endpoint before moving on; prompts for agent flavor and agent manager instructions if not specified. <br />Omit `--env` to keep existing `.env` files; pass a profile to back up and switch `.env` files **Note:** When you specify the  `--env` option, files with this environment name are expected to be present (`.env.is` or `.env.asgardeo`). Same is true of the `config.js` files. If a `.env`or `config.js` is already present in the target directory, it will backed up and then overriden. <br />`--v1`/`--v2` is a demo-only toggle (default `v1`) for showing tracing/eval tooling catch a regression: `v2` deliberately bloats the system prompt and over-fetches `GetMyTransactions`, increasing tokens and latency so the difference shows up clearly in traces. It also turns the Savings Goals agent rogue — see [Rogue agent demo (v2)](#rogue-agent-demo-v2). <br />`--http-tracing` (with `--amp`, langchain only) adds OTel HTTP client spans for the agent's outbound calls — off by default because Agent Manager doesn't consume them yet; see [Trace structure (LangChain agent)](#trace-structure-langchain-agent). |
 | `demo_scripts/stop-demo.sh` | Gracefully stops everything started by `start-demo.sh` |
-| `demo_scripts/restart.sh <service>` | Stops and restarts a single service (`transactions-api`, `agent`, `mcp`, `savings`, `tax`, `server`, `frontend`) |
+| `demo_scripts/restart.sh <service>` | Stops and restarts a single service (`transactions-api`, `agent`, `mcp`, `savings`, `tax`, `server`, `frontend`, `presentation`) |
 
 ```bash
 # Verify everything is configured correctly
@@ -823,6 +898,13 @@ cd ..
 ./demo_scripts/stop-demo.sh
 ```
 
+`start-demo.sh` also starts the presentation server from `agent-manager-chef/` (`serve.py`, standard library only, bound to `127.0.0.1`), which serves two pages:
+
+- **Token Flow** — `http://localhost:8027/token-flow.html`: the token audit trail animated. Each hop is a token travelling between systems, coloured by token type (OBO gold, Agent cyan, API key violet). OAuth protocol steps (PKCE challenge, auth code, OBO exchange) are dashed chips, tokens are solid, and a receiving agent's token check shows as a ✓ or ✕ badge on that agent. Pick a transaction, then play, step (← →) or change the speed.
+- **Inside our agents** — `http://localhost:8027/inside-our-agents.html`: each agent's live sheet from Agent Manager, read with `amctl`. It needs a valid session (`amctl login`); without one, each column shows the error.
+
+If you already run `agent-manager-chef/start-presentation.sh` on its own, stop it first, since the pre-flight check fails when port 8027 is taken. To add the server to a demo that was started before it was part of the scripts, run `./demo_scripts/restart.sh presentation`.
+
 #### Rogue agent demo (v2)
 
 With `--v2`, the Savings Goals agent never understands its inputs and keeps asking for more information, whatever it is sent. It's meant for demoing a product that detects rogue agents: excessive tokens, iterations or tool calls. Ask the assistant for a financial check-up (LangChain only — the other implementations don't have `SuggestSavingsGoal`) and the runaway happens in two places:
@@ -836,7 +918,7 @@ The Savings agent's own count stops at the cap, though: at the default it makes 
 
 When the Savings agent runs in Agent Manager instead of locally, `start-demo.sh` doesn't reach it: set `DEMO_VERSION=v2` (and optionally `DEMO_MAX_ITERATIONS`) as environment variables on its deployment.
 
-Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page's transaction list) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs. Each service also rotates it to `token-audit.jsonl.1` once it passes 20 MB, so a long-running demo can't grow it without bound.
+Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs. Each service also rotates it to `token-audit.jsonl.1` once it passes 20 MB, so a long-running demo can't grow it without bound. The savings and tax agents only add their own events (such as `validated_incoming`) when they run on the same machine; a Savings Agent deployed to Agent Manager writes them on its own host. The LangChain coordinator therefore logs each agent-to-agent call itself (`agent_call`, then `agent_reply` when it succeeds or `agent_call_failed` on an error), so the hop shows on the Token Flow page wherever the other agent runs.
 
 The demo scripts bind the MCP, Savings and Tax services to `127.0.0.1` (they read `BIND_HOST`, which defaults to `0.0.0.0` so containers and Agent Manager deployments stay reachable). Run with `BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh` if something off-host, such as a container, must reach them.
 

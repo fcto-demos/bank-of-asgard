@@ -11,7 +11,13 @@ node_modules
 dist
 dist-ssr
 *.local
+# Env files: ignore every variant (.env, .env.47GW, .env.bak, …); only templates and
+# the app's non-secret Vite mode files are tracked.
 .env
+.env.*
+!.env.example
+!app/.env.development
+!app/.env.production
 **/public/config.js
 **/public/config.is.js
 **/public/config.prod.js
@@ -23,6 +29,11 @@ package-lock.json
 .demo-logs/
 .env.bak
 **/config.js.bak
+
+# Gateway installer (gateway-setup/): per-machine settings, issued API keys, .env backups
+gateway-setup/gateway.env
+gateway-setup/out/
+*.gateway.bak
 
 # Python virtual environments
 venv/

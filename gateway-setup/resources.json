@@ -1,0 +1,333 @@
+{
+  "providers": {
+    "anthropic": {
+      "displayName": "Anthropic",
+      "template": "anthropic",
+      "upstreamUrl": "https://api.anthropic.com",
+      "authHeader": "x-api-key",
+      "authValuePrefix": "",
+      "secretVar": "ANTHROPIC_API_KEY",
+      "models": [
+        "claude-haiku-4-5",
+        "claude-sonnet-4-6"
+      ],
+      "probePath": "/v1/messages",
+      "contentPath": "$.messages[-1].content",
+      "probeBody": {
+        "model": "probe",
+        "max_tokens": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": "{text}"
+          }
+        ]
+      },
+      "toolTurnProbeBody": {
+        "model": "probe",
+        "max_tokens": 1,
+        "messages": [
+          {
+            "role": "user",
+            "content": "What are my recent transactions?"
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "probe-1",
+                "name": "GetMyTransactions",
+                "input": {}
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "probe-1",
+                "content": "[]"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "bedrock": {
+      "displayName": "AWS Bedrock",
+      "template": "awsbedrock",
+      "upstreamUrl": "https://bedrock-runtime.{AWS_REGION}.amazonaws.com",
+      "authHeader": "Authorization",
+      "authValuePrefix": "Bearer ",
+      "secretVar": "AWS_BEARER_TOKEN_BEDROCK",
+      "models": [
+        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "eu.anthropic.claude-sonnet-4-6"
+      ],
+      "probePath": "/model/probe/converse",
+      "contentPath": "$.messages[-1].content[0].text",
+      "probeBody": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "text": "{text}"
+              }
+            ]
+          }
+        ],
+        "inferenceConfig": {
+          "maxTokens": 1
+        }
+      },
+      "toolTurnProbeBody": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "text": "What are my recent transactions?"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "toolUse": {
+                  "toolUseId": "probe-1",
+                  "name": "GetMyTransactions",
+                  "input": {}
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "toolResult": {
+                  "toolUseId": "probe-1",
+                  "content": [
+                    {
+                      "text": "[]"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "inferenceConfig": {
+          "maxTokens": 1
+        }
+      }
+    }
+  },
+  "guardrailOrder": [
+    "log-request",
+    "length",
+    "content-safety",
+    "topic",
+    "injection",
+    "pii",
+    "log-response"
+  ],
+  "guardrails": {
+    "length": {
+      "notes": "Length of what the user typed, 1-10,000 bytes — the gateway's replacement for the agents' own 4,000-character message cap, which they skip when the gateway is on. min stays 1: a higher minimum blocks ordinary replies such as 'yes' or 'ok'. Reads the last message, so like the topic guard it runs only on x-boa-message: user-text — a tool-result follow-up has no text there and would be rejected (422 'Error extracting value from JSONPath').",
+      "policy": "content-length-guardrail",
+      "version": "v1",
+      "executionCondition": "'x-boa-message' in request.Headers && request.Headers['x-boa-message'][0] == 'user-text'",
+      "params": {
+        "request": {
+          "enabled": true,
+          "min": 1,
+          "max": 10000,
+          "jsonPath": "{contentPath}",
+          "showAssessment": true
+        },
+        "response": {
+          "enabled": false
+        }
+      }
+    },
+    "injection": {
+      "notes": "Prompt-injection regex over the whole body (jsonPath \"$\", the regex policy's whole-payload mode), so it needs no condition: a tool-result follow-up has no text in its last message, but the whole body always reads. Two families only: override verbs + an instructions-like noun, and 'you are now <unrestricted persona>'. The 'reveal your system prompt' family is left to the semantic guard: over the whole body it would also match the model's own earlier refusal ('I can't show you my system prompt') and block every later turn. Checked against every agent prompt and tool description in this repo: no match. showAssessment stays off — it would echo the pattern back to the caller.",
+      "policy": "regex-guardrail",
+      "version": "v1",
+      "params": {
+        "request": {
+          "enabled": true,
+          "invert": true,
+          "jsonPath": "$",
+          "showAssessment": false,
+          "regex": "(?i)\\b(?:ignore|disregard|forget|override|bypass)\\b.{0,40}\\b(?:instructions?|rules|guidelines|directions|prompts?)\\b|\\byou\\s+are\\s+now\\b.{0,40}\\b(?:unrestricted|unfiltered|uncensored|jailbroken|dan|developer\\s+mode)\\b"
+        }
+      }
+    },
+    "topic": {
+      "notes": "Hybrid topic guard, tuned on AI Gateway 1.2.1 with its configured embedding provider against 44 held-out questions. Allow list = what the assistant does + normal dialogue ('yes, go ahead', 'what about another city?'), at a LOW threshold (0.675): it only stops clearly unrelated requests (poems, code, tennis tips) and lets every banking question and follow-up through. Deny list = full sentences for the topic the demo refuses (sports) at 0.75. Single words make poor deny phrases (everything is loosely near 'sports'), and an allow list alone topped out at ~90% correct (follow-ups and off-topic overlap), so the strict topic decision stays with the agent's own instructions. Runs only on what the user typed (executionCondition on x-boa-message, set by transactions-agent/app/gateway.py message_kind): on a tool-result follow-up the last message has no text and the policy would reject the request (422 'Error extracting value from JSONPath'). request.Body is not available to conditions on 1.2.1, hence the header. Needs an embedding provider in the gateway's config.toml.",
+      "policy": "semantic-prompt-guard",
+      "version": "v1",
+      "executionCondition": "'x-boa-message' in request.Headers && request.Headers['x-boa-message'][0] == 'user-text'",
+      "params": {
+        "jsonPath": "{contentPath}",
+        "allowedPhrases": [
+          "Show me my recent transactions.",
+          "How much did I spend on restaurants last month?",
+          "Which subscriptions am I paying for?",
+          "Is my spending healthy compared to my income?",
+          "Help me set a savings goal.",
+          "Prepare my tax return and tell me which deductions I can claim.",
+          "Find a bank agency near me.",
+          "Is there a branch in this city and when is it open?",
+          "Show my profile details.",
+          "Update my phone number and address.",
+          "Yes, please go ahead.",
+          "No, that's fine, thank you.",
+          "Thanks, that's helpful!",
+          "What about another city?",
+          "And for the previous month?",
+          "The second one.",
+          "Can you explain that in more detail?",
+          "Hello, can you help me with my account?"
+        ],
+        "allowSimilarityThreshold": 0.675,
+        "deniedPhrases": [
+          "Who will win the football match tonight?",
+          "Tell me the latest Champions League results.",
+          "Which team is top of the Premier League?",
+          "Who won the World Cup?",
+          "Who is the best tennis player right now?",
+          "Give me sports betting tips."
+        ],
+        "denySimilarityThreshold": 0.75,
+        "showAssessment": true
+      }
+    },
+    "content-safety": {
+      "notes": "Azure AI Content Safety (CONTENT_SAFETY=azure, as on the demo gateway) or an AWS Bedrock guardrail. Endpoint, key, region and guardrail id are gateway-wide settings in config.toml. Azure moderates both directions with passthroughOnError true and no executionCondition: whatever has text is moderated and blocked at the thresholds; a tool-result request (no text in its last message) or a tool-call-only reply (no $.content[0].text) is skipped rather than rejected — and so is everything while Azure is unreachable. A condition can't be used on the Azure policy: it would apply to the response phase too and skip the final answers, which come right after tool calls. response.jsonPath is the Anthropic Messages shape. The Bedrock variant moderates requests only, gated on x-boa-message: user-text like the topic guard.",
+      "variants": {
+        "azure": {
+          "policy": "azure-content-safety-content-moderation",
+          "version": "v1",
+          "params": {
+            "request": {
+              "jsonPath": "{contentPath}",
+              "passthroughOnError": true,
+              "showAssessment": true,
+              "hateSeverityThreshold": 2,
+              "sexualSeverityThreshold": 4,
+              "selfHarmSeverityThreshold": 4,
+              "violenceSeverityThreshold": 4
+            },
+            "response": {
+              "jsonPath": "$.content[0].text",
+              "passthroughOnError": true,
+              "showAssessment": false,
+              "hateSeverityThreshold": 4,
+              "sexualSeverityThreshold": 5,
+              "selfHarmSeverityThreshold": 3,
+              "violenceSeverityThreshold": 4
+            }
+          }
+        },
+        "bedrock": {
+          "policy": "aws-bedrock-guardrail",
+          "version": "v1",
+          "executionCondition": "'x-boa-message' in request.Headers && request.Headers['x-boa-message'][0] == 'user-text'",
+          "params": {
+            "request": {
+              "enabled": true,
+              "jsonPath": "{contentPath}",
+              "redactPII": false,
+              "passthroughOnError": false,
+              "showAssessment": true
+            },
+            "response": {
+              "enabled": false
+            }
+          }
+        }
+      }
+    },
+    "pii": {
+      "notes": "Redacts the customer's date of birth anywhere in the request (jsonPath \"$\" = whole body as text) — the get_my_profile tool result included, which is the point: transactions-agent/app/tools.py returns dateOfBirth unredacted so the gateway can show this. Anchored on the field name, so ordinary dates (every transaction has one) are left alone; the name is redacted along with the value since the gateway's regex engine (RE2) has no lookbehind. redactPII true = permanent '*****' (false would put the value back in the response). Email/phone masking stays off: on v2 it would also mask a new address the user types to update their profile.",
+      "policy": "pii-masking-regex",
+      "version": "v1",
+      "params": {
+        "jsonPath": "$",
+        "redactPII": true,
+        "email": false,
+        "phone": false,
+        "ssn": false,
+        "customPIIEntities": [
+          {
+            "piiEntity": "DATE_OF_BIRTH",
+            "piiRegex": "(?i)(?:date[ _]?of[ _]?birth|birth[ _]?date|\\bdob\\b)[^0-9]{1,16}[0-9]{1,4}[-/.][0-9]{1,2}[-/.][0-9]{1,4}"
+          }
+        ]
+      }
+    },
+    "log-request": {
+      "notes": "Logs each request's headers and payload to the gateway runtime log (docker logs …-gateway-runtime-1) — handy in the demo to show what the agent actually sends, tool results and x-boa-message included. First in the chain, so it shows the request as it arrived. Credentials are excluded (excludeHeaders: nothing is excluded by default, so the agent's X-API-Key or bearer token would otherwise land in the runtime log). The payload is logged before pii runs, so the runtime log does contain the unredacted profile (date of birth included) — that is the 'before' half of the redaction demo; drop log-request from V2_GUARDRAILS where that matters.",
+      "policy": "log-message",
+      "version": "v1",
+      "params": {
+        "request": {
+          "headers": true,
+          "payload": true,
+          "excludeHeaders": [
+            "authorization",
+            "x-api-key",
+            "x-provider-key",
+            "cookie"
+          ]
+        },
+        "response": {
+          "headers": false,
+          "payload": false
+        }
+      }
+    },
+    "log-response": {
+      "notes": "Logs each response's headers and payload. Last in the chain, so a request a guardrail blocked shows up here with the guardrail's verdict.",
+      "policy": "log-message",
+      "version": "v1",
+      "params": {
+        "request": {
+          "headers": false,
+          "payload": false
+        },
+        "response": {
+          "headers": true,
+          "payload": true,
+          "excludeHeaders": [
+            "set-cookie"
+          ]
+        }
+      }
+    }
+  },
+  "authPolicies": {
+    "jwt": {
+      "policy": "jwt-auth",
+      "version": "v1"
+    },
+    "mcp": {
+      "policy": "mcp-auth",
+      "version": "v1"
+    },
+    "apiKey": {
+      "policy": "api-key-auth"
+    },
+    "cost": {
+      "policy": "llm-cost",
+      "version": "v1"
+    }
+  }
+}

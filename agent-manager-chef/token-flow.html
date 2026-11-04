@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ---------- Animated token flow: prototype for the app's /tokenflow page ----------
+   Each audit event is a token travelling from one system to the next, coloured by
+   token type. Page chrome uses the app's cream/gold palette; the stage is dark so the
+   tokens glow. Data: /api/token-audit (serve.py) or a .jsonl picked from disk. */
+:root {
+  --gold: #997029; --gold-border: #c7a24c; --cream: #faf5e9; --ink: #463a24;
+  --page: #f6f0e1; --muted: #8a7a58;
+  --stage: #120e08; --stage-2: #1d170e; --node: #241d12; --node-line: rgba(199,162,76,.45);
+  --node-text: #faf5e9; --node-role: #b39a6a;
+  --obo: #f2c14e; --agent: #4fd1e8; --key: #b18cff; --call: #d9cfb8; --fail: #ff5a4f;
+  --mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; background: var(--page); color: var(--ink); font: 14px/1.4 'Inter', 'Segoe UI', Roboto, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+
+/* Header: title, transaction picker, playback controls. */
+.tf-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 20px; }
+.tf-title { color: var(--gold); font-weight: 700; font-size: 1.1rem; letter-spacing: .04em; text-transform: uppercase; }
+.tf-sub { color: var(--muted); font-size: 12.5px; }
+.tf-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tf-select, .tf-btn { height: 32px; border: 1px solid rgba(70,58,36,.22); border-radius: 6px; background: #fff; color: var(--ink); font: 500 13px 'Inter', sans-serif; }
+.tf-select { min-width: 260px; max-width: 100%; padding: 0 10px; }
+.tf-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 36px; padding: 0 10px; cursor: pointer; }
+.tf-btn:hover { border-color: var(--gold-border); }
+.tf-btn.is-primary { background: var(--gold); border-color: var(--gold); color: #fff; min-width: 88px; }
+.tf-btn svg { width: 16px; height: 16px; fill: currentColor; }
+.tf-btn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--cream); }
+.tf-speed { display: inline-flex; border: 1px solid rgba(70,58,36,.22); border-radius: 6px; overflow: hidden; }
+.tf-speed button { height: 30px; padding: 0 9px; border: 0; background: #fff; color: var(--ink); font: 600 12px var(--mono); cursor: pointer; }
+.tf-speed button + button { border-left: 1px solid rgba(70,58,36,.12); }
+.tf-speed button[aria-pressed="true"] { background: var(--ink); color: var(--cream); }
+.tf-file { display: none; }
+
+/* Body: stage on the left, hop feed on the right. */
+.tf-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; padding: 0 20px; }
+.tf-stage { position: relative; min-height: 360px; border-radius: 12px; overflow: hidden; background: radial-gradient(ellipse at 50% 45%, var(--stage-2), var(--stage) 70%); box-shadow: inset 0 0 0 1px rgba(199,162,76,.18); }
+.tf-stage svg.tf-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* "Now playing" banner across the top of the stage. */
+.tf-now { position: absolute; z-index: 2; left: 12px; right: 12px; top: 10px; display: flex; align-items: center; gap: 12px; min-height: 42px; padding: 6px 12px; border: 1px solid rgba(199,162,76,.22); border-radius: 10px; background: rgba(18,14,8,.72); color: var(--node-text); backdrop-filter: blur(6px); }
+.tf-now-n { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--c, var(--call)); color: #1a140b; font: 700 12px var(--mono); }
+.tf-now-text { min-width: 0; }
+.tf-now-label { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-now-meta { color: var(--node-role); font: 500 12px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-now-clock { margin-left: auto; flex: none; color: var(--gold-border); font: 700 14px var(--mono); }
+.tf-now.is-fail { border-color: rgba(255,90,79,.6); }
+.tf-now.is-fail .tf-now-label { color: var(--fail); }
+
+.tf-legend { position: absolute; z-index: 2; left: 16px; right: 330px; bottom: 14px; display: flex; gap: 6px 14px; flex-wrap: wrap; color: var(--node-role); font: 500 11.5px var(--mono); }
+.tf-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.tf-legend i { width: 18px; height: 9px; border-radius: 5px; background: var(--c); box-shadow: 0 0 8px var(--c); }
+.tf-legend i.is-step { background: transparent; box-shadow: none; border: 1.5px dashed var(--node-role); }
+.tf-legend i.is-token { background: var(--node-role); box-shadow: none; }
+.tf-hint { position: absolute; z-index: 2; right: 16px; bottom: 14px; color: #6d5d3e; font: 500 11px var(--mono); }
+.tf-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: var(--node-role); text-align: center; }
+.tf-empty[hidden] { display: none; }
+.tf-empty button { margin-top: 12px; }
+
+/* SVG: wires, nodes, wallets, tokens. */
+.lane { fill: none; stroke: rgba(199,162,76,.16); stroke-width: 1.5; stroke-dasharray: 2 6; transition: stroke .3s, stroke-width .3s; }
+.lane.is-hot { stroke: var(--c); stroke-width: 2; stroke-dasharray: 6 8; animation: laneFlow .9s linear infinite; opacity: .55; }
+@keyframes laneFlow { to { stroke-dashoffset: -28; } }
+.node-box { fill: var(--node); stroke: var(--node-line); stroke-width: 1.2; transition: stroke .25s, fill .25s; }
+.node.is-hub .node-box { stroke: var(--gold-border); stroke-width: 1.6; filter: drop-shadow(0 0 14px rgba(199,162,76,.25)); }
+.node.is-active .node-box { stroke: var(--c, var(--gold-border)); fill: #2d2416; }
+.node-icon { fill: none; stroke: var(--gold-border); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.node-name { fill: var(--node-text); font: 600 14px 'Inter', sans-serif; }
+.node-role { fill: var(--node-role); font: 500 10px var(--mono); letter-spacing: .04em; }
+.node-pulse { fill: none; stroke: var(--c); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.node-pulse.go { animation: nodePulse .7s ease-out; }
+@keyframes nodePulse { from { opacity: .9; transform: scale(1); } to { opacity: 0; transform: scale(1.18, 1.45); } }
+.node.is-fail .node-box { stroke: var(--fail); }
+
+.wallet-chip rect { fill: color-mix(in srgb, var(--c) 18%, transparent); stroke: var(--c); stroke-width: 1; }
+.wallet-chip text { fill: var(--c); font: 700 12.5px var(--mono); }
+.wallet-chip { transform-box: fill-box; transform-origin: center; }
+.wallet-chip.is-new { animation: chipIn .45s cubic-bezier(.2,.9,.3,1.4); }
+.wallet-chip.is-used { animation: chipUse .6s ease-out; }
+@keyframes chipIn { from { transform: scale(.2); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes chipUse { 50% { transform: scale(1.25); } }
+
+.token-halo { fill: var(--c); opacity: .28; }
+.token-pill { fill: var(--c); }
+.token-text { fill: #1a140b; font: 800 14px var(--mono); letter-spacing: .04em; }
+/* OAuth protocol steps (challenge, code, exchange request) are outlined; tokens are solid. */
+.is-step .token-halo { opacity: .14; }
+.is-step .token-pill { fill: var(--stage); stroke: var(--c); stroke-width: 2.5; stroke-dasharray: 7 4; }
+.is-step .token-text { fill: var(--c); }
+.trail { fill: none; stroke: var(--c); stroke-width: 4; stroke-linecap: round; opacity: .85; }
+.burst { fill: var(--fail); animation: burst .7s ease-out forwards; }
+/* A token check inside the receiving agent: a badge above its box, not a flight. */
+.check { transform-box: fill-box; transform-origin: center; animation: checkIn .45s cubic-bezier(.2,.9,.3,1.3) both; }
+.check.is-leaving { animation: checkOut .5s ease-in forwards; }
+@keyframes checkIn { from { opacity: 0; transform: translateY(10px) scale(.6); } to { opacity: 1; transform: none; } }
+@keyframes checkOut { to { opacity: 0; transform: translateY(-8px); } }
+.check-pill { fill: var(--stage); stroke: var(--c); stroke-width: 2; }
+.check.is-upstream .check-pill { stroke-dasharray: 6 4; }
+.check-mark { fill: none; stroke: var(--c); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.check-text { fill: var(--c); font: 800 13px var(--mono); letter-spacing: .04em; }
+@keyframes burst { to { transform: translate(var(--dx), var(--dy)); opacity: 0; } }
+.fail-x { stroke: var(--fail); stroke-width: 3.5; stroke-linecap: round; animation: failX 1.6s ease-out forwards; }
+@keyframes failX { 0% { opacity: 0; } 15% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Hop feed. */
+.tf-feed { min-height: 0; display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.07); border-radius: 12px; background: #fff; }
+.tf-feed-head { display: flex; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid rgba(0,0,0,.06); color: var(--muted); font: 600 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.tf-hops { flex: 1; min-height: 0; overflow-y: auto; list-style: none; padding: 6px 0; }
+.hop { display: grid; grid-template-columns: 24px 1fr; gap: 9px; padding: 6px 14px; font-size: 13px; cursor: pointer; opacity: .42; transition: opacity .25s, background .25s; }
+.hop:hover { background: #fbf7ec; }
+.hop.is-done { opacity: 1; }
+.hop.is-current { opacity: 1; background: #f8f0db; box-shadow: inset 3px 0 0 var(--c); }
+.hop-n { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--c); color: #1a140b; font: 700 11px var(--mono); }
+.hop.is-step .hop-n { background: transparent; box-shadow: inset 0 0 0 2px var(--c); color: var(--ink); }
+.hop-chip { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--c); color: #1a140b; font: 700 10px/16px var(--mono); vertical-align: 1px; }
+.hop.is-step .hop-chip { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); color: var(--ink); }
+.hop-label { font-weight: 600; }
+.hop.is-fail .hop-label { color: #c0392b; }
+.hop-route { color: var(--muted); font-size: 12px; }
+.hop-meta { margin-top: 1px; color: #7d6e50; font: 500 11px var(--mono); word-break: break-word; }
+.hop-scopes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.hop-scopes span { padding: 1px 7px; border: 1px solid var(--gold-border); border-radius: 999px; background: #fff8e6; font: 500 11px var(--mono); }
+
+/* Timeline: one tick per hop. */
+.tf-timeline { display: flex; align-items: center; gap: 12px; padding: 10px 20px 12px; }
+.tf-ticks { flex: 1; display: flex; gap: 3px; height: 16px; }
+.tick { flex: 1; min-width: 4px; border: 0; border-radius: 3px; background: var(--c); opacity: .25; cursor: pointer; transition: opacity .2s, transform .2s; }
+.tick.is-done { opacity: .9; }
+.tick.is-step { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.tick.is-current { opacity: 1; transform: scaleY(1.35); box-shadow: 0 0 0 2px var(--ink); }
+.tick.is-fail { background: repeating-linear-gradient(45deg, var(--fail) 0 4px, #a8322a 4px 8px); }
+.tf-count { min-width: 72px; color: var(--muted); font: 600 12px var(--mono); text-align: right; }
+
+@media (max-width: 1100px) {
+  .tf-main { grid-template-columns: 1fr; grid-template-rows: minmax(420px, 1fr) 280px; }
+}
+@media (max-width: 640px) {
+  .tf-head, .tf-main, .tf-timeline { padding-left: 16px; padding-right: 16px; }
+  .tf-select { min-width: 0; width: 100%; }
+  .tf-hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lane.is-hot, .node-pulse.go, .wallet-chip.is-new, .wallet-chip.is-used { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="tf-head">
+  <div>
+    <div class="tf-title">Token Flow</div>
+    <div class="tf-sub">Bank of Asgard · animated prototype</div>
+  </div>
+  <div class="tf-tools">
+    <select class="tf-select" data-tf-txn aria-label="Transaction"></select>
+    <button class="tf-btn" type="button" data-tf-reload title="Reload the audit log">Reload</button>
+    <button class="tf-btn" type="button" data-tf-restart title="Restart (R)"><svg viewBox="0 0 16 16"><path d="M3 2h2v12H3zM14 2v12L6 8z"/></svg></button>
+    <button class="tf-btn" type="button" data-tf-back title="Previous hop (←)"><svg viewBox="0 0 16 16"><path d="M12 2v12L4 8zM2 2h2v12H2z" transform="matrix(-1 0 0 1 16 0)"/></svg></button>
+    <button class="tf-btn is-primary" type="button" data-tf-play title="Play / pause (space)"></button>
+    <button class="tf-btn" type="button" data-tf-fwd title="Next hop (→)"><svg viewBox="0 0 16 16"><path d="M2 2v12l8-6zM11 2h2v12h-2z"/></svg></button>
+    <div class="tf-speed" role="group" aria-label="Speed" data-tf-speed>
+      <button type="button" data-speed="0.5">0.5×</button><button type="button" data-speed="1" aria-pressed="true">1×</button><button type="button" data-speed="2">2×</button><button type="button" data-speed="4">4×</button>
+    </div>
+    <input class="tf-file" type="file" accept=".jsonl,.json,.txt" data-tf-file>
+  </div>
+</header>
+
+<main class="tf-main">
+  <section class="tf-stage" aria-label="Token flow animation">
+    <div class="tf-now" data-tf-now aria-live="polite">
+      <span class="tf-now-n" data-tf-now-n>–</span>
+      <div class="tf-now-text">
+        <div class="tf-now-label" data-tf-now-label>Loading the audit log…</div>
+        <div class="tf-now-meta" data-tf-now-meta></div>
+      </div>
+      <span class="tf-now-clock" data-tf-now-clock></span>
+    </div>
+    <svg class="tf-svg" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid meet" data-tf-svg aria-hidden="true">
+      <defs>
+        <filter id="tfGlow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <g data-layer="lanes"></g>
+      <g data-layer="nodes"></g>
+      <g data-layer="tokens"></g>
+    </svg>
+    <div class="tf-legend" data-tf-legend></div>
+    <div class="tf-hint">space · play/pause &nbsp; ← → · step &nbsp; R · restart</div>
+    <div class="tf-empty" data-tf-empty hidden>
+      <div>
+        <div data-tf-empty-text></div>
+        <button class="tf-btn" type="button" data-tf-pick hidden>Open a token-audit.jsonl…</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="tf-feed">
+    <div class="tf-feed-head"><span>Hops</span><span data-tf-feed-count></span></div>
+    <ol class="tf-hops" data-tf-hops></ol>
+  </aside>
+</main>
+
+<footer class="tf-timeline">
+  <div class="tf-ticks" data-tf-ticks></div>
+  <div class="tf-count" data-tf-count></div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var NS = 'http://www.w3.org/2000/svg';
+  var $ = function (sel) { return document.querySelector(sel); };
+
+  // ---------------------------------------------------------------------------
+  // Event vocabulary — same rules as app/src/pages/token-flow.jsx, so both views
+  // tell the same story.
+  // ---------------------------------------------------------------------------
+
+  // Internal de-dup bookkeeping, not a real hop.
+  var NOISE_EVENTS = { dedupe_wait: true };
+
+  var EVENT_LABELS = {
+    cache_hit: 'Token reused (cache hit)',
+    obo_initiated: 'OBO exchange initiated',
+    obo_exchanged: 'OBO token issued',
+    agent_native_auth_initiated: 'Native auth initiated (PKCE challenge)',
+    agent_native_auth_completed: 'Native auth completed (password authenticator)',
+    agent_native_auth_failed: 'Agent authentication failed',
+    agent_token_fetch: 'Authorization code exchanged (PKCE, no client secret)',
+    gateway_token_fetch: 'Gateway token requested',
+    gateway_token_fresh: 'Gateway token obtained (fresh)',
+    validated_incoming: 'Incoming token verified (signature + audience)',
+    accepted_incoming: 'Incoming token accepted (verified by the gateway in front)',
+    api_call: 'API call',
+    agent_call: 'Agent call (A2A)',
+    agent_call_failed: 'Agent call failed',
+    agent_reply: 'Agent reply',
+    llm_call: 'LLM call'
+  };
+  function eventLabel(event) {
+    if (EVENT_LABELS[event]) return EVENT_LABELS[event];
+    var words = String(event || 'event').replace(/_/g, ' ');
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
+
+  var IDP_ACTOR = 'IS';
+
+  // `fresh` is logged as Agent -> <resource>, but the token came FROM the IdP: draw it
+  // as IS -> Agent, the "token obtained" response. `target` keeps the resource it is for,
+  // so that system still appears on the stage.
+  function effectiveHop(e) {
+    if (e.event === 'fresh') {
+      return {
+        origin: IDP_ACTOR, destination: e.origin || 'unknown', target: e.destination || null,
+        label: 'Token obtained (fresh)' + (e.destination ? ' for ' + e.destination : '')
+      };
+    }
+    return { origin: e.origin || 'unknown', destination: e.destination || 'unknown', label: eventLabel(e.event) };
+  }
+
+  function formatDelta(ms) {
+    return ms < 1000 ? '+' + Math.round(ms) + 'ms' : '+' + (ms / 1000).toFixed(1) + 's';
+  }
+
+  // Events whose arrival leaves the destination holding a token (shown in its wallet).
+  // (Not agent_native_auth_completed: that hands back an auth code, not a token.)
+  var ISSUE_EVENTS = { fresh: true, obo_exchanged: true, gateway_token_fresh: true };
+
+  // ---------------------------------------------------------------------------
+  // Token kinds: colour, the label on the travelling chip, and the legend text.
+  // ---------------------------------------------------------------------------
+  var KINDS = {
+    OBO_TOKEN: { css: 'var(--obo)', chip: 'OBO', token: 'OBO TOKEN', legend: 'OBO token (user + agent)', short: 'OBO' },
+    AGENT_TOKEN: { css: 'var(--agent)', chip: 'AGENT', token: 'AGENT TOKEN', legend: 'Agent token', short: 'Agent' },
+    API_KEY: { css: 'var(--key)', chip: 'KEY', token: 'API KEY', legend: 'Gateway API key', short: 'API key' },
+    CALL: { css: 'var(--call)', chip: 'CALL', token: 'CALL', legend: 'Call, no token logged', short: '' }
+  };
+  function kindOf(type) { return KINDS[type] ? type : 'CALL'; }
+
+  // What travels on each hop. OAuth protocol steps (step: true) are drawn as outlined
+  // chips, so a PKCE challenge or an exchange request never looks like the token it leads
+  // to; every other hop carries a token being issued or presented, named by its type.
+  var STEP_CHIPS = {
+    agent_native_auth_initiated: 'PKCE CHALLENGE',
+    agent_native_auth_completed: 'AUTH CODE',
+    agent_native_auth_failed: 'AUTH FAILED',
+    agent_token_fetch: 'CODE → TOKEN',
+    obo_initiated: 'OBO EXCHANGE',
+    gateway_token_fetch: 'CLIENT CREDS'
+  };
+  // Checks the receiving agent runs on a token it was sent: drawn on that agent as a
+  // badge, since nothing travels.
+  var LOCAL_EVENTS = { validated_incoming: true, accepted_incoming: true };
+  function checkText(event, failed) {
+    if (failed) return 'TOKEN REJECTED';
+    return event === 'accepted_incoming' ? 'TRUSTED UPSTREAM' : 'TOKEN VERIFIED';
+  }
+  function chipFor(event, kind) {
+    if (STEP_CHIPS[event]) return { text: STEP_CHIPS[event], step: true };
+    if (event === 'cache_hit') return { text: 'CACHED ' + KINDS[kind].chip, step: false };
+    if (event === 'agent_reply') return { text: 'REPLY', step: false };
+    return { text: KINDS[kind].token, step: false };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Systems: where each one sits around the hub, what it is, which icon it gets.
+  // Angles are degrees on the ellipse around the hub (0 = right, -90 = top).
+  // ---------------------------------------------------------------------------
+  var ROLES = [
+    { re: /^IS$|identity|asgardeo/i, role: 'IDENTITY SERVER', angle: -90, icon: 'shield' },
+    { re: /gateway/i, role: 'AI GATEWAY · LLM', angle: 180, icon: 'gate' },
+    { re: /transactions api/i, role: 'RESOURCE API', angle: 0, icon: 'db' },
+    { re: /savings/i, role: 'A2A AGENT', angle: 38, icon: 'bot' },
+    { re: /tax/i, role: 'A2A AGENT', angle: 142, icon: 'bot' },
+    { re: /mcp|agenc/i, role: 'MCP SERVER', angle: 90, icon: 'plug' }
+  ];
+  var FREE_ANGLES = [-38, -142, 64, 116, -12, -168, 12, 168];
+  var ICONS = {
+    shield: 'M0 -13 L11 -8 V1 C11 8 6 12 0 14 C-6 12 -11 8 -11 1 V-8 Z M-5 0 L-1 4 L6 -4',
+    gate: 'M-12 12 V-1 A12 12 0 0 1 12 -1 V12 M-5 12 V3 A5 5 0 0 1 5 3 V12',
+    db: 'M-11 -8 A11 4 0 1 0 11 -8 A11 4 0 1 0 -11 -8 M-11 -8 V8 A11 4 0 0 0 11 8 V-8 M-11 0 A11 4 0 0 0 11 0',
+    bot: 'M-10 -5 H10 V10 H-10 Z M0 -5 V-11 M-4 2 H-3.9 M4 2 H4.1',
+    plug: 'M-4 -12 V-5 M4 -12 V-5 M-8 -5 H8 V0 A8 8 0 0 1 -8 0 Z M0 8 V13',
+    // Ansuz ᚨ, the coordinator's rune on the "Inside our agents" slide.
+    rune: 'M-5 -12 V12 M-5 -10 L6 -3 M-5 -2 L6 5'
+  };
+  var CX = 600, CY = 392, RX = 430, RY = 232;
+  var NODE_W = 196, NODE_H = 60, HUB_W = 224, HUB_H = 70;
+
+  // ---------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------
+  var allEvents = [];
+  var hops = [];          // the hops of the selected transaction
+  var nodes = {};         // actor name -> { g, x, y, w, h, wallet, pulse }
+  var lanes = {};         // "A→B" -> path
+  var cur = -1;           // last completed hop
+  var flight = null;      // { i, elapsed, els }
+  var gapLeft = 0;
+  var playing = false;
+  var speed = 1;
+  var lastFrame = 0;
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var FLIGHT_MS = reduceMotion ? 1 : 1150;
+
+  // Pause after hop i, from the real time to the next hop: log-scaled so a 10 s LLM
+  // call doesn't stall the demo and back-to-back hops still read as separate.
+  function gapAfter(i) {
+    if (i + 1 >= hops.length) return 0;
+    var g = Math.max(0, hops[i + 1].epoch - hops[i].epoch);
+    return 260 + Math.min(1, Math.log10(1 + g * 10) / 2) * 900;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Data
+  // ---------------------------------------------------------------------------
+  function buildHops(events) {
+    var tokenKinds = {};     // token_hash -> token_type, so an api_call that only logs the hash keeps its colour
+    var list = events.filter(function (e) { return !NOISE_EVENTS[e.event]; });
+    var t0 = list.length ? list[0].epoch : 0;
+    return list.map(function (e, i) {
+      if (e.token_hash && e.token_type) tokenKinds[e.token_hash] = e.token_type;
+      var type = e.token_type || (e.token_hash && tokenKinds[e.token_hash]) || null;
+      var hop = effectiveHop(e);
+      var kind = kindOf(type);
+      var meta = [formatDelta((e.epoch - t0) * 1000)];
+      if (KINDS[kind].short) meta.push(KINDS[kind].short);
+      if (e.token_hash) meta.push('token ' + e.token_hash);
+      if (e.sub) meta.push('sub ' + shortId(e.sub));
+      if (e.act) meta.push('act ' + e.act);
+      if (e.error) meta.push('error ' + e.error);
+      var local = !!LOCAL_EVENTS[e.event], failed = e.success === false;
+      var chip = local ? { text: checkText(e.event, failed), step: false } : chipFor(e.event, kind);
+      return {
+        i: i, event: e.event, epoch: e.epoch, origin: hop.origin, destination: hop.destination, target: hop.target || null,
+        label: local && failed ? 'Incoming token rejected' : hop.label, local: local,
+        kind: kind, chip: chip.text, step: chip.step, color: KINDS[kind].css, failed: failed, hash: e.token_hash || null,
+        scopes: Array.isArray(e.scopes) ? e.scopes : [], meta: meta.join(' · '),
+        delta: formatDelta((e.epoch - t0) * 1000), issues: !!ISSUE_EVENTS[e.event]
+      };
+    });
+  }
+  function shortId(v) { v = String(v); return /^[0-9a-f-]{20,}$/i.test(v) ? v.slice(0, 8) + '…' : v; }
+
+  function transactions(events) {
+    var latest = {}, counts = {};
+    events.forEach(function (e) {
+      if (!e.transaction_id || NOISE_EVENTS[e.event]) return;
+      counts[e.transaction_id] = (counts[e.transaction_id] || 0) + 1;
+      if (!(e.transaction_id in latest) || e.epoch > latest[e.transaction_id]) latest[e.transaction_id] = e.epoch;
+    });
+    return Object.keys(latest).sort(function (a, b) { return latest[b] - latest[a]; })
+      .map(function (id) { return { id: id, epoch: latest[id], count: counts[id] }; });
+  }
+
+  function loadFromServer() {
+    showEmpty('');
+    setNow({ label: 'Loading the audit log…' });
+    return fetch('api/token-audit', { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(setEvents)
+      .catch(function (e) {
+        setEvents([]);
+        showEmpty('Could not read /api/token-audit (' + e.message + '). Start ./start-presentation.sh, or open a log file.', true);
+      });
+  }
+
+  function loadFromFile(file) {
+    file.text().then(function (text) {
+      var events = text.split('\n').filter(function (l) { return l.trim(); }).map(function (l) {
+        try { return JSON.parse(l); } catch (e) { return null; }
+      }).filter(Boolean);
+      events.sort(function (a, b) { return a.epoch - b.epoch; });
+      setEvents(events);
+    });
+  }
+
+  function setEvents(events) {
+    allEvents = events;
+    var select = $('[data-tf-txn]');
+    var keep = select.value;
+    select.textContent = '';
+    var txns = transactions(events);
+    txns.forEach(function (t) {
+      var o = document.createElement('option');
+      o.value = t.id;
+      o.textContent = new Date(t.epoch * 1000).toLocaleTimeString() + ' · ' + t.id.slice(0, 8) + ' · ' + t.count + ' hops';
+      select.appendChild(o);
+    });
+    var all = document.createElement('option');
+    all.value = '';
+    all.textContent = 'All events (' + events.length + ')';
+    select.appendChild(all);
+    select.value = txns.some(function (t) { return t.id === keep; }) ? keep : (txns[0] ? txns[0].id : '');
+    selectTransaction(select.value);
+  }
+
+  function selectTransaction(id) {
+    var events = id ? allEvents.filter(function (e) { return e.transaction_id === id; }) : allEvents;
+    hops = buildHops(events);
+    buildScene();
+    buildFeed();
+    seek(-1);
+    if (!hops.length) {
+      showEmpty('No token audit events yet. Run the demo, then press Reload.');
+      return;
+    }
+    showEmpty('');
+    play(true);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scene: nodes around the hub, one curved lane per direction.
+  // ---------------------------------------------------------------------------
+  function svgEl(tag, attrs, parent) {
+    var el = document.createElementNS(NS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+
+  // Where the line from node n's centre towards point t leaves its box (plus a gap),
+  // so lanes start and end at the box edge instead of under the label.
+  function edge(n, t) {
+    var dx = t.x - n.x, dy = t.y - n.y, pad = 6;
+    var k = Math.min(dx ? (n.w / 2 + pad) / Math.abs(dx) : Infinity, dy ? (n.h / 2 + pad) / Math.abs(dy) : Infinity);
+    return { x: n.x + dx * k, y: n.y + dy * k };
+  }
+
+  function buildScene() {
+    var laneLayer = $('[data-layer="lanes"]'), nodeLayer = $('[data-layer="nodes"]');
+    laneLayer.textContent = ''; nodeLayer.textContent = ''; $('[data-layer="tokens"]').textContent = '';
+    nodes = {}; lanes = {};
+    if (!hops.length) return;
+
+    // Hub = the system in the most hops (the coordinator, in practice).
+    var degree = {}, order = [];
+    hops.forEach(function (h) {
+      [h.origin, h.destination, h.target].forEach(function (a, k) {
+        if (!a) return;
+        if (!(a in degree)) { degree[a] = 0; order.push(a); }
+        if (k < 2) degree[a]++;
+      });
+    });
+    var hub = order.slice().sort(function (a, b) { return degree[b] - degree[a]; })[0];
+
+    var used = [];
+    function taken(angle) { return used.some(function (u) { return Math.abs(((angle - u + 540) % 360) - 180) < 24; }); }
+    order.forEach(function (name) {
+      var spec = ROLES.filter(function (r) { return r.re.test(name); })[0];
+      var node = { name: name, role: spec ? spec.role : 'SYSTEM', icon: spec ? spec.icon : 'bot' };
+      if (name === hub) {
+        node.x = CX; node.y = CY; node.w = HUB_W; node.h = HUB_H; node.hub = true;
+        node.role = /agent/i.test(name) ? 'COORDINATOR AGENT' : node.role; node.icon = 'rune';
+      } else {
+        var angle = spec && !taken(spec.angle) ? spec.angle : FREE_ANGLES.filter(function (a) { return !taken(a); })[0];
+        if (angle === undefined) angle = used.length * 47;
+        used.push(angle);
+        var rad = angle * Math.PI / 180;
+        node.x = CX + RX * Math.cos(rad); node.y = CY + RY * Math.sin(rad); node.w = NODE_W; node.h = NODE_H;
+      }
+      nodes[name] = node;
+    });
+
+    // Lanes: a gentle curve per direction, bowed to its own side so a request and its
+    // response never share a wire.
+    hops.forEach(function (h) {
+      var key = h.origin + '→' + h.destination;
+      if (lanes[key] || h.local) return;
+      var a = nodes[h.origin], b = nodes[h.destination], d;
+      if (a === b) {
+        var top = a.y - a.h / 2;
+        d = 'M' + (a.x - 28) + ' ' + top + ' C' + (a.x - 70) + ' ' + (top - 90) + ' ' + (a.x + 70) + ' ' + (top - 90) + ' ' + (a.x + 28) + ' ' + top;
+      } else {
+        var dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1, bow = Math.min(46, len * 0.12);
+        var m = { x: (a.x + b.x) / 2 - dy / len * bow, y: (a.y + b.y) / 2 + dx / len * bow };
+        var p = edge(a, m), q = edge(b, m);
+        d = 'M' + p.x.toFixed(1) + ' ' + p.y.toFixed(1) + ' Q' + m.x.toFixed(1) + ' ' + m.y.toFixed(1) + ' ' + q.x.toFixed(1) + ' ' + q.y.toFixed(1);
+      }
+      lanes[key] = svgEl('path', { 'class': 'lane', d: d }, laneLayer);
+    });
+
+    Object.keys(nodes).forEach(function (name) {
+      var n = nodes[name];
+      var g = svgEl('g', { 'class': 'node' + (n.hub ? ' is-hub' : ''), transform: 'translate(' + n.x.toFixed(1) + ' ' + n.y.toFixed(1) + ')' }, nodeLayer);
+      n.pulse = svgEl('rect', { 'class': 'node-pulse', x: -n.w / 2, y: -n.h / 2, width: n.w, height: n.h, rx: 14 }, g);
+      svgEl('rect', { 'class': 'node-box', x: -n.w / 2, y: -n.h / 2, width: n.w, height: n.h, rx: 12 }, g);
+      svgEl('path', { 'class': 'node-icon', d: ICONS[n.icon], transform: 'translate(' + (-n.w / 2 + 28) + ' 0) scale(.9)' }, g);
+      var title = svgEl('text', { 'class': 'node-name', x: -n.w / 2 + 52, y: -2 }, g);
+      title.textContent = name;
+      var role = svgEl('text', { 'class': 'node-role', x: -n.w / 2 + 52, y: 15 }, g);
+      role.textContent = n.role;
+      n.wallet = svgEl('g', { transform: 'translate(0 ' + (n.h / 2 + 22) + ')' }, g);
+      n.g = g;
+    });
+  }
+
+  // Tokens each system holds after hop `upto`, drawn under its box.
+  function renderWallets(upto, fresh) {
+    var held = {};
+    for (var i = 0; i <= upto; i++) {
+      var h = hops[i];
+      if (!h.issues || h.failed || h.kind === 'CALL') continue;
+      var w = held[h.destination] || (held[h.destination] = []);
+      var key = h.hash || h.kind;
+      if (!w.some(function (t) { return t.key === key; })) w.push({ key: key, kind: h.kind, hash: h.hash, at: i, label: h.label });
+    }
+    Object.keys(nodes).forEach(function (name) {
+      var g = nodes[name].wallet, list = held[name] || [];
+      g.textContent = '';
+      list.forEach(function (t) { t.text = KINDS[t.kind].chip + (t.hash ? ' · ' + t.hash.slice(0, 6) : ''); t.w = t.text.length * 8 + 18; });
+      var gap = 6, x = -(list.reduce(function (sum, t) { return sum + t.w; }, 0) + (list.length - 1) * gap) / 2;
+      list.forEach(function (t) {
+        // Position on the outer group, animation on the inner one: a CSS transform would
+        // replace the transform attribute.
+        var slot = svgEl('g', { transform: 'translate(' + x.toFixed(1) + ' -12)' }, g);
+        x += t.w + gap;
+        var chip = svgEl('g', { 'class': 'wallet-chip' + (t.at === fresh ? ' is-new' : ''), 'data-key': t.key }, slot);
+        chip.style.setProperty('--c', KINDS[t.kind].css);
+        svgEl('title', {}, chip).textContent = KINDS[t.kind].legend + (t.hash ? ' ' + t.hash : '') + ' (from: ' + t.label + ')';
+        svgEl('rect', { width: t.w, height: 24, rx: 12 }, chip);
+        var text = svgEl('text', { x: t.w / 2, y: 16.5, 'text-anchor': 'middle' }, chip);
+        text.textContent = t.text;
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Flight: a chip travels the lane with a glowing trail; it pulses the destination
+  // on arrival, or bursts red short of it when the hop failed.
+  // ---------------------------------------------------------------------------
+  function launch(i) {
+    if (hops[i].local) { launchCheck(i); return; }
+    var h = hops[i], lane = lanes[h.origin + '→' + h.destination], layer = $('[data-layer="tokens"]');
+    var total = lane.getTotalLength();
+    var trail = svgEl('path', { 'class': 'trail', d: lane.getAttribute('d'), filter: 'url(#tfGlow)' }, layer);
+    var chip = svgEl('g', { 'class': h.step ? 'is-step' : '' }, layer);
+    [trail, chip, lane].forEach(function (el) { el.style.setProperty('--c', h.failed ? 'var(--fail)' : h.color); });
+    svgEl('circle', { 'class': 'token-halo', r: 28, filter: 'url(#tfGlow)' }, chip);
+    var w = Math.max(54, h.chip.length * 9.2 + 24);
+    svgEl('rect', { 'class': 'token-pill', x: -w / 2, y: -15, width: w, height: 30, rx: 15 }, chip);
+    var text = svgEl('text', { 'class': 'token-text', y: 5.5, 'text-anchor': 'middle' }, chip);
+    text.textContent = h.chip;
+    lane.classList.add('is-hot');
+    markActive(h, true);
+    // The token leaving a wallet it was parked in.
+    if (h.hash) {
+      var parked = nodes[h.origin].wallet.querySelector('[data-key="' + h.hash + '"]');
+      if (parked) { parked.classList.remove('is-used'); void parked.getBBox(); parked.classList.add('is-used'); }
+    }
+    flight = { i: i, elapsed: 0, total: total, lane: lane, trail: trail, chip: chip };
+    setNow(h);
+    renderFeed(i);
+    moveFlight(0);
+  }
+
+  // A check the receiving agent runs: a ✓ / ✕ badge rises above its box for the length
+  // of a flight, then fades as the next hop starts.
+  function launchCheck(i) {
+    var h = hops[i], n = nodes[h.destination], layer = $('[data-layer="tokens"]');
+    var slot = svgEl('g', { transform: 'translate(' + n.x.toFixed(1) + ' ' + (n.y - n.h / 2 - 26).toFixed(1) + ')' }, layer);
+    var badge = svgEl('g', { 'class': 'check' + (h.event === 'accepted_incoming' ? ' is-upstream' : '') }, slot);
+    badge.style.setProperty('--c', h.failed ? 'var(--fail)' : h.color);
+    var w = h.chip.length * 8.6 + 52;
+    svgEl('rect', { 'class': 'check-pill', x: -w / 2, y: -16, width: w, height: 32, rx: 16 }, badge);
+    svgEl('path', { 'class': 'check-mark', d: h.failed ? 'M-6 -6 L6 6 M6 -6 L-6 6' : 'M-7 0 L-2 5 L7 -5', transform: 'translate(' + (-w / 2 + 20) + ' 0)' }, badge);
+    var text = svgEl('text', { 'class': 'check-text', x: 12, y: 4.5, 'text-anchor': 'middle' }, badge);
+    text.textContent = h.chip;
+    markActive(h, true);
+    flight = { i: i, elapsed: 0, local: true, chip: slot };
+    setNow(h);
+    renderFeed(i);
+  }
+
+  function ease(t) { return t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+  function moveFlight(p) {
+    var f = flight, h = hops[f.i];
+    if (f.local) return;
+    var stop = h.failed ? 0.8 : 1;
+    var s = ease(Math.min(1, p)) * stop * f.total;
+    var pt = f.lane.getPointAtLength(s);
+    f.chip.setAttribute('transform', 'translate(' + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1) + ')');
+    var tail = Math.min(140, f.total * 0.35);
+    f.trail.setAttribute('stroke-dasharray', tail + ' ' + (f.total + tail));
+    f.trail.setAttribute('stroke-dashoffset', (tail - s).toFixed(1));
+    f.trail.style.opacity = p >= 1 ? 0 : .85;
+  }
+
+  function land() {
+    var f = flight, h = hops[f.i];
+    if (h.failed && !f.local) burst(f.lane.getPointAtLength(f.total * 0.8));
+    clearFlight();
+    cur = h.i;
+    var dest = nodes[h.destination];
+    dest.pulse.style.setProperty('--c', h.failed ? 'var(--fail)' : h.color);
+    dest.pulse.classList.remove('go'); void dest.pulse.getBBox(); dest.pulse.classList.add('go');
+    renderAll(h.issues ? h.i : -2);
+    gapLeft = gapAfter(h.i);
+    if (stopAfter !== null && cur >= stopAfter) { stopAfter = null; play(false); }
+  }
+
+  function burst(pt) {
+    var layer = $('[data-layer="tokens"]');
+    var g = svgEl('g', { transform: 'translate(' + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1) + ')' }, layer);
+    for (var k = 0; k < 10; k++) {
+      var a = k / 10 * Math.PI * 2, r = 26 + Math.random() * 22;
+      var c = svgEl('circle', { 'class': 'burst', r: 3 }, g);
+      c.style.setProperty('--dx', (Math.cos(a) * r).toFixed(1) + 'px');
+      c.style.setProperty('--dy', (Math.sin(a) * r).toFixed(1) + 'px');
+    }
+    svgEl('path', { 'class': 'fail-x', d: 'M-9 -9 L9 9 M9 -9 L-9 9' }, g);
+    setTimeout(function () { g.remove(); }, 1700);
+  }
+
+  function clearFlight() {
+    if (!flight) return;
+    if (flight.local) {
+      var slot = flight.chip;
+      slot.firstChild.classList.add('is-leaving');
+      setTimeout(function () { slot.remove(); }, 500);
+    } else {
+      flight.trail.remove(); flight.chip.remove();
+      flight.lane.classList.remove('is-hot');
+    }
+    markActive(hops[flight.i], false);
+    flight = null;
+  }
+
+  function markActive(h, on) {
+    (h.local ? [h.destination] : [h.origin, h.destination]).forEach(function (name) {
+      var g = nodes[name].g;
+      g.classList.toggle('is-active', on);
+      g.style.setProperty('--c', h.failed ? 'var(--fail)' : h.color);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Playback
+  // ---------------------------------------------------------------------------
+  function frame(now) {
+    var dt = lastFrame ? Math.min(100, now - lastFrame) : 0;
+    lastFrame = now;
+    if (playing && hops.length) {
+      if (flight) {
+        flight.elapsed += dt * speed;
+        moveFlight(flight.elapsed / FLIGHT_MS);
+        if (flight.elapsed >= FLIGHT_MS) land();
+      } else if ((gapLeft -= dt * speed) <= 0) {
+        if (cur + 1 < hops.length) launch(cur + 1);
+        else play(false);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function play(on) {
+    if (on && cur >= hops.length - 1 && !flight) seek(-1);
+    playing = on && hops.length > 0;
+    var btn = $('[data-tf-play]');
+    btn.innerHTML = playing
+      ? '<svg viewBox="0 0 16 16"><path d="M3 2h3.5v12H3zM9.5 2H13v12H9.5z"/></svg>Pause'
+      : '<svg viewBox="0 0 16 16"><path d="M3 2v12l11-6z"/></svg>Play';
+  }
+
+  // Jump to "hop k done" (k = -1: nothing yet), no animation.
+  function seek(k) {
+    clearFlight();
+    cur = Math.max(-1, Math.min(hops.length - 1, k));
+    gapLeft = cur < 0 ? 400 : 0;
+    renderAll(-2);
+  }
+
+  // Forward animates exactly one hop, then pauses (a hop already in the air lands at
+  // once); back jumps to the hop before, without animation.
+  var stopAfter = null;
+  function step(dir) {
+    play(false);
+    if (dir > 0) {
+      if (flight) { stopAfter = null; flight.elapsed = FLIGHT_MS; moveFlight(1); land(); return; }
+      if (cur + 1 < hops.length) { stopAfter = cur + 1; launch(cur + 1); play(true); }
+    } else {
+      stopAfter = null;
+      seek(flight ? cur : cur - 1);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Feed, banner, timeline
+  // ---------------------------------------------------------------------------
+  function buildFeed() {
+    var list = $('[data-tf-hops]'), ticks = $('[data-tf-ticks]');
+    list.textContent = ''; ticks.textContent = '';
+    hops.forEach(function (h) {
+      var li = document.createElement('li');
+      li.className = 'hop' + (h.failed ? ' is-fail' : '') + (h.step ? ' is-step' : '');
+      li.style.setProperty('--c', h.failed ? 'var(--fail)' : h.color);
+      li.dataset.i = h.i;
+      var n = document.createElement('span'); n.className = 'hop-n'; n.textContent = h.i + 1;
+      var body = document.createElement('div');
+      [['hop-label', h.label], ['hop-route', route(h)], ['hop-meta', h.meta]].forEach(function (p) {
+        var d = document.createElement('div'); d.className = p[0]; d.textContent = p[1]; body.appendChild(d);
+      });
+      var tag = document.createElement('span'); tag.className = 'hop-chip'; tag.textContent = h.chip;
+      body.firstChild.appendChild(tag);
+      if (h.scopes.length) {
+        var sc = document.createElement('div'); sc.className = 'hop-scopes';
+        h.scopes.forEach(function (s) { var c = document.createElement('span'); c.textContent = s; sc.appendChild(c); });
+        body.appendChild(sc);
+      }
+      li.appendChild(n); li.appendChild(body);
+      li.addEventListener('click', function () { play(false); seek(h.i); setNow(h); });
+      list.appendChild(li);
+
+      var t = document.createElement('button');
+      t.type = 'button';
+      t.className = 'tick' + (h.failed ? ' is-fail' : '') + (h.step ? ' is-step' : '');
+      t.style.setProperty('--c', h.color);
+      t.title = (h.i + 1) + '. ' + h.label;
+      t.addEventListener('click', function () { play(false); seek(h.i); setNow(h); });
+      ticks.appendChild(t);
+    });
+    $('[data-tf-feed-count]').textContent = hops.length ? hops.length + ' hops' : '';
+    renderLegend();
+  }
+
+  function renderFeed(active) {
+    var items = document.querySelectorAll('.hop'), ticks = document.querySelectorAll('.tick');
+    for (var i = 0; i < items.length; i++) {
+      var done = i <= cur, current = i === active;
+      items[i].classList.toggle('is-done', done);
+      items[i].classList.toggle('is-current', current);
+      ticks[i].classList.toggle('is-done', done);
+      ticks[i].classList.toggle('is-current', current);
+      if (current) items[i].scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+    }
+    $('[data-tf-count]').textContent = (Math.max(0, active + 1)) + ' / ' + hops.length;
+  }
+
+  function renderAll(freshChip) {
+    renderWallets(cur, freshChip);
+    renderFeed(flight ? flight.i : cur);
+    if (!flight) setNow(cur >= 0 ? hops[cur] : null);
+  }
+
+  function setNow(h) {
+    var box = $('[data-tf-now]');
+    var n = $('[data-tf-now-n]'), label = $('[data-tf-now-label]'), meta = $('[data-tf-now-meta]'), clock = $('[data-tf-now-clock]');
+    if (!h || h.i === undefined) {
+      box.classList.remove('is-fail');
+      box.style.removeProperty('--c');
+      n.textContent = '–';
+      label.textContent = h && h.label ? h.label : (hops.length ? 'Ready: ' + hops.length + ' hops' : '');
+      meta.textContent = hops.length ? 'press Play, or step through with →' : '';
+      clock.textContent = '';
+      return;
+    }
+    box.classList.toggle('is-fail', h.failed);
+    box.style.setProperty('--c', h.failed ? 'var(--fail)' : h.color);
+    n.textContent = h.i + 1;
+    label.textContent = (h.failed ? '✕ ' : '') + h.label;
+    var scopes = h.scopes.length ? ' · scopes ' + h.scopes.join(', ') : '';
+    meta.textContent = route(h) + ' · ' + h.meta.replace(/^\+[^·]+· ?/, '') + scopes;
+    clock.textContent = h.delta;
+  }
+
+  function route(h) {
+    return h.local ? 'at ' + h.destination + ' · token from ' + h.origin : h.origin + ' → ' + h.destination;
+  }
+
+  function renderLegend() {
+    var legend = $('[data-tf-legend]'), seen = {};
+    legend.textContent = '';
+    hops.forEach(function (h) { seen[h.kind] = true; if (h.failed) seen.FAIL = true; });
+    Object.keys(KINDS).concat(['FAIL']).forEach(function (k) {
+      if (!seen[k]) return;
+      var s = document.createElement('span'), i = document.createElement('i');
+      i.style.setProperty('--c', k === 'FAIL' ? 'var(--fail)' : KINDS[k].css);
+      s.appendChild(i);
+      s.appendChild(document.createTextNode(k === 'FAIL' ? 'Failed hop' : KINDS[k].legend));
+      legend.appendChild(s);
+    });
+    [['is-token', 'Token (solid)'], ['is-step', 'OAuth step (dashed)']].forEach(function (p) {
+      if (!hops.some(function (h) { return h.step === (p[0] === 'is-step'); })) return;
+      var s = document.createElement('span'), i = document.createElement('i');
+      i.className = p[0];
+      s.appendChild(i);
+      s.appendChild(document.createTextNode(p[1]));
+      legend.appendChild(s);
+    });
+  }
+
+  function showEmpty(text, offerFile) {
+    $('[data-tf-empty]').hidden = !text;
+    $('[data-tf-empty-text]').textContent = text;
+    $('[data-tf-pick]').hidden = !offerFile;
+    if (text) setNow({ label: '' });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Wiring
+  // ---------------------------------------------------------------------------
+  $('[data-tf-txn]').addEventListener('change', function (e) { selectTransaction(e.target.value); });
+  $('[data-tf-reload]').addEventListener('click', loadFromServer);
+  $('[data-tf-play]').addEventListener('click', function () { stopAfter = null; play(!playing); });
+  $('[data-tf-restart]').addEventListener('click', function () { stopAfter = null; seek(-1); play(true); });
+  $('[data-tf-back]').addEventListener('click', function () { step(-1); });
+  $('[data-tf-fwd]').addEventListener('click', function () { step(1); });
+  $('[data-tf-speed]').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    speed = parseFloat(b.dataset.speed);
+    this.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+  });
+  $('[data-tf-pick]').addEventListener('click', function () { $('[data-tf-file]').click(); });
+  $('[data-tf-file]').addEventListener('change', function (e) { if (e.target.files[0]) loadFromFile(e.target.files[0]); });
+  document.addEventListener('keydown', function (e) {
+    if (e.target.closest && e.target.closest('select, input')) return;
+    if (e.key === ' ') { e.preventDefault(); stopAfter = null; play(!playing); }
+    else if (e.key === 'ArrowRight') step(1);
+    else if (e.key === 'ArrowLeft') step(-1);
+    else if (e.key === 'r' || e.key === 'R') { stopAfter = null; seek(-1); play(true); }
+  });
+
+  play(false);
+  requestAnimationFrame(frame);
+  loadFromServer();
+})();
+</script>
+</body>
+</html>

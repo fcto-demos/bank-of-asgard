@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
 from app.audit_log import register_actor_name
-from app.gateway import GatewayTokenManager, GatewayBearerAuth
+from app.gateway import GatewayAuth, build_gateway_auths, guardrail_reason
 from app.prompt import (
     MAX_USER_MESSAGE_CHARS, MESSAGE_TOO_LONG_REPLY, WELCOME_MESSAGE, agent_system_prompt,
 )
@@ -167,9 +167,9 @@ _default_models = {
 }
 
 
-def _build_gateway_model_client(base_url: str, token_manager: GatewayTokenManager):
+def _build_gateway_model_client(base_url: str, gw_auth: GatewayAuth):
     """Build a model client routed via the WSO2 API Gateway at the given base URL."""
-    http_client = httpx.AsyncClient(auth=GatewayBearerAuth(token_manager), verify=_ssl_verify)
+    http_client = httpx.AsyncClient(auth=gw_auth, verify=_ssl_verify)
     if llm_provider == 'anthropic':
         return AnthropicChatCompletionClient(
             model=llm_model or _default_models["anthropic"],
@@ -202,14 +202,9 @@ def _build_gateway_model_client(base_url: str, token_manager: GatewayTokenManage
 
 if _use_gateway:
     logger.info("LLM routing via WSO2 API Gateway (provider=%s)", llm_provider)
-    _gw_token_manager = GatewayTokenManager(
-        token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
-        client_id=os.environ["GATEWAY_CLIENT_ID"],
-        client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
-        ssl_verify=_ssl_verify,
-    )
-    model_client = _build_gateway_model_client(os.environ["GATEWAY_BASE_URL"], _gw_token_manager)
-    model_client_secured = _build_gateway_model_client(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_token_manager)
+    _gw_auth, _gw_auth_secured = build_gateway_auths(_ssl_verify)
+    model_client = _build_gateway_model_client(os.environ["GATEWAY_BASE_URL"], _gw_auth)
+    model_client_secured = _build_gateway_model_client(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_auth_secured)
     logger.info("Gateway base URL: %s", os.environ["GATEWAY_BASE_URL"])
     logger.info("Gateway secured URL: %s", os.environ["GATEWAY_BASE_URL_SECURED"])
 else:
@@ -287,16 +282,10 @@ def _extract_gateway_error(e: Exception) -> str | None:
     while cause is not None:
         if isinstance(cause, httpx.HTTPStatusError):
             status = cause.response.status_code
-            if status == 446:
-                logger.warning("Guardrail triggered (446): %s", cause.response.text)
-                try:
-                    data = cause.response.json()
-                    msg = data.get("message") or data.get("detail")
-                    if isinstance(msg, dict):
-                        msg = msg.get("actionReason") or msg.get("action") or str(msg)
-                    return msg or cause.response.text or "Your request was blocked by an AI guardrail policy."
-                except Exception:
-                    return cause.response.text or "Your request was blocked by an AI guardrail policy."
+            reason = guardrail_reason(status, cause.response.text)
+            if reason:
+                logger.warning("Guardrail triggered (%s): %s", status, cause.response.text)
+                return reason
             if status == 429:
                 logger.warning("Rate limit hit (429): %s", cause.response.text)
                 return "I'm currently busy — the AI service is at capacity. Please try again in a moment."

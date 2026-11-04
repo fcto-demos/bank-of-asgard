@@ -461,12 +461,12 @@ components:
         short-lived tokens, explicit `aud` claim validation, and RS256/RS384/RS512 algorithms only.
       flows:
         authorizationCode:
-          authorizationUrl: https://api.asgardeo.io/t/{org}/oauth2/authorize
-          tokenUrl: https://api.asgardeo.io/t/{org}/oauth2/token
+          authorizationUrl: https://api.asgardeo.io/t/myorg/oauth2/authorize
+          tokenUrl: https://api.asgardeo.io/t/myorg/oauth2/token
           scopes:
             read_transactions: Read the authenticated user's transactions
         clientCredentials:
-          tokenUrl: https://api.asgardeo.io/t/{org}/oauth2/token
+          tokenUrl: https://api.asgardeo.io/t/myorg/oauth2/token
           scopes:
             admin_provision: Provision and view transaction data for any user (admin only)
   schemas:

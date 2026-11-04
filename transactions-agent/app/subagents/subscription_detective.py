@@ -28,7 +28,8 @@ Be concise and conversational — this will be read directly by the customer."""
 
 def build_graph(llm):
     """Build the Subscription Detective sub-agent graph. Call once per process."""
-    graph = create_agent(llm, [], system_prompt=SUBSCRIPTION_DETECTIVE_PROMPT)
+    # name= is the gen_ai.agent.name on this sub-agent's INTERNAL invoke_agent span.
+    graph = create_agent(llm, [], system_prompt=SUBSCRIPTION_DETECTIVE_PROMPT, name="subscription_detective")
     return graph.with_config(run_name="subscription_detective")
 
 

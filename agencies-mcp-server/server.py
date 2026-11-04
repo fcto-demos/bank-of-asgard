@@ -7,6 +7,7 @@ import jwt as pyjwt
 import uvicorn
 from dotenv import load_dotenv
 from fastmcp import FastMCP
+from starlette.applications import Starlette
 from starlette.middleware import Middleware
 
 load_dotenv()
@@ -233,11 +234,23 @@ def get_agencies(town: str) -> list[dict]:
     return result
 
 
+def build_app() -> Starlette:
+    """Both MCP transports on one port, behind the same bearer check: /sse (legacy SSE,
+    what the agent uses when calling this server directly) and /mcp (Streamable HTTP,
+    what the WSO2 AI Gateway's MCP proxy speaks upstream — spec 2025-06-18)."""
+    streamable = mcp.http_app(path="/mcp", transport="http")
+    sse = mcp.http_app(transport="sse")
+    return Starlette(
+        routes=[*streamable.routes, *sse.routes],
+        lifespan=streamable.router.lifespan_context,  # runs the Streamable HTTP session manager
+        middleware=[Middleware(BearerAuthMiddleware)],
+    )
+
+
 if __name__ == "__main__":
     # BIND_HOST defaults to all interfaces so containers (Docker, Agent Manager) stay
     # reachable; native/VM launches (start-demo.sh, systemd) set 127.0.0.1 so the port
     # isn't exposed on a public host.
     bind_host = os.environ.get("BIND_HOST", "0.0.0.0")  # noqa: S104
     logger.info("Starting Agencies MCP server on %s:8012 (IDP: %s)", bind_host, IDP_BASE_URL)
-    app = mcp.http_app(transport="sse", middleware=[Middleware(BearerAuthMiddleware)])
-    uvicorn.run(app, host=bind_host, port=8012)
+    uvicorn.run(build_app(), host=bind_host, port=8012)

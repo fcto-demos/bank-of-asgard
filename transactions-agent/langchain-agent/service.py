@@ -4,12 +4,23 @@ import json
 import logging
 import os
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import cached_property
 from pathlib import Path
-from typing import Literal, Dict, List, Any
+from typing import Literal, Dict, Iterator, List, Any
+from urllib.parse import urlsplit
 
 import httpx
+
+# Opt-in (start-demo.sh --http-tracing): HTTP client spans (OTel HTTP semconv) and W3C
+# traceparent injection for every httpx call — the API tools, MCP over SSE and the remote
+# Savings/Tax agents. Off by default because Agent Manager doesn't consume these spans yet.
+# Read from the process environment, not .env: the script also has to set
+# OTEL_SEMCONV_STABILITY_OPT_IN before amp-instrument starts.
+if os.environ.get("HTTP_CLIENT_TRACING", "").lower() == "true":
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    HTTPXClientInstrumentor().instrument()
 
 # Configure logging before asgardeo imports so the patch is in place when its clients are created
 logging.basicConfig(
@@ -24,14 +35,22 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.errors import GraphRecursionError
-from traceloop.sdk import Traceloop
+from opentelemetry import baggage, propagate, trace
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_NAME, GEN_AI_CONVERSATION_ID, GEN_AI_OPERATION_NAME, GEN_AI_PROVIDER_NAME,
+    GenAiOperationNameValues,
+)
+from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv.attributes.server_attributes import SERVER_ADDRESS, SERVER_PORT
+from opentelemetry.trace import SpanKind
+from traceloop.sdk.tracing import set_conversation_id
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, HTTPException
 from pydantic import BaseModel, PrivateAttr
 from starlette.websockets import WebSocketDisconnect
 
-from app.audit_log import register_actor_name, set_session, set_transaction
-from app.gateway import GatewayTokenManager, GatewayBearerAuth
+from app.audit_log import emit_token_event, register_actor_name, set_session, set_transaction
+from app.gateway import GatewayAuth, build_gateway_auths, guardrail_reason
 from app.prompt import (
     DEMO_VERSION, MAX_USER_MESSAGE_CHARS, MESSAGE_TOO_LONG_REPLY, WELCOME_MESSAGE,
     agent_system_prompt,
@@ -45,7 +64,7 @@ from app.tools import (
 )
 from app.subagents import subscription_detective, spending_health
 from app.tax import DeductionSummary, format_summary, summarize_deductible_spend
-from tool import SecureLangChainTool
+from tool import SecureLangChainTool, ToolKind
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
 
 from asgardeo_ai import AgentConfig
@@ -68,12 +87,12 @@ class GatewayChatAnthropic(ChatAnthropic):
 
     ChatAnthropic builds its own internal httpx client and does not expose http_client
     as a constructor parameter. This subclass overrides _async_client to inject our
-    GatewayBearerAuth handler so tokens are refreshed transparently on each request.
+    gateway auth handler (bearer token refreshed on each request, or a static API key).
     """
 
-    _gw_auth: GatewayBearerAuth = PrivateAttr()
+    _gw_auth: GatewayAuth = PrivateAttr()
 
-    def __init__(self, *, gw_auth: GatewayBearerAuth, **data):
+    def __init__(self, *, gw_auth: GatewayAuth, **data):
         super().__init__(**data)
         self._gw_auth = gw_auth
 
@@ -278,9 +297,8 @@ _default_models = {
 _ANTHROPIC_CACHE_CONTROL = {"cache_control": {"type": "ephemeral"}}
 
 
-def _build_gateway_llm(gw_base_url: str, token_manager: GatewayTokenManager):
+def _build_gateway_llm(gw_base_url: str, gw_auth: GatewayAuth):
     """Build a LangChain LLM routed via the WSO2 API Gateway at the given base URL."""
-    gw_auth = GatewayBearerAuth(token_manager)
     if llm_provider == 'anthropic':
         return GatewayChatAnthropic(
             model=llm_model or _default_models["anthropic"],
@@ -302,19 +320,14 @@ _GATEWAY_URL_PREFIXES: tuple[str, ...] = ()
 
 if _use_gateway:
     logger.info("LLM routing via WSO2 API Gateway (provider=%s)", llm_provider)
-    _gw_token_manager = GatewayTokenManager(
-        token_endpoint=os.environ["GATEWAY_TOKEN_ENDPOINT"],
-        client_id=os.environ["GATEWAY_CLIENT_ID"],
-        client_secret=os.environ["GATEWAY_CLIENT_SECRET"],
-        ssl_verify=_ssl_verify,
-    )
-    llm = _build_gateway_llm(os.environ["GATEWAY_BASE_URL"], _gw_token_manager)
-    llm_secured = _build_gateway_llm(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_token_manager)
+    _gw_auth, _gw_auth_secured = build_gateway_auths(_ssl_verify)
+    llm = _build_gateway_llm(os.environ["GATEWAY_BASE_URL"], _gw_auth)
+    llm_secured = _build_gateway_llm(os.environ["GATEWAY_BASE_URL_SECURED"], _gw_auth_secured)
     logger.info("Gateway base URL: %s", os.environ["GATEWAY_BASE_URL"])
     logger.info("Gateway secured URL: %s", os.environ["GATEWAY_BASE_URL_SECURED"])
-    # 446 (guardrail) is a status only the WSO2 AI Gateway returns — never the IDP or
-    # any other service. _extract_gateway_error uses this to make sure it only treats a
-    # 446/429 as a gateway error when the failing request actually targeted the gateway.
+    # A guardrail block (446, or a 4xx carrying GUARDRAIL_INTERVENED) only ever comes from
+    # the WSO2 AI Gateway — never the IDP or any other service. _extract_gateway_error uses
+    # this to only treat it (and 429) as a gateway error when the request targeted the gateway.
     _GATEWAY_URL_PREFIXES = (os.environ["GATEWAY_BASE_URL"], os.environ["GATEWAY_BASE_URL_SECURED"])
 else:
     match llm_provider:
@@ -367,6 +380,96 @@ async def _analyze_spending_health(token: OAuthToken) -> str:
     return await spending_health.analyze(_spending_health_graph, result["transactions"])
 
 
+_tracer = trace.get_tracer(__name__)
+
+# gen_ai.provider.name for the two remote agents: the organisation hosting each one. A
+# custom value — the GenAI semconv's well-known providers are hosted-agent platforms.
+_SAVINGS_AGENT_PROVIDER = "bank_of_asgard"
+_TAX_AGENT_PROVIDER = "ministry_of_finance"
+
+
+@contextmanager
+def _invoke_remote_agent_span(agent_name: str, provider: str, url: str) -> Iterator[None]:
+    """`invoke_agent {agent_name}` CLIENT span around a call to an agent in another process.
+
+    The OTel GenAI convention for remote agent invocation — it is what lets a trace tell
+    SuggestSavingsGoal/PrepareTaxReturn apart from API tools (plain HTTP spans) and the
+    in-process sub-agents (INTERNAL invoke_agent spans from the LangGraph instrumentation).
+    The httpx span for the actual request nests under it."""
+    target = urlsplit(url)
+    attributes: dict = {
+        GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
+        GEN_AI_PROVIDER_NAME: provider,
+        GEN_AI_AGENT_NAME: agent_name,
+    }
+    if target.hostname:
+        attributes[SERVER_ADDRESS] = target.hostname
+        attributes[SERVER_PORT] = target.port or (443 if target.scheme == "https" else 80)
+    with _tracer.start_as_current_span(
+        f"{GenAiOperationNameValues.INVOKE_AGENT.value} {agent_name}",
+        kind=SpanKind.CLIENT,
+        attributes=attributes,
+    ) as span:
+        try:
+            yield
+        except Exception as e:
+            span.set_attribute(
+                ERROR_TYPE,
+                str(e.response.status_code) if isinstance(e, httpx.HTTPStatusError)
+                else type(e).__qualname__,
+            )
+            raise
+
+
+def _trace_context_headers(conversation_id: str | None) -> dict[str, str]:
+    """W3C `traceparent` and `baggage` headers for a call to an agent in another process.
+
+    Built inside _invoke_remote_agent_span, so traceparent points at that span and the
+    remote agent's spans join this trace beneath it. gen_ai.conversation.id rides along as
+    baggage so the remote agent can stamp its own spans with the same conversation.
+    Injected here rather than left to the httpx instrumentation, which is opt-in
+    (--http-tracing); when that is on, it replaces traceparent with its own HTTP client
+    span, one level further down, and leaves the baggage alone."""
+    context = (
+        baggage.set_baggage(GEN_AI_CONVERSATION_ID, conversation_id) if conversation_id
+        else None
+    )
+    headers: dict[str, str] = {}
+    propagate.inject(headers, context=context)
+    return headers
+
+
+@contextmanager
+def _audit_agent_call(resource: str, token: OAuthToken) -> Iterator[None]:
+    """Token-audit hops for a call to an agent in another process: `agent_call` as the
+    request leaves, then `agent_reply` (agent -> Coordinator, no token) when it succeeds
+    or `agent_call_failed` when it errors — the A2A counterpart of tools.py's api_call.
+    Logged here, by the caller, because the receiving agent's own events
+    (validated_incoming, its LLM calls) only reach this trail when it runs on this
+    machine: an agent deployed to Agent Manager writes them to its own disk."""
+    audit = {
+        "service": "transactions-agent", "origin": "transactions-agent", "destination": resource,
+        "access_token": token.access_token, "kind": "AGENT_TOKEN", "resource": resource,
+        "requested_by": "transactions-agent",
+    }
+    emit_token_event(event="agent_call", **audit)
+    try:
+        yield
+    except Exception as e:
+        emit_token_event(
+            event="agent_call_failed", success=False,
+            error=(f"HTTP {e.response.status_code}" if isinstance(e, httpx.HTTPStatusError)
+                   else type(e).__qualname__),
+            **audit,
+        )
+        raise
+    emit_token_event(
+        service="transactions-agent", event="agent_reply",
+        origin=resource, destination="transactions-agent",
+        resource=resource, requested_by="transactions-agent",
+    )
+
+
 async def _suggest_savings_goal(
     token: OAuthToken,
     subscription_summary: str,
@@ -374,6 +477,7 @@ async def _suggest_savings_goal(
     monthly_recoverable: float,
     user_sub: str | None = None,
     transaction_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> str:
     """Call the standalone Savings Goals agent service with findings from the other
     two sub-agents and return its recommendation. A real cross-process agent call —
@@ -384,9 +488,10 @@ async def _suggest_savings_goal(
     call back to whose consented data the Coordinator is delegating, not just which
     agents were involved.
 
-    transaction_id (the Coordinator's session_id) is forwarded so the Savings Agent
-    can tag its own spans with the same Traceloop association property, since OTEL
-    context doesn't cross this process boundary on its own."""
+    transaction_id (this turn's ID) keys the Savings Agent's audit events and its per-turn
+    round cap. Tracing uses the standard headers instead: traceparent joins its spans to
+    this trace, and conversation_id (the session) travels as gen_ai.conversation.id
+    baggage — see _trace_context_headers."""
     headers = {"Authorization": f"Bearer {token.access_token}"}
     # Also sent as a header (not just in the body) so the Savings Agent's bearer-auth
     # middleware — which runs before the body is parsed — can tag its own
@@ -402,10 +507,15 @@ async def _suggest_savings_goal(
     }
     try:
         async with httpx.AsyncClient(verify=_ssl_verify) as client:
-            response = await client.post(
-                SAVINGS_AGENT_URL, headers=headers, json=payload, timeout=_SAVINGS_AGENT_TIMEOUT,
-            )
-            response.raise_for_status()
+            with (
+                _invoke_remote_agent_span("Savings Agent", _SAVINGS_AGENT_PROVIDER, SAVINGS_AGENT_URL),
+                _audit_agent_call("savings_agent", token),
+            ):
+                response = await client.post(
+                    SAVINGS_AGENT_URL, headers=headers | _trace_context_headers(conversation_id),
+                    json=payload, timeout=_SAVINGS_AGENT_TIMEOUT,
+                )
+                response.raise_for_status()
             result = response.json()
     except httpx.TransportError as e:
         # Timeout or unreachable — hand it back to the model rather than failing the turn.
@@ -459,6 +569,7 @@ class _CappedSavingsTool(SecureLangChainTool):
         self._session_context = session_context
 
     async def _arun(self, *args: Any, run_manager=None, **kwargs: Any) -> Any:
+        self._label_trace_span()  # also on refused calls, which never reach super()._arun
         self._session_context["savings_calls"] += 1
         if self._session_context["savings_calls"] > DEMO_MAX_ITERATIONS:
             logger.warning(
@@ -490,13 +601,15 @@ async def _prepare_tax_return(
     summary: dict,
     user_sub: str | None = None,
     transaction_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> str:
     """Send the per-category totals to the Ministry of Finance's Tax Agent.
 
     The cross-organisation hop. `summary` comes from session state rather than from the
     model, so the figures the ministry receives are exactly the ones computed in
     app/tax.py — the LLM cannot restate, round, or invent them. Note what is sent: gross
-    income and one total per relief category, and nothing else."""
+    income and one total per relief category, and nothing else. transaction_id and
+    conversation_id play the same roles as in _suggest_savings_goal."""
     headers = {"Authorization": f"Bearer {token.access_token}"}
     # Also sent as a header (not just in the body) so the Tax Agent's bearer-auth
     # middleware — which runs before the body is parsed — can tag its own
@@ -514,8 +627,15 @@ async def _prepare_tax_return(
         sorted(summary["qualifying_spend"]),
     )
     async with httpx.AsyncClient(verify=_ssl_verify) as client:
-        response = await client.post(TAX_AGENT_URL, headers=headers, json=payload, timeout=30.0)
-        response.raise_for_status()
+        with (
+            _invoke_remote_agent_span("Tax Agent", _TAX_AGENT_PROVIDER, TAX_AGENT_URL),
+            _audit_agent_call("tax_agent", token),
+        ):
+            response = await client.post(
+                TAX_AGENT_URL, headers=headers | _trace_context_headers(conversation_id),
+                json=payload, timeout=30.0,
+            )
+            response.raise_for_status()
         result = response.json()
     a = result["assessment"]
     return (
@@ -556,6 +676,7 @@ def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) ->
             token, summary,
             user_sub=session_context["user_sub"],
             transaction_id=session_context["transaction_id"],
+            conversation_id=session_context["conversation_id"],
         )
 
     # SummarizeDeductibleExpenses runs bank-side under the CITIZEN's consent (OBO), with
@@ -571,6 +692,7 @@ def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) ->
             "only — it does not send anything to the ministry."
         ),
         name="SummarizeDeductibleExpenses",
+        kind=ToolKind.API,
         auth=AuthSchema(auth_manager, AuthConfig(
             scopes=TAX_SCOPES,
             token_type=OAuthTokenType.OBO_TOKEN,
@@ -598,6 +720,7 @@ def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) ->
             "from the previous step, so never ask the user for them or for a tax ID."
         ),
         name="PrepareTaxReturn",
+        kind=ToolKind.AGENT,
         auth=AuthSchema(tax_auth_manager, AuthConfig(
             scopes=[],
             token_type=OAuthTokenType.AGENT_TOKEN,
@@ -714,16 +837,10 @@ def _extract_gateway_error(e: Exception) -> str | None:
             cause = getattr(cause, "__cause__", None) or getattr(cause, "__context__", None)
             continue
 
-        if status == 446:
-            logger.warning("Guardrail triggered (446): %s", body)
-            try:
-                data = parsed if parsed is not None else json.loads(body)
-                msg = data.get("message") or data.get("detail")
-                if isinstance(msg, dict):
-                    msg = msg.get("actionReason") or msg.get("action") or str(msg)
-                return msg or body or "Your request was blocked by an AI guardrail policy."
-            except Exception:
-                return body or "Your request was blocked by an AI guardrail policy."
+        reason = guardrail_reason(status, parsed if parsed is not None else body)
+        if reason:
+            logger.warning("Guardrail triggered (%s): %s", status, body)
+            return reason
         if status == 429:
             logger.warning("Rate limit hit (429): %s", body)
             return "I'm currently busy — the AI service is at capacity. Please try again in a moment."
@@ -836,13 +953,13 @@ async def run_agent(
             await websocket.send_json(TextResponse(content=MESSAGE_TOO_LONG_REPLY).model_dump())
             continue
 
-        # Fresh transaction_id per turn — each prompt gets its own trace instead of
-        # every turn in the session sharing one ID and accumulating the whole history.
+        # Fresh transaction_id per turn — the audit-log key that groups one prompt's token
+        # hops on the Token Flow page. (Traces need no ID of their own: each turn is its own
+        # trace, and gen_ai.conversation.id groups the session's turns.)
         turn_id = str(uuid.uuid4())
         if session_context is not None:
             session_context["transaction_id"] = turn_id
             session_context["savings_calls"] = 0
-        Traceloop.set_association_properties({"transaction_id": turn_id})
         set_transaction(turn_id)
 
         try:
@@ -890,6 +1007,8 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     """WebSocket endpoint for the Transaction Assistant chat."""
     session_id = str(uuid.uuid4())
     set_session(session_id)
+    # OTel GenAI gen_ai.conversation.id on every span of this session, across turns.
+    set_conversation_id(session_id)
 
     async def message_handler(message: AuthRequestMessage):
         """Send OBO auth request to the frontend over this session's WebSocket."""
@@ -909,14 +1028,15 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # Captures the end user's identity (decoded from the OBO token, never LLM-supplied)
     # the first time an OBO-authenticated tool runs, so SuggestSavingsGoal's call to the
     # standalone Savings Agent can be traced back to whose consented data is involved.
-    # transaction_id is refreshed per turn in run_agent (not per session) so each prompt
-    # gets its own trace instead of accumulating the whole conversation under one ID.
-    # tax_summary holds the aggregates computed by SummarizeDeductibleExpenses so that
+    # transaction_id is refreshed per turn in run_agent (not per session) so the audit log
+    # groups each prompt's hops separately; conversation_id is the session, forwarded to
+    # the remote agents as gen_ai.conversation.id baggage. tax_summary holds the aggregates computed by SummarizeDeductibleExpenses so that
     # PrepareTaxReturn sends the figures that were actually computed from the user's
     # transactions, rather than whatever the model paraphrased back into its arguments.
     # savings_calls counts SuggestSavingsGoal calls this turn for _CappedSavingsTool.
     session_context: dict = {
-        "user_sub": None, "transaction_id": None, "tax_summary": None, "savings_calls": 0,
+        "user_sub": None, "transaction_id": None, "conversation_id": session_id,
+        "tax_summary": None, "savings_calls": 0,
     }
 
     async def _analyze_subscriptions_traced(token: OAuthToken) -> str:
@@ -937,6 +1057,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             token, subscription_summary, spending_summary, monthly_recoverable,
             user_sub=session_context["user_sub"],
             transaction_id=session_context["transaction_id"],
+            conversation_id=session_context["conversation_id"],
         )
 
     # Wire the transactions tool with OBO token auth
@@ -950,6 +1071,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "spending history, or account activity."
         ),
         name="GetMyTransactions",
+        kind=ToolKind.API,
         auth=AuthSchema(auth_manager, AuthConfig(
             scopes=["read_transactions"],
             token_type=OAuthTokenType.OBO_TOKEN,
@@ -963,6 +1085,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         get_my_profile,
         description=GET_MY_PROFILE_DESCRIPTION,
         name="GetMyProfile",
+        kind=ToolKind.API,
         auth=AuthSchema(auth_manager, PROFILE_AUTH_CONFIG)
     )
 
@@ -970,6 +1093,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         update_my_profile,
         description=UPDATE_MY_PROFILE_DESCRIPTION,
         name="UpdateMyProfile",
+        kind=ToolKind.API,
         auth=AuthSchema(auth_manager, UPDATE_PROFILE_AUTH_CONFIG)
     )
 
@@ -984,6 +1108,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "or asks what they're being charged for repeatedly."
         ),
         name="AnalyzeSubscriptions",
+        kind=ToolKind.SUBAGENT,
         auth=AuthSchema(auth_manager, AuthConfig(
             scopes=["read_transactions"],
             token_type=OAuthTokenType.OBO_TOKEN,
@@ -999,6 +1124,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "check-up or asks how their spending has changed recently."
         ),
         name="AnalyzeSpendingHealth",
+        kind=ToolKind.SUBAGENT,
         auth=AuthSchema(auth_manager, AuthConfig(
             scopes=["read_transactions"],
             token_type=OAuthTokenType.OBO_TOKEN,
@@ -1022,6 +1148,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "phone numbers, or available services near a city."
         ),
         name="GetAgencies",
+        kind=ToolKind.MCP,
         auth=AuthSchema(mcp_auth_manager, AuthConfig(
             scopes=[],
             token_type=OAuthTokenType.AGENT_TOKEN,
@@ -1051,6 +1178,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
             "and a friendly recommendation message."
         ),
         name="SuggestSavingsGoal",
+        kind=ToolKind.AGENT,
         auth=AuthSchema(savings_auth_manager, AuthConfig(
             scopes=[],
             token_type=OAuthTokenType.AGENT_TOKEN,
@@ -1082,10 +1210,13 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # never finish.
     tools.extend(tax_tools)
 
+    # name= becomes gen_ai.agent.name on the LangGraph instrumentation's invoke_agent span
+    # (otherwise the generic "LangGraph"); run_name names the LangChain workflow span.
     graph = create_agent(
         active_llm,
         tools,
         system_prompt=agent_system_prompt + _COORDINATOR_ADDENDUM,
+        name="banking_assistant",
     ).with_config(run_name="banking_assistant")
 
     chat_history: List = []

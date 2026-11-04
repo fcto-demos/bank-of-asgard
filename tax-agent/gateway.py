@@ -107,3 +107,27 @@ class GatewayBearerAuth(httpx.Auth):
             access_token=token, resource="llm_gateway", requested_by="savings-goals-agent",
         )
         yield request
+
+
+class GatewayApiKeyAuth(httpx.Auth):
+    """httpx auth handler that injects a static gateway API key on every LLM request.
+
+    The alternative to GatewayBearerAuth for gateways that issue API keys per LLM proxy
+    (the WSO2 AI Gateway's default, see gateway-setup/). Copied from
+    savings-goals-agent/gateway.py. The key itself is never logged — audit_log
+    fingerprints it the same way it does a token.
+    """
+
+    def __init__(self, api_key: str, header_name: str = "X-API-Key"):
+        self._api_key = api_key
+        self._header_name = header_name
+
+    async def async_auth_flow(self, request):
+        request.headers[self._header_name] = self._api_key
+        emit_token_event(
+            service="tax-agent", event="llm_call",
+            origin="tax-agent", destination="wso2-gateway",
+            access_token=self._api_key, kind="API_KEY",
+            resource="llm_gateway", requested_by="tax-agent",
+        )
+        yield request

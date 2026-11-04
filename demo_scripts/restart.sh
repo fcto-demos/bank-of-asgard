@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # restart.sh — stop and restart a single Bank of Asgard service
 # Usage: ./demo_scripts/restart.sh <service>
-# Services: transactions-api | agent | mcp | savings | tax | server | frontend
+# Services: transactions-api | agent | mcp | savings | tax | server | frontend | presentation
 
 set -euo pipefail
 
@@ -18,8 +18,9 @@ PORT_SAVINGS=8013
 PORT_TAX=8014
 PORT_SERVER=3002
 PORT_FRONTEND=5173
+PORT_SLIDES=8027
 
-# Native launches bind the standalone Python services (MCP, savings, tax) to localhost
+# Native launches bind the standalone Python services (API, MCP, savings, tax) to localhost
 # only — on a public VM their ports would otherwise be reachable directly. Override with
 # BIND_HOST=0.0.0.0 if something off-host (e.g. a container) must reach them.
 export BIND_HOST="${BIND_HOST:-127.0.0.1}"
@@ -38,7 +39,7 @@ show_help() {
     echo ""
     echo -e "${BOLD}Usage:${NC} ./demo_scripts/restart.sh <service>"
     echo ""
-    echo -e "  ${BOLD}service${NC}   transactions-api | agent | mcp | savings | tax | server | frontend"
+    echo -e "  ${BOLD}service${NC}   transactions-api | agent | mcp | savings | tax | server | frontend | presentation"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
     echo "  ./demo_scripts/restart.sh agent"
@@ -165,7 +166,7 @@ case "$SERVICE" in
         free_port $PORT_API
         TXAPI_PY="$ROOT/transactions-api/venv/bin/python"
         [[ -f "$TXAPI_PY" ]] || die "transactions-api venv not found"
-        (cd "$ROOT/transactions-api" && "$TXAPI_PY" -m uvicorn app.main:app --port "$PORT_API" \
+        (cd "$ROOT/transactions-api" && "$TXAPI_PY" -m uvicorn app.main:app --host "$BIND_HOST" --port "$PORT_API" \
             > "$LOG_DIR/transactions-api.log" 2>&1) &
         register_pid "transactions-api" "$!"
         check_launched "$!" "transactions-api"
@@ -178,6 +179,8 @@ case "$SERVICE" in
         [[ -n "$AGENT" ]]    || die "AGENT not set in .demo.context — re-run start-demo.sh"
         [[ -n "$USE_AMP" ]]  || die "USE_AMP not set in .demo.context — re-run start-demo.sh"
         AMP_LABEL=$( [[ "$USE_AMP" == "true" ]] && echo "AMP enabled" || echo "AMP disabled" )
+        HTTP_TRACING="${HTTP_TRACING:-false}"
+        [[ "$HTTP_TRACING" == "true" ]] && AMP_LABEL="$AMP_LABEL + HTTP tracing"
         DEMO_VERSION="${DEMO_VERSION:-v1}"
         section "Restarting $AGENT_ARG (port $PORT_AGENT)"
         ok "Framework: $AGENT_ARG  |  $AMP_LABEL  |  Demo version: $DEMO_VERSION"
@@ -203,6 +206,8 @@ case "$SERVICE" in
             fi
             (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY DEMO_VERSION
              if [[ -n "$AGENT_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$AGENT_OTEL_CERT"; fi
+             # --http-tracing (from .demo.context): see start-demo.sh for why both are exported here.
+             if [[ "$HTTP_TRACING" == "true" ]]; then export HTTP_CLIENT_TRACING=true OTEL_SEMCONV_STABILITY_OPT_IN=http; fi
              cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" \
                 "$AMP_INSTRUMENT" "$UVICORN" service:app \
                 --app-dir "$AGENT" --port "$PORT_AGENT" \
@@ -337,8 +342,20 @@ case "$SERVICE" in
         LOG_FILE="$LOG_DIR/frontend.log"
         ;;
 
+    presentation)
+        section "Restarting presentation server (port $PORT_SLIDES)"
+        stop_service "presentation"
+        free_port $PORT_SLIDES
+        (cd "$ROOT/agent-manager-chef" && python3 serve.py "$PORT_SLIDES" \
+            > "$LOG_DIR/presentation.log" 2>&1) &
+        register_pid "presentation" "$!"
+        check_launched "$!" "presentation"
+        wait_for_http "http://localhost:$PORT_SLIDES/token-flow.html" "presentation"
+        LOG_FILE="$LOG_DIR/presentation.log"
+        ;;
+
     *)
-        die "Unknown service '$SERVICE'. Choose: transactions-api, agent, mcp, savings, server, frontend"
+        die "Unknown service '$SERVICE'. Choose: transactions-api, agent, mcp, savings, tax, server, frontend, presentation"
         ;;
 esac
 

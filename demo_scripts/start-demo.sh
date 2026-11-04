@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # start-demo.sh — Bank of Asgard full-stack demo launcher
 # Starts: transactions-api → selected agent → agencies-mcp-server → server → frontend
+#         → presentation server (Token Flow + Inside our agents pages)
 # Logs go to .demo-logs/  PIDs tracked in .demo.pids
 
 set -euo pipefail
@@ -18,8 +19,9 @@ PORT_AGENT=8011
 PORT_MCP=8012
 PORT_SAVINGS=8013
 PORT_TAX=8014
+PORT_SLIDES=8027
 
-# Native launches bind the standalone Python services (MCP, savings, tax) to localhost
+# Native launches bind the standalone Python services (API, MCP, savings, tax) to localhost
 # only — on a public VM their ports would otherwise be reachable directly. Override with
 # BIND_HOST=0.0.0.0 if something off-host (e.g. a container) must reach them.
 export BIND_HOST="${BIND_HOST:-127.0.0.1}"
@@ -49,7 +51,10 @@ show_help() {
     echo "                     Requires: amp-instrumentation installed in both agent venvs"
     echo "                               AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in transactions-agent/.env"
     echo "                               AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in savings-goals-agent/.env"
-    echo "  --v1 | --v2        Demo-only regression toggle for tracing/eval demos (default: v1)"
+    echo "  --http-tracing     With --amp, langchain only: also emit OTel HTTP client spans for"
+    echo "                     httpx calls (stable HTTP semconv) and propagate traceparent."
+    echo "                     Off by default — Agent Manager doesn't consume these spans yet."
+    echo "  --v1 | --v2       Demo-only regression toggle for tracing/eval demos (default: v1)"
     echo "                     v2 deliberately degrades token usage and latency (bloated system"
     echo "                     prompt + over-fetching GetMyTransactions) to show up in traces,"
     echo "                     and turns the Savings Goals agent rogue: it never proposes a goal"
@@ -67,12 +72,14 @@ show_help() {
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 USE_AMP=false
+HTTP_TRACING=false
 AGENT_ARG=""
 ENV_PROFILE=""
 DEMO_VERSION="v1"
 for arg in "$@"; do
     case "$arg" in
         --amp)          USE_AMP=true ;;
+        --http-tracing) HTTP_TRACING=true ;;
         --env=is)       ENV_PROFILE="is" ;;
         --env=asgardeo) ENV_PROFILE="asgardeo" ;;
         --v1)           DEMO_VERSION="v1" ;;
@@ -135,6 +142,11 @@ elif $AMP_SUPPORTED && ! $USE_AMP; then
     echo ""
     read -rp "  Enable AMP (Agent Manager) instrumentation? [y/N]: " amp_choice
     [[ "$amp_choice" =~ ^[Yy]$ ]] && USE_AMP=true || true
+fi
+
+if $HTTP_TRACING && { ! $USE_AMP || [[ "$AGENT" != "langchain-agent" ]]; }; then
+    warn "--http-tracing needs --amp with the langchain agent. Skipping."
+    HTTP_TRACING=false
 fi
 
 # ── MCP server paths ──────────────────────────────────────────────────────────
@@ -256,6 +268,7 @@ cat > "$ROOT/.demo.context" <<EOF
 AGENT=$AGENT
 AGENT_ARG=$AGENT_ARG
 USE_AMP=$USE_AMP
+HTTP_TRACING=$HTTP_TRACING
 ENV_PROFILE=$ENV_PROFILE
 DEMO_VERSION=$DEMO_VERSION
 EOF
@@ -321,7 +334,7 @@ section "Starting transactions-api (port $PORT_API)"
 
 TXAPI_PY="$ROOT/transactions-api/venv/bin/python"
 [[ -f "$TXAPI_PY" ]] || die "transactions-api venv not found — run: cd transactions-api && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
-(cd "$ROOT/transactions-api" && "$TXAPI_PY" -m uvicorn app.main:app --port "$PORT_API" \
+(cd "$ROOT/transactions-api" && "$TXAPI_PY" -m uvicorn app.main:app --host "$BIND_HOST" --port "$PORT_API" \
     > "$LOG_DIR/transactions-api.log" 2>&1) &
 echo "transactions-api:$!" >> "$PID_FILE"
 
@@ -351,6 +364,10 @@ if $USE_AMP; then
     # service at a CA bundle chosen for a different service's endpoint.
     (export AMP_OTEL_ENDPOINT AMP_AGENT_API_KEY DEMO_VERSION
      if [[ -n "$AGENT_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$AGENT_OTEL_CERT"; fi
+     # --http-tracing: httpx client spans (service.py) with stable HTTP semconv names. The
+     # opt-in must be set before amp-instrument starts — OTel reads it once, when the first
+     # instrumentor initialises — and it renames Traceloop's requests/urllib3 spans too.
+     if $HTTP_TRACING; then export HTTP_CLIENT_TRACING=true OTEL_SEMCONV_STABILITY_OPT_IN=http; fi
      cd "$AGENT_DIR" && PYTHONPATH="$AGENT_DIR" "$AMP_INSTRUMENT" "$UVICORN" service:app \
         --app-dir "$AGENT" --port "$PORT_AGENT" \
         > "$LOG_DIR/agent.log" 2>&1) &
@@ -461,6 +478,19 @@ echo "frontend:$!" >> "$PID_FILE"
 
 wait_for_http "http://localhost:$PORT_FRONTEND" "frontend" 90
 
+# ── Start presentation server (agent-manager-chef) ────────────────────────────
+# Serves the animated Token Flow page (reads .demo-logs/token-audit.jsonl) and the
+# "Inside our agents" slide (reads Agent Manager through amctl). Standard library only,
+# bound to 127.0.0.1 by serve.py itself.
+section "Starting presentation server (port $PORT_SLIDES)"
+
+(cd "$ROOT/agent-manager-chef" && python3 serve.py "$PORT_SLIDES" \
+    > "$LOG_DIR/presentation.log" 2>&1) &
+echo "presentation:$!" >> "$PID_FILE"
+check_launched "$!" "presentation server" "$LOG_DIR/presentation.log"
+
+wait_for_http "http://localhost:$PORT_SLIDES/token-flow.html" "presentation"
+
 # ── Remove error trap now that everything is up ───────────────────────────────
 trap - ERR INT TERM
 
@@ -476,6 +506,8 @@ echo -e "  ${BOLD}Agent ($AGENT_ARG)${NC}           ws://localhost:$PORT_AGENT"
 echo -e "  ${BOLD}Agencies MCP${NC}         sse://localhost:$PORT_MCP"
 echo -e "  ${BOLD}Savings Goals agent${NC} http://localhost:$PORT_SAVINGS"
 $TAX_ENABLED && echo -e "  ${BOLD}Tax agent ${NC} http://localhost:$PORT_TAX" || true
+echo -e "  ${BOLD}Token Flow${NC}           http://localhost:$PORT_SLIDES/token-flow.html"
+echo -e "  ${BOLD}Inside our agents${NC}    http://localhost:$PORT_SLIDES/inside-our-agents.html  (needs an amctl session)"
 echo -e "  ${BOLD}LLM${NC}                  $LLM_PROVIDER / $LLM_MODEL${LLM_VIA}"
 echo -e "  ${BOLD}IDP environment${NC}      ${ENV_PROFILE:-existing}"
 [[ "$AGENT" == "strands-agent" ]] && echo -e "  ${BOLD}AWS branding${NC}         enabled" || echo -e "  ${BOLD}AWS branding${NC}         disabled"
@@ -490,5 +522,6 @@ echo -e "    ${BLUE}$LOG_DIR/savings.log${NC}"
 $TAX_ENABLED && echo -e "    ${BLUE}$LOG_DIR/tax.log${NC}" || true
 echo -e "    ${BLUE}$LOG_DIR/server.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/frontend.log${NC}"
+echo -e "    ${BLUE}$LOG_DIR/presentation.log${NC}"
 echo -e "  To stop: ${BLUE}./demo_scripts/stop-demo.sh${NC}"
 echo ""
