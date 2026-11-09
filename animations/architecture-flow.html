@@ -1,0 +1,1469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+/* ---------- Animated architecture: every Bank of Asgard component, and a sample request
+   travelling through them ----------
+   Companion to token-flow.html: same engine (a chip per hop, coloured by token type,
+   flying a bowed lane; checks as a badge on the receiver; a wallet of held tokens under
+   each system), but the scenarios are scripted from the code instead of read from the
+   audit log, so every hop is shown (remote agents keep their own steps on their own
+   disk) and the page works offline. Sources are noted next to each scenario below. */
+:root {
+  --mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  --fail: #ff5a4f;
+}
+/* Dark (default): dark page, dark stage. */
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
+  /* page chrome */
+  --page: #15110a; --ink: #efe6d2; --muted: #a8956c; --gold: #d2ac57; --hint: #7d6a47;
+  --accent: #b8913f; --on-accent: #1a140b;
+  --panel: #1c170f; --panel-2: #17130c; --line: rgba(199,162,76,.24); --line-soft: rgba(199,162,76,.12);
+  --control: #221c12; --control-on: #efe6d2; --control-on-text: #1a140b;
+  --hover: rgba(199,162,76,.07); --current: rgba(199,162,76,.15); --chip-bg: rgba(199,162,76,.1);
+  --bubble-bot: #241d12; --consent-bg: rgba(199,162,76,.1); --done-bg: rgba(111,174,111,.14); --done-line: #6fae6f;
+  /* stage */
+  --stage: #120e08; --stage-2: #1d170e; --stage-line: rgba(199,162,76,.22); --now-bg: rgba(18,14,8,.82);
+  --node: #241d12; --node-sub: #1f190f; --node-active: #2d2416; --node-line: rgba(199,162,76,.45);
+  --node-text: #faf5e9; --node-role: #b39a6a; --node-extra: #8a7550; --icon: #c7a24c; --idle: .34;
+  --wire: rgba(199,162,76,.14); --wire-live: rgba(199,162,76,.3);
+  --z-gold: #c7a24c; --z-wso2: #ff8a3d; --z-model: #f472b6; --z-mof: #8fb8ff; --z-obs: #9fb4cf;
+  --zone-fill: 4%; --zone-stroke: 62%; --zone-text: 92%;
+  --pill-text: #1a140b; --halo: .28;
+  /* token kinds */
+  --obo: #f2c14e; --agent: #4fd1e8; --key: #b18cff; --call: #d9cfb8;
+  --user: #8be28b; --app: #ff9f5a; --up: #f472b6; --trace: #9fb4cf;
+}
+/* Light: cream page, light stage, deeper token colours for contrast on a light ground. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page: #f6f0e1; --ink: #463a24; --muted: #8a7a58; --gold: #997029; --hint: #a8996f;
+  --accent: #997029; --on-accent: #fff;
+  --panel: #fffdf8; --panel-2: #fbf6ea; --line: rgba(70,58,36,.22); --line-soft: rgba(70,58,36,.1);
+  --control: #fff; --control-on: #463a24; --control-on-text: #faf5e9;
+  --hover: #fbf7ec; --current: #f8f0db; --chip-bg: #fff8e6;
+  --bubble-bot: #fff; --consent-bg: #fff8e6; --done-bg: #f2fbf1; --done-line: #8bc48b;
+  --stage: #fbf8f0; --stage-2: #fffdf8; --stage-line: rgba(153,112,41,.3); --now-bg: rgba(255,253,248,.9);
+  --node: #fffdf8; --node-sub: #fbf6ea; --node-active: #fff3d6; --node-line: rgba(153,112,41,.5);
+  --node-text: #2b2416; --node-role: #7d6a47; --node-extra: #9a8862; --icon: #997029; --idle: .42;
+  --wire: rgba(120,90,30,.2); --wire-live: rgba(120,90,30,.38);
+  --z-gold: #9a7428; --z-wso2: #d4621a; --z-model: #c43d86; --z-mof: #3c6fd1; --z-obs: #5b7290;
+  --zone-fill: 4%; --zone-stroke: 70%; --zone-text: 100%;
+  --pill-text: #1a140b; --halo: .2;
+  --obo: #e8b130; --agent: #22b8d6; --key: #a37ff0; --call: #c9b98f;
+  --user: #5cc76a; --app: #f58a3d; --up: #ee5fa7; --trace: #7d96b8;
+}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; background: var(--page); color: var(--ink); font: 14px/1.4 'Inter', 'Segoe UI', Roboto, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+
+/* Header: title, scenario picker, playback controls, view toggles. */
+.af-head > div:first-child { min-width: 0; }
+.af-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 20px 6px; }
+.af-title { color: var(--gold); font-weight: 700; font-size: 1.1rem; letter-spacing: .04em; text-transform: uppercase; }
+.af-sub { color: var(--muted); font-size: 12.5px; }
+.af-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.af-select, .af-btn { height: 32px; border: 1px solid var(--line); border-radius: 6px; background: var(--control); color: var(--ink); font: 500 13px 'Inter', sans-serif; }
+.af-select { min-width: 300px; max-width: 100%; padding: 0 10px; }
+.af-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 36px; padding: 0 10px; cursor: pointer; }
+.af-btn:hover { border-color: var(--gold); }
+.af-btn.is-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); min-width: 88px; }
+.af-btn svg { width: 16px; height: 16px; fill: currentColor; }
+.af-btn svg.is-line { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.af-btn[aria-pressed="true"] { background: var(--control-on); border-color: var(--control-on); color: var(--control-on-text); }
+.af-view { display: inline-flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--line); }
+.af-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--control); }
+.af-seg button { height: 30px; padding: 0 10px; border: 0; background: var(--control); color: var(--ink); font: 600 12px var(--mono); cursor: pointer; white-space: nowrap; }
+.af-seg button + button { border-left: 1px solid var(--line-soft); }
+.af-seg button[aria-pressed="true"] { background: var(--control-on); color: var(--control-on-text); }
+.af-seg[aria-disabled="true"] { opacity: .4; pointer-events: none; }
+
+/* Options: what the scripted run assumes. */
+.af-opts { display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap; padding: 0 20px 10px; }
+.af-opt { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+
+/* Body: stage on the left, chat + hop list on the right (hideable: .is-full). */
+.af-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; padding: 0 20px; }
+.af-main.is-full { grid-template-columns: minmax(0, 1fr); }
+.af-main.is-full .af-side { display: none; }
+.af-stage { position: relative; min-width: 0; min-height: 380px; border-radius: 12px; overflow: hidden; background: radial-gradient(ellipse at 50% 45%, var(--stage-2), var(--stage) 70%); box-shadow: inset 0 0 0 1px var(--stage-line); }
+.af-stage svg.af-svg { position: absolute; inset: 62px 0 0; width: 100%; height: calc(100% - 62px); }
+
+/* "Now playing" banner across the top of the stage. */
+.af-now { position: absolute; z-index: 2; left: 12px; right: 12px; top: 10px; display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 6px 12px; border: 1px solid var(--stage-line); border-radius: 10px; background: var(--now-bg); color: var(--node-text); backdrop-filter: blur(6px); }
+.af-now-n { flex: none; display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 14px; background: var(--c, var(--call)); color: var(--pill-text); font: 700 12px var(--mono); }
+.af-now-text { min-width: 0; }
+.af-now-label { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.af-now-meta { color: var(--node-role); font: 500 12px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.af-now-clock { margin-left: auto; flex: none; color: var(--gold); font: 700 14px var(--mono); }
+
+/* SVG: zones, wires, lanes, nodes, wallets, tokens. */
+.zone { --z: var(--z-gold); }
+.zone.is-wso2 { --z: var(--z-wso2); }
+.zone.is-model { --z: var(--z-model); }
+.zone.is-mof { --z: var(--z-mof); }
+.zone.is-obs { --z: var(--z-obs); }
+.zone rect { fill: color-mix(in srgb, var(--z) var(--zone-fill), transparent); stroke: color-mix(in srgb, var(--z) var(--zone-stroke), transparent); stroke-width: 1.8; stroke-dasharray: 8 5; }
+.zone text { fill: color-mix(in srgb, var(--z) var(--zone-text), transparent); font: 700 11.5px var(--mono); letter-spacing: .2em; }
+.zone.is-inner rect { fill: color-mix(in srgb, var(--z) 5%, transparent); stroke-width: 1.3; stroke-dasharray: 3 4; }
+.zone.is-inner text { font-size: 10px; letter-spacing: .14em; }
+.zone.is-mof rect { stroke-width: 2.2; stroke-dasharray: 10 5; }
+.zone-note { fill: color-mix(in srgb, var(--z-mof) 85%, transparent); font: 500 10px var(--mono); }
+
+.wire { fill: none; stroke: var(--wire); stroke-width: 1.2; }
+.wire.is-live { stroke: var(--wire-live); }
+.lane { fill: none; stroke: var(--c, var(--wire-live)); stroke-width: 1.6; opacity: 0; transition: opacity .3s; }
+.lane.is-used { opacity: .25; stroke-dasharray: 2 5; }
+.lane.is-hot { opacity: .65; stroke-width: 2; stroke-dasharray: 6 8; animation: laneFlow .9s linear infinite; }
+@keyframes laneFlow { to { stroke-dashoffset: -28; } }
+
+.node { transition: opacity .35s; }
+.node.is-idle { opacity: var(--idle); }
+.node-box { fill: var(--node); stroke: var(--node-line); stroke-width: 1.2; transition: stroke .25s, fill .25s; }
+.node.is-hub .node-box { stroke: var(--z-gold); stroke-width: 1.8; filter: drop-shadow(0 0 14px rgba(199,162,76,.25)); }
+.node.is-sub .node-box { fill: var(--node-sub); stroke-dasharray: 4 3; }
+.node.is-band .node-box { fill: var(--node-sub); stroke: color-mix(in srgb, var(--z-obs) 55%, transparent); }
+.node.is-mof .node-box { stroke: color-mix(in srgb, var(--z-mof) 70%, transparent); }
+.node.is-active .node-box { stroke: var(--c, var(--z-gold)); fill: var(--node-active); stroke-dasharray: none; stroke-width: 1.8; }
+.node-icon { fill: none; stroke: var(--icon); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.node.is-mof .node-icon { stroke: var(--z-mof); }
+.node.is-band .node-icon { stroke: var(--z-obs); }
+.node-name { fill: var(--node-text); font: 600 14px 'Inter', sans-serif; }
+.node.is-hub .node-name { font-size: 17px; font-weight: 700; }
+.node.is-sub .node-name { font-size: 13px; }
+.node-role { fill: var(--node-role); font: 500 10px var(--mono); letter-spacing: .04em; }
+.node-extra { fill: var(--node-extra); font: 500 10px var(--mono); }
+.node-pulse { fill: none; stroke: var(--c); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.node-pulse.go { animation: nodePulse .7s ease-out; }
+@keyframes nodePulse { from { opacity: .9; transform: scale(1); } to { opacity: 0; transform: scale(1.14, 1.45); } }
+
+.wallet-chip rect { fill: color-mix(in srgb, var(--c) 18%, transparent); stroke: var(--c); stroke-width: 1; }
+.wallet-chip text { fill: var(--c); font: 700 11.5px var(--mono); }
+.wallet-chip { transform-box: fill-box; transform-origin: center; }
+.wallet-chip.is-new { animation: chipIn .45s cubic-bezier(.2,.9,.3,1.4); }
+.wallet-chip.is-used { animation: chipUse .6s ease-out; }
+@keyframes chipIn { from { transform: scale(.2); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes chipUse { 50% { transform: scale(1.25); } }
+
+.token-halo { fill: var(--c); opacity: var(--halo); }
+.token-pill { fill: var(--c); }
+.token-text { fill: var(--pill-text); font: 800 13.5px var(--mono); letter-spacing: .04em; }
+/* OAuth protocol steps (consent, challenge, code, exchange request) are outlined; tokens are solid. */
+.is-step .token-halo { opacity: .14; }
+.is-step .token-pill { fill: var(--stage); stroke: var(--c); stroke-width: 2.5; stroke-dasharray: 7 4; }
+.is-step .token-text { fill: var(--c); }
+.trail { fill: none; stroke: var(--c); stroke-width: 4; stroke-linecap: round; opacity: .85; }
+/* A check run by the receiver: a badge on that system, not a flight. */
+.check { transform-box: fill-box; transform-origin: center; animation: checkIn .45s cubic-bezier(.2,.9,.3,1.3) both; }
+.check.is-leaving { animation: checkOut .5s ease-in forwards; }
+@keyframes checkIn { from { opacity: 0; transform: translateY(10px) scale(.6); } to { opacity: 1; transform: none; } }
+@keyframes checkOut { to { opacity: 0; transform: translateY(-8px); } }
+.check-pill { fill: var(--stage); stroke: var(--c); stroke-width: 2; }
+.check.is-work .check-pill { stroke-dasharray: 3 3; }
+.check-mark { fill: none; stroke: var(--c); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.check-text { fill: var(--c); font: 800 12.5px var(--mono); letter-spacing: .04em; }
+/* On a light ground, text drawn in a token colour is darkened to stay readable. */
+:root[data-theme="light"] :is(.wallet-chip text, .is-step .token-text, .check-text) { fill: color-mix(in srgb, var(--c) 58%, #000); }
+:root[data-theme="light"] .check-mark { stroke: color-mix(in srgb, var(--c) 70%, #000); }
+:root[data-theme="light"] .check-pill { fill: #fff; }
+
+/* Right column: the assistant chat as the user sees it, then the hop list. */
+.af-side { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.af-card { min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--panel); }
+.af-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font: 600 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.af-chat { flex: 1 1 55%; }
+.af-hopcard { flex: 1 1 45%; }
+.chat-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; background: linear-gradient(var(--panel), var(--panel-2)); }
+.chat-empty { margin: auto; color: var(--muted); font-size: 12.5px; text-align: center; }
+.msg { max-width: 88%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.45; animation: msgIn .3s ease-out; }
+@keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.msg.is-user { align-self: flex-end; background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 4px; }
+.msg.is-bot { align-self: flex-start; background: var(--bubble-bot); border: 1px solid var(--line-soft); border-bottom-left-radius: 4px; }
+.msg.is-bot p + p, .msg.is-bot p + ul, .msg.is-bot ul + p { margin-top: 6px; }
+.msg.is-bot ul { padding-left: 16px; }
+.msg.is-bot li + li { margin-top: 3px; }
+.msg-who { display: block; margin-bottom: 2px; color: var(--gold); font: 700 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.msg .w { opacity: 0; animation: wordIn .25s ease-out forwards; }
+@keyframes wordIn { to { opacity: 1; } }
+.msg-note { align-self: center; color: var(--muted); font: italic 500 12px 'Inter', sans-serif; text-align: center; }
+.consent { align-self: stretch; padding: 10px 12px; border: 1.5px solid var(--z-gold); border-radius: 10px; background: var(--consent-bg); font-size: 12.5px; animation: msgIn .3s ease-out; }
+.consent-title { font-weight: 700; }
+.consent-scopes { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 8px; }
+.consent-scopes span, .hop-scopes span { padding: 1px 7px; border: 1px solid var(--z-gold); border-radius: 999px; background: var(--chip-bg); font: 500 11px var(--mono); }
+.consent-btn { display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font: 600 12px 'Inter', sans-serif; }
+.consent.is-pressing .consent-btn { animation: press .9s ease-in-out infinite; }
+@keyframes press { 50% { transform: scale(.94); box-shadow: 0 0 0 5px rgba(199,162,76,.35); } }
+.consent.is-done { border-color: var(--done-line); background: var(--done-bg); }
+.consent.is-done .consent-btn { background: #5c9e5c; color: #fff; }
+.typing { align-self: flex-start; display: inline-flex; gap: 4px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--bubble-bot); }
+.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: dot 1s ease-in-out infinite; }
+.typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 60%, 100% { opacity: .25; transform: none; } 30% { opacity: 1; transform: translateY(-3px); } }
+.chat-foot { padding: 6px 14px; border-top: 1px solid var(--line-soft); color: var(--hint); font: 500 10.5px var(--mono); }
+
+.af-hops { flex: 1; min-height: 0; overflow-y: auto; list-style: none; padding: 6px 0; }
+.hop { display: grid; grid-template-columns: 30px 1fr; gap: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer; opacity: .42; transition: opacity .25s, background .25s; }
+.hop:hover { background: var(--hover); }
+.hop.is-done { opacity: 1; }
+.hop.is-current { opacity: 1; background: var(--current); box-shadow: inset 3px 0 0 var(--c); }
+.hop-n { display: grid; place-items: center; width: 28px; height: 22px; border-radius: 11px; background: var(--c); color: var(--pill-text); font: 700 10.5px var(--mono); }
+.hop.is-step .hop-n { background: transparent; box-shadow: inset 0 0 0 2px var(--c); color: var(--ink); }
+.hop-chip { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--c); color: var(--pill-text); font: 700 10px/16px var(--mono); vertical-align: 1px; }
+.hop.is-step .hop-chip { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); color: var(--ink); }
+.hop-label { font-weight: 600; }
+.hop-route { color: var(--muted); font-size: 12px; }
+.hop-meta { margin-top: 1px; color: var(--node-extra); font: 500 11px var(--mono); word-break: break-word; }
+.hop-scopes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+
+/* Footer: legend, then one tick per step. */
+.af-foot { padding: 8px 20px 12px; }
+.af-legend { display: flex; gap: 6px 14px; flex-wrap: wrap; margin-bottom: 8px; color: var(--muted); font: 500 11.5px var(--mono); }
+.af-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.af-legend i { width: 18px; height: 9px; border-radius: 5px; background: var(--c); }
+.af-legend i.is-step { background: transparent; border: 1.5px dashed var(--muted); }
+.af-legend i.is-badge { width: 16px; height: 16px; border-radius: 50%; background: transparent; border: 2px solid var(--muted); }
+.af-hint { margin-left: auto; color: var(--hint); }
+.af-timeline { display: flex; align-items: center; gap: 12px; }
+.af-ticks { flex: 1; display: flex; gap: 3px; height: 16px; }
+.tick { flex: 1; min-width: 3px; border: 0; border-radius: 3px; background: var(--c); opacity: .25; cursor: pointer; transition: opacity .2s, transform .2s; }
+.tick.is-done { opacity: .9; }
+.tick.is-step { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.tick.is-par { background: linear-gradient(var(--c) 0 45%, transparent 45% 55%, var(--c) 55%); }
+.tick.is-current { opacity: 1; transform: scaleY(1.35); box-shadow: 0 0 0 2px var(--ink); }
+.af-count { min-width: 72px; color: var(--muted); font: 600 12px var(--mono); text-align: right; }
+
+.af-zoom { position: absolute; z-index: 2; right: 12px; bottom: 12px; display: flex; gap: 6px; }
+.af-zoom .af-seg button { height: 30px; min-width: 32px; font-size: 13px; }
+.af-zoom .af-btn { height: 32px; font: 600 12px var(--mono); }
+.af-zoom-level { align-self: center; min-width: 44px; color: var(--node-role); font: 600 11px var(--mono); text-align: right; }
+.af-stage svg.af-svg { cursor: grab; touch-action: none; }
+.af-stage svg.af-svg.is-dragging { cursor: grabbing; }
+
+@media (max-width: 1100px) {
+  html, body { height: auto; }
+  .af-main { flex: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
+  .af-stage { align-self: start; min-height: 0; aspect-ratio: 16 / 10; }
+  .af-side { flex-direction: row; height: 360px; }
+  .af-side > * { flex: 1 1 50%; min-width: 0; }
+  .af-legend .af-hint { display: none; }
+}
+@media (max-width: 640px) {
+  .af-head, .af-opts, .af-main, .af-foot { padding-left: 16px; padding-right: 16px; }
+  .af-select { min-width: 0; width: 100%; }
+  .af-tools { margin-left: 0; }
+  .af-now { position: static; margin: 8px; }
+  .af-stage { aspect-ratio: auto; display: flex; flex-direction: column; }
+  .af-stage svg.af-svg { position: static; height: auto; aspect-ratio: 16 / 9; }
+  .af-side { flex-direction: column; height: auto; }
+  .af-side > * { flex: none; height: 340px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lane.is-hot, .node-pulse.go, .wallet-chip.is-new, .wallet-chip.is-used, .typing i, .consent.is-pressing .consent-btn { animation: none; }
+  .msg .w { animation: none; opacity: 1; }
+}
+</style>
+<script>
+  // Theme before first paint: ?theme=light|dark, else the last choice, else dark.
+  (function () {
+    var t = new URLSearchParams(location.search).get('theme');
+    if (t !== 'light' && t !== 'dark') { try { t = localStorage.getItem('af-theme'); } catch (e) { t = null; } }
+    document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+  })();
+</script>
+</head>
+<body>
+
+<header class="af-head">
+  <div>
+    <div class="af-title">Architecture Flow</div>
+    <div class="af-sub">Bank of Asgard · agents, sub-agents, MCP, APIs, gateway and identity, one request at a time</div>
+  </div>
+  <div class="af-tools">
+    <select class="af-select" data-af-scenario aria-label="Sample request"></select>
+    <button class="af-btn" type="button" data-af-restart title="Restart (R)"><svg viewBox="0 0 16 16"><path d="M3 2h2v12H3zM14 2v12L6 8z"/></svg></button>
+    <button class="af-btn" type="button" data-af-back title="Previous step (←)"><svg viewBox="0 0 16 16"><path d="M12 2v12L4 8zM2 2h2v12H2z" transform="matrix(-1 0 0 1 16 0)"/></svg></button>
+    <button class="af-btn is-primary" type="button" data-af-play title="Play / pause (space)"></button>
+    <button class="af-btn" type="button" data-af-fwd title="Next step (→)"><svg viewBox="0 0 16 16"><path d="M2 2v12l8-6zM11 2h2v12h-2z"/></svg></button>
+    <div class="af-seg" role="group" aria-label="Speed" data-af-speed>
+      <button type="button" data-v="0.5">0.5×</button><button type="button" data-v="1" aria-pressed="true">1×</button><button type="button" data-v="2">2×</button><button type="button" data-v="4">4×</button>
+    </div>
+    <div class="af-view">
+      <button class="af-btn" type="button" data-af-theme title="Light / dark theme (T)" aria-label="Switch theme"></button>
+      <button class="af-btn" type="button" data-af-details title="Show / hide the chat and steps (D)" aria-label="Details panel"><svg class="is-line" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/></svg>Details</button>
+    </div>
+  </div>
+</header>
+
+<div class="af-opts">
+  <span class="af-opt">Tokens
+    <span class="af-seg" role="group" data-af-opt="cached">
+      <button type="button" data-v="0" aria-pressed="true" title="First request of the session: consent, agent login and OBO exchange are shown">First call</button><button type="button" data-v="1" title="Same session, later request: tokens come from the cache">Cached</button>
+    </span>
+  </span>
+  <span class="af-opt">AI Guardrails
+    <span class="af-seg" role="group" data-af-opt="guard">
+      <button type="button" data-v="0" aria-pressed="true" title="The coordinator's LLM calls use boa-llm-v1">Off · v1</button><button type="button" data-v="1" title="The app's AI Guardrails toggle: the coordinator's LLM calls use boa-llm-v2">On · v2</button>
+    </span>
+  </span>
+</div>
+
+<main class="af-main">
+  <section class="af-stage" aria-label="Architecture animation">
+    <div class="af-now" data-af-now aria-live="polite">
+      <span class="af-now-n" data-af-now-n>–</span>
+      <div class="af-now-text">
+        <div class="af-now-label" data-af-now-label></div>
+        <div class="af-now-meta" data-af-now-meta></div>
+      </div>
+      <span class="af-now-clock" data-af-now-clock></span>
+    </div>
+    <svg class="af-svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid meet" data-af-svg aria-hidden="true">
+      <defs>
+        <filter id="afGlow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <g data-layer="zones"></g>
+      <g data-layer="wires"></g>
+      <g data-layer="lanes"></g>
+      <g data-layer="nodes"></g>
+      <g data-layer="tokens"></g>
+    </svg>
+    <div class="af-zoom">
+      <span class="af-zoom-level" data-af-zoom-level>100%</span>
+      <span class="af-seg" role="group" aria-label="Zoom">
+        <button type="button" data-af-zoom="out" title="Zoom out (−)" aria-label="Zoom out">−</button><button type="button" data-af-zoom="fit" title="Fit the whole diagram (0)">Fit</button><button type="button" data-af-zoom="in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+      </span>
+      <button class="af-btn" type="button" data-af-follow title="Follow: zoom on the systems of the current step (F)">Follow</button>
+    </div>
+  </section>
+
+  <aside class="af-side">
+    <section class="af-card af-chat" aria-label="Assistant chat">
+      <div class="af-card-head"><span>Assistant · <span data-af-coordinator></span></span><span data-af-chat-state></span></div>
+      <div class="chat-body" data-af-chat></div>
+      <div class="chat-foot">Scripted sample: figures are illustrative.</div>
+    </section>
+    <section class="af-card af-hopcard" aria-label="Steps">
+      <div class="af-card-head"><span>Steps</span><span data-af-hop-count></span></div>
+      <ol class="af-hops" data-af-hops></ol>
+    </section>
+  </aside>
+</main>
+
+<footer class="af-foot">
+  <div class="af-legend" data-af-legend></div>
+  <div class="af-timeline">
+    <div class="af-ticks" data-af-ticks></div>
+    <div class="af-count" data-af-count></div>
+  </div>
+</footer>
+
+<script src="agent-names.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const $ = (sel) => document.querySelector(sel);
+
+  // ---------------------------------------------------------------------------
+  // Token kinds: same colours and rules as token-flow.html (solid = a token,
+  // dashed = an OAuth step, a badge = a check by the receiver), plus the kinds that
+  // page never sees (the user's own token, the server's client-credentials token,
+  // the gateway's provider credential, OTel spans).
+  // ---------------------------------------------------------------------------
+  const KINDS = {
+    OBO:   { css: 'var(--obo)',   legend: 'OBO token (user + agent)' },
+    AGENT: { css: 'var(--agent)', legend: 'Agent token' },
+    KEY:   { css: 'var(--key)',   legend: 'Gateway API key' },
+    USER:  { css: 'var(--user)',  legend: 'User token (browser sign-in)' },
+    APP:   { css: 'var(--app)',   legend: 'App token (client credentials)' },
+    UP:    { css: 'var(--up)',    legend: 'Provider credential (gateway → LLM)' },
+    TRACE: { css: 'var(--trace)', legend: 'OpenTelemetry spans' },
+    CALL:  { css: 'var(--call)',  legend: 'Message or data, no token' }
+  };
+
+  // ---------------------------------------------------------------------------
+  // The system. Positions are in the 1600×900 viewBox; ports and paths are the
+  // defaults from README.md / demo_scripts/start-demo.sh.
+  // ---------------------------------------------------------------------------
+  const NODES = {
+    user:    { x: 150,  y: 262, w: 210, h: 58, name: 'User', role: 'CUSTOMER · BROWSER', icon: 'user' },
+    app:     { x: 150,  y: 480, w: 210, h: 64, name: 'Bank of Asgard App', role: 'REACT SPA · :5173', extra: 'chat over WebSocket', icon: 'screen' },
+    server:  { x: 150,  y: 690, w: 210, h: 64, name: 'Backend Server', role: 'NODE · EXPRESS · :3002', extra: 'signup · orgs · summary', icon: 'server' },
+    is:      { x: 580,  y: 96,  w: 236, h: 64, name: 'Identity Server', role: 'WSO2 IS 7.2 · ASGARDEO', extra: 'OIDC · agent identity · OBO', icon: 'shield' },
+    gw:      { x: 1060, y: 96,  w: 236, h: 64, name: 'AI Gateway', role: 'WSO2 · boa-llm-v1 / v2', extra: 'LLM · MCP · API routes', icon: 'gate' },
+    llm:     { x: 1420, y: 96,  w: 236, h: 64, name: 'LLM', role: 'ANTHROPIC · CLAUDE', extra: 'claude-haiku-4-5', icon: 'spark' },
+    saga:    { x: 580,  y: 322, w: 280, h: 80, name: '{saga}', role: 'COORDINATOR · TRANSACTIONS AGENT', extra: ':8011 · WebSocket /chat', icon: 'rune', cls: 'is-hub' },
+    subs:    { x: 452,  y: 562, w: 232, h: 56, name: 'Subscription Detective', role: 'IN-PROCESS SUB-AGENT', icon: 'search', cls: 'is-sub' },
+    spend:   { x: 708,  y: 562, w: 232, h: 56, name: 'Spending Health', role: 'IN-PROCESS SUB-AGENT', icon: 'pulse', cls: 'is-sub' },
+    txapi:   { x: 1060, y: 300, w: 212, h: 64, name: 'Transactions API', role: 'RESOURCE API · :8010', extra: 'GET /transactions', icon: 'db' },
+    savings: { x: 1060, y: 492, w: 212, h: 64, name: '{savings}', role: 'SAVINGS AGENT · :8013', extra: 'POST /suggest-goal', icon: 'coins' },
+    mcp:     { x: 1060, y: 684, w: 212, h: 64, name: 'Agencies MCP', role: 'MCP SERVER · :8012', extra: 'tool: get_agencies', icon: 'plug' },
+    tax:     { x: 1420, y: 492, w: 236, h: 64, name: '{tax}', role: 'TAX AGENT · :8014', extra: 'POST /prepare-return', icon: 'scroll', cls: 'is-mof' },
+    amp:     { x: 800,  y: 846, w: 1540, h: 50, name: 'Agent Manager', role: 'OTEL TRACES · EVALUATIONS · ONE TRACE ACROSS AGENTS (traceparent)', icon: 'chart', cls: 'is-band', inline: true }
+  };
+
+  // Agent names come from agent-names.js (shared with inside-our-agents.html). Script
+  // strings say {saga}, {savings} and {tax}; fill() swaps in the names ({SAVINGS}:
+  // upper case, for the token chips).
+  const NAMES = Object.assign({ coordinator: 'Coordinator', savings: 'Savings Agent', tax: 'Tax Agent' }, window.AGENT_NAMES || {});
+  const NAME_OF = { saga: NAMES.coordinator, savings: NAMES.savings, tax: NAMES.tax };
+  const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function fill(s, html) {
+    if (typeof s !== 'string') return s;
+    return s.replace(/\{(saga|savings|tax|SAGA|SAVINGS|TAX)\}/g, (m, k) => {
+      let v = NAME_OF[k.toLowerCase()];
+      if (k === k.toUpperCase()) v = v.toUpperCase();
+      return html ? esc(v) : v;
+    });
+  }
+  Object.keys(NODES).forEach((id) => { NODES[id].name = fill(NODES[id].name); });
+
+  const ZONES = [
+    { x: 310,  y: 20,  w: 920,  h: 150, label: 'WSO2 PLATFORM', cls: 'is-wso2' },
+    { x: 1260, y: 20,  w: 320,  h: 150, label: 'MODEL PROVIDER', cls: 'is-model' },
+    { x: 20,   y: 392, w: 260,  h: 398, label: 'WEB APP' },
+    { x: 310,  y: 190, w: 550,  h: 600, label: 'BANK OF ASGARD · AGENTS' },
+    { x: 330,  y: 254, w: 510,  h: 360, label: 'ONE PROCESS · LANGCHAIN', cls: 'is-inner', labelY: 'bottom' },
+    { x: 890,  y: 190, w: 340,  h: 600, label: 'BANK OF ASGARD · SERVICES' },
+    { x: 1260, y: 190, w: 320,  h: 600, label: 'MINISTRY OF FINANCE', cls: 'is-mof', note: ['Another organisation’s agent.', 'Only aggregates cross this line.'] },
+    { x: 20,   y: 812, w: 1560, h: 76,  label: '', cls: 'is-obs' }
+  ];
+
+  // Lanes that would cut through another box get routed through the gaps between
+  // zones. Key "a|b": the a→b path runs through pts; b→a uses the same points in
+  // reverse, shifted by off, so a request and its reply never share a wire.
+  const VIA = {
+    'subs|gw':      { pts: [[800, 432]], off: [16, 14] },
+    'savings|gw':   { pts: [[906, 430], [906, 210]], off: [16, 0] },
+    'gw|mcp':       { pts: [[1206, 250], [1206, 610]], off: [12, 0] },
+    'server|gw':    { pts: [[560, 740], [872, 664], [872, 220]], off: [10, 0] },
+    'saga|amp':     { pts: [[866, 420], [866, 790]], off: [0, 0] },
+    'savings|amp':  { pts: [[1212, 560], [1212, 790]], off: [0, 0] }
+  };
+
+  // Connections that exist in the architecture, drawn faintly whatever the scenario.
+  // The LLM, MCP and the Transactions API are only reached through the gateway.
+  const WIRES = [
+    ['user', 'app'], ['app', 'is'], ['app', 'saga'], ['app', 'server'], ['server', 'is'], ['server', 'gw'],
+    ['saga', 'is'], ['saga', 'gw'], ['saga', 'subs'], ['saga', 'spend'], ['subs', 'gw'], ['spend', 'gw'],
+    ['saga', 'savings'], ['saga', 'tax'], ['savings', 'gw'], ['tax', 'gw'],
+    ['gw', 'llm'], ['gw', 'txapi'], ['gw', 'mcp']
+  ];
+
+  const ICONS = {
+    shield: 'M0 -13 L11 -8 V1 C11 8 6 12 0 14 C-6 12 -11 8 -11 1 V-8 Z M-5 0 L-1 4 L6 -4',
+    gate: 'M-12 12 V-1 A12 12 0 0 1 12 -1 V12 M-5 12 V3 A5 5 0 0 1 5 3 V12',
+    db: 'M-11 -8 A11 4 0 1 0 11 -8 A11 4 0 1 0 -11 -8 M-11 -8 V8 A11 4 0 0 0 11 8 V-8 M-11 0 A11 4 0 0 0 11 0',
+    plug: 'M-4 -12 V-5 M4 -12 V-5 M-8 -5 H8 V0 A8 8 0 0 1 -8 0 Z M0 8 V13',
+    rune: 'M-5 -12 V12 M-5 -10 L6 -3 M-5 -2 L6 5',
+    user: 'M5 -7 A5 5 0 1 1 -5 -7 A5 5 0 1 1 5 -7 M-10 12 C-10 4 -5 1 0 1 C5 1 10 4 10 12',
+    screen: 'M-12 -9 H12 V7 H-12 Z M-12 -4 H12 M-5 12 H5 M0 7 V12',
+    server: 'M-11 -11 H11 V-2 H-11 Z M-11 2 H11 V11 H-11 Z M-6 -6.5 H-5.9 M-6 6.5 H-5.9',
+    spark: 'M0 -13 C1.5 -4 4 -1.5 13 0 C4 1.5 1.5 4 0 13 C-1.5 4 -4 1.5 -13 0 C-4 -1.5 -1.5 -4 0 -13 Z',
+    search: 'M6 -2 A8 8 0 1 1 -10 -2 A8 8 0 1 1 6 -2 M4 4 L12 12',
+    pulse: 'M-13 0 H-6 L-3 -9 L2 9 L5 0 H13',
+    coins: 'M12 0 A12 12 0 1 1 -12 0 A12 12 0 1 1 12 0 M4 -5 C2 -7 -5 -7 -5 -3 C-5 1 5 -1 5 3 C5 7 -2 7 -4 5 M0 -9 V-7 M0 7 V9',
+    scroll: 'M-9 -12 H5 L10 -7 V12 H-9 Z M5 -12 V-7 H10 M-5 -3 H6 M-5 2 H6 M-5 7 H2',
+    chart: 'M-12 12 H12 M-8 12 V2 M-2 12 V-6 M4 12 V-1 M10 12 V-10'
+  };
+
+  // ---------------------------------------------------------------------------
+  // Script helpers. A scenario is a list of hops (one flight or one badge each),
+  // or { par: [track, track], title } blocks where the tracks run side by side.
+  // ---------------------------------------------------------------------------
+  function hop(from, to, kind, chip, label, detail, x) {
+    const h = Object.assign({ from, to, kind, chip: fill(chip), label: fill(label), detail: fill(detail || '') }, x || {});
+    if (h.issues) h.issues = Object.assign({}, h.issues, { text: fill(h.issues.text) });
+    if (h.chat) {
+      h.chat = h.chat.map((e) => Object.assign({}, e, { text: fill(e.text), title: fill(e.title), html: fill(e.html, true) }));
+    }
+    return h;
+  }
+  const step = (from, to, kind, chip, label, detail, x) => hop(from, to, kind, chip, label, detail, Object.assign({ step: true }, x));
+  const check = (at, kind, chip, label, detail, x) => hop(at, at, kind, chip, label, detail, Object.assign({ local: true }, x));
+  const work = (at, chip, label, detail, x) => check(at, 'CALL', chip, label, detail, Object.assign({ work: true }, x));
+
+  // One LLM round trip: agent → gateway → model → gateway → agent. Only Saga's calls
+  // follow the app's AI Guardrails toggle (boa-llm-v2); the sub-agents, Picsou and
+  // Penible always use v1.
+  function llm(from, purpose, reply, answer, o) {
+    const guarded = o.guard && from === 'saga';
+    const route = guarded ? 'boa-llm-v2' : 'boa-llm-v1';
+    const out = [
+      hop(from, 'gw', 'KEY', 'API KEY', NODES[from].name + ' calls the LLM: ' + purpose,
+        'POST /' + route + '/v1/messages · X-API-Key' + (from === 'saga' ? ' + x-boa-message' : '') + ' · the agent never holds a model key')
+    ];
+    if (guarded) out.push(check('gw', 'KEY', 'GUARDRAILS PASSED', 'Gateway runs the v2 guardrails on the prompt', 'length · content safety · topic · prompt injection · PII'));
+    out.push(
+      hop('gw', 'llm', 'UP', 'PROVIDER KEY', 'Gateway forwards to the model', 'Provider lock (X-Provider-Key) · the upstream credential lives in the gateway', { fast: true }),
+      hop('llm', 'gw', 'CALL', reply, 'Model answers', answer, { fast: true })
+    );
+    if (guarded) out.push(check('gw', 'KEY', 'RESPONSE CHECKED', 'Gateway checks the response before returning it', 'PII · content safety · log-response', { fast: true }));
+    out.push(hop('gw', from, 'CALL', reply, 'Gateway returns the completion', 'llm-cost metadata logged (tokens, model, cost)', { fast: true }));
+    return out;
+  }
+
+  // Saga's own login, for a given audience: Asgardeo app-native auth with the agent's
+  // id + secret, then authorization_code + PKCE as a public client (auth/auth_manager.py).
+  function agentToken(key, aud, wallet, o) {
+    if (o.cached) {
+      return [check('saga', 'AGENT', 'CACHED AGENT TOKEN', 'Agent token reused from the cache', 'aud = ' + aud + ' · cache key (AGENT, resource)', { issues: { key, text: wallet } })];
+    }
+    return [
+      step('saga', 'is', 'AGENT', 'NATIVE AUTH + PKCE', '{saga} signs in as itself', 'agent id + secret → /oauth2/authn · auth code → /oauth2/token (PKCE, no client secret) · aud ' + aud),
+      hop('is', 'saga', 'AGENT', 'AGENT TOKEN', 'Agent token issued', 'sub = {saga}’s agent identity · aud = ' + aud, { issues: { key, text: wallet } })
+    ];
+  }
+
+  // The user's delegated consent, then the On-Behalf-Of exchange (auth_manager.py
+  // _fetch_obo_token): the token ends up carrying sub = user and act = Saga.
+  function oboToken(key, scopes, purpose, o, x) {
+    x = x || {};
+    if (o.cached) {
+      return [check('saga', 'OBO', 'CACHED OBO TOKEN', 'OBO token reused from the session cache', 'cache key (OBO, resource, ' + scopes.join(' + ') + ') · no new consent', { issues: { key, text: x.wallet || 'OBO' }, scopes })];
+    }
+    const actor = x.actorCached
+      ? [check('saga', 'AGENT', 'ACTOR TOKEN CACHED', '{saga}’s actor token is still valid', 'reused for the exchange', { uses: 'actor' })]
+      : agentToken('actor', 'AGENT_APP_ID (actor)', 'AGENT · ACTOR', {});
+    return [
+      step('saga', 'app', 'OBO', 'CONSENT REQUEST', '{saga} asks the user for consent', 'WebSocket {type: "auth_request", auth_url, scopes} · the PKCE verifier stays with {saga}',
+        { chat: [{ t: 'typing', on: false }, { t: 'consent', id: key, title: purpose, scopes }] }),
+      step('user', 'app', 'CALL', 'AUTHORISE', 'User clicks Authorise', 'Opens the Identity Server popup', { press: key }),
+      step('app', 'is', 'OBO', 'PKCE CHALLENGE', 'Consent screen at the Identity Server', 'GET /oauth2/authorize · client AGENT_APP_ID · code_challenge (S256) · scope ' + scopes.join(' '), { scopes }),
+      step('is', 'saga', 'OBO', 'AUTH CODE', 'Identity Server redirects to {saga}’s /callback', 'the user approved · the code is bound to {saga}’s PKCE challenge', { chat: [{ t: 'consent-ok', id: key }] }),
+      ...actor,
+      step('saga', 'is', 'OBO', 'OBO EXCHANGE', 'Token exchange: user’s code + {saga}’s actor token', 'authorization_code + actor_token + code_verifier', { uses: 'actor' }),
+      hop('is', 'saga', 'OBO', 'OBO TOKEN', 'OBO token issued', 'sub = the user · act.sub = {saga} · scope ' + scopes.join(' '),
+        { issues: { key, text: x.wallet || 'OBO' }, scopes, chat: [{ t: 'note', text: 'Authorisation complete! Fetching your transactions now…' }, { t: 'typing', on: true }] })
+    ];
+  }
+
+  // Exported spans at the end of a run (amp-instrument, OTel GenAI semconv).
+  function otel(emitters) {
+    return {
+      title: 'Spans exported to Agent Manager',
+      par: emitters.map((n) => [hop(n, 'amp', 'TRACE', 'OTEL SPANS', NODES[n].name + ' exports its spans',
+        'one trace across agents · traceparent / baggage carried on every A2A call', { fast: true })])
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scenarios. Each build(o) returns the script for the current options.
+  // ---------------------------------------------------------------------------
+  const CHECKUP_REPLY =
+    '<p><strong>Your financial check-up</strong></p><ul>' +
+    '<li><strong>Subscriptions:</strong> 5 recurring charges, <strong>$84.95/month</strong>. Two streaming services overlap, so cancelling one saves $15.49.</li>' +
+    '<li><strong>Spending trend:</strong> last 45 days vs. the 45 before: dining out <strong>+32%</strong>, ride-hailing +18%, groceries −6%.</li>' +
+    '<li><strong>Savings goal (from {savings}):</strong> a <em>Rainy-day fund</em>. Put <strong>$250/month</strong> aside for $3,042 in 1 year, $16,162 in 5 years and $34,936 in 10 years at 3% APY.</li>' +
+    '</ul><p>Want me to set that goal up?</p>';
+
+  function subTrack(sub, tool, days, findChip, findText, summary) {
+    return [
+      hop('saga', sub, 'OBO', 'TASK + OBO', '{saga} runs ' + tool + ' in-process', 'SecureLangChainTool injects the OBO token · the LLM never sees it', { uses: 'obo' }),
+      hop(sub, 'txapi', 'OBO', 'OBO TOKEN', NODES[sub].name + ' fetches transactions', 'GET /transactions?days=' + days + '&limit=300 · Bearer OBO', { scopes: ['read_transactions'] }),
+      check('txapi', 'OBO', 'TOKEN VERIFIED', 'Transactions API verifies the OBO token', 'JWKS signature · issuer · scope read_transactions · logs act.sub = {saga}'),
+      hop('txapi', sub, 'CALL', 'TRANSACTIONS', 'The user’s transactions come back', 'only rows for the token’s sub'),
+      work(sub, findChip, NODES[sub].name + ' analyses them', findText),
+      ...llm(sub, 'summarise the findings', 'SUMMARY', 'a short narrative · no tools', { guard: false }),
+      hop(sub, 'saga', 'CALL', 'SUMMARY', NODES[sub].name + ' reports back to {saga}', summary)
+    ];
+  }
+
+  const SCENARIOS = [
+    {
+      id: 'checkup',
+      title: '“Give me a financial check-up”',
+      // transactions-agent/langchain-agent/service.py _COORDINATOR_ADDENDUM: call the two
+      // Analyze tools together, then SuggestSavingsGoal once both results are back.
+      build: (o) => [
+        hop('user', 'app', 'CALL', 'PROMPT', 'The user asks for a financial check-up', 'typed into the assistant panel', { chat: [{ t: 'user', text: 'Can you do a financial check-up for me?' }] }),
+        hop('app', 'saga', 'CALL', 'WS MESSAGE', 'The app sends the prompt to {saga}', 'WebSocket /chat?session_id=… · the browser’s own token is not forwarded', { chat: [{ t: 'typing', on: true }] }),
+        ...llm('saga', 'plan the check-up', 'TOOL CALLS', 'AnalyzeSubscriptions + AnalyzeSpendingHealth, in the same turn', o),
+        ...oboToken('obo', ['read_transactions'], '{saga} wants to read your transactions', o),
+        { title: 'Two sub-agents work in parallel', par: [
+          subTrack('subs', 'AnalyzeSubscriptions', 365, 'RECURRING CHARGES', 'same merchant + amount, 3+ charges 25–35 days apart · deterministic', '5 subscriptions · $84.95 / month'),
+          subTrack('spend', 'AnalyzeSpendingHealth', 90, 'CATEGORY DELTAS', 'last 45 days vs. the 45 before, per category · deterministic', 'dining +32% · ride-hailing +18% · groceries −6%')
+        ] },
+        ...llm('saga', 'decide the next step', 'TOOL CALL', 'both summaries are in → SuggestSavingsGoal', o),
+        ...agentToken('agent-sav', 'SAVINGS_AGENT_CLIENT_ID', 'AGENT → {SAVINGS}', o),
+        hop('saga', 'savings', 'AGENT', 'AGENT TOKEN', '{saga} asks {savings} for a savings goal', 'POST /suggest-goal · both summaries + monthly amount · X-Transaction-Id · traceparent', { uses: 'agent-sav' }),
+        check('savings', 'AGENT', 'TOKEN VERIFIED', '{savings} verifies the agent token', 'RS256 via IS JWKS · aud = SAVINGS_AGENT_CLIENT_ID · proves which agent is calling'),
+        work('savings', 'PROJECT @ 3% APY', '{savings} projects 1, 5 and 10-year balances', 'projections.py · deterministic, no LLM'),
+        ...llm('savings', 'name the goal', 'GOAL', '{goal_name, message} · {savings} uses its own gateway key', o),
+        hop('savings', 'saga', 'CALL', 'GOAL + PROJECTIONS', '{savings} replies to {saga}', 'goal_name · suggested_monthly_amount · projected_balances · message'),
+        ...llm('saga', 'write the answer', 'ANSWER', 'one reply built from the three results', o),
+        hop('saga', 'app', 'CALL', 'REPLY', '{saga} sends the answer to the app', 'one WebSocket message, rendered as Markdown', { chat: [{ t: 'typing', on: false }, { t: 'bot', html: CHECKUP_REPLY }], hold: 2600 }),
+        otel(['saga', 'savings'])
+      ]
+    },
+    {
+      id: 'agencies',
+      title: '“Where’s the nearest branch in Paris?” · MCP',
+      // GetAgencies: AGENT_TOKEN audienced for MCP_CLIENT_ID; agencies-mcp-server checks
+      // aud == EXPECTED_AUDIENCE in its BearerAuthMiddleware.
+      build: (o) => [
+        hop('user', 'app', 'CALL', 'PROMPT', 'The user asks for a branch', 'typed into the assistant panel', { chat: [{ t: 'user', text: 'Where is the nearest Bank of Asgard branch in Paris?' }] }),
+        hop('app', 'saga', 'CALL', 'WS MESSAGE', 'The app sends the prompt to {saga}', 'WebSocket /chat', { chat: [{ t: 'typing', on: true }] }),
+        ...llm('saga', 'pick a tool', 'TOOL CALL', 'GetAgencies(town = "Paris")', o),
+        ...agentToken('agent-mcp', 'MCP_CLIENT_ID', 'AGENT → MCP', o),
+        hop('saga', 'mcp', 'AGENT', 'AGENT TOKEN', '{saga} calls the MCP tool get_agencies', 'MCP (Streamable HTTP) · tools/call get_agencies {town: "Paris"} · Bearer agent token', { uses: 'agent-mcp' }),
+        check('mcp', 'AGENT', 'TOKEN VERIFIED', 'The MCP server verifies the agent token', 'BearerAuthMiddleware · JWKS signature · aud = MCP_CLIENT_ID'),
+        hop('mcp', 'saga', 'CALL', '5 AGENCIES', 'The tool result comes back', 'name · address · phone · opening_hours · services'),
+        ...llm('saga', 'write the answer', 'ANSWER', 'pick the closest branches, format them', o),
+        hop('saga', 'app', 'CALL', 'REPLY', '{saga} sends the answer to the app', 'one WebSocket message', {
+          hold: 2400,
+          chat: [{ t: 'typing', on: false }, { t: 'bot', html:
+            '<p>Here are three Paris branches:</p><ul>' +
+            '<li><strong>Asgard Paris – Opéra</strong>, 12 Boulevard des Capucines. Mon–Fri 09:00–17:30, Sat 09:00–12:00.</li>' +
+            '<li><strong>Asgard Paris – Marais</strong>, 34 Rue de Bretagne. Mon–Fri 09:00–17:00.</li>' +
+            '<li><strong>Asgard Paris – Nation</strong>, 78 Avenue du Trône. Mon–Fri 09:00–17:00, Sat 10:00–12:00.</li></ul>' }]
+        }),
+        otel(['saga'])
+      ]
+    },
+    {
+      id: 'tax',
+      title: '“Prepare my tax return” · cross-organisation',
+      // SummarizeDeductibleExpenses (OBO, TAX_SCOPES, its own consent) then, after the
+      // user agrees, PrepareTaxReturn (AGENT_TOKEN for TAX_AGENT_CLIENT_ID): service.py
+      // _build_tax_tools. Only gross income + per-category totals cross to the ministry.
+      build: (o) => [
+        hop('user', 'app', 'CALL', 'PROMPT', 'The user asks for help with their tax return', 'typed into the assistant panel', { chat: [{ t: 'user', text: 'Can you help me prepare my 2026 tax return?' }] }),
+        hop('app', 'saga', 'CALL', 'WS MESSAGE', 'The app sends the prompt to {saga}', 'WebSocket /chat', { chat: [{ t: 'typing', on: true }] }),
+        ...llm('saga', 'plan', 'TOOL CALL', 'SummarizeDeductibleExpenses (always first)', o),
+        ...oboToken('obo-tax', ['read_transactions', 'share_tax_data'], '{saga} wants to prepare data to share with the Ministry of Finance', o, { wallet: 'OBO · TAX' }),
+        hop('saga', 'txapi', 'OBO', 'OBO · TAX', '{saga} reads the tax year’s transactions', 'GET /transactions · OBO token with TAX_SCOPES (its own cache entry, so its own consent)', { uses: 'obo-tax', scopes: ['read_transactions', 'share_tax_data'] }),
+        check('txapi', 'OBO', 'TOKEN VERIFIED', 'Transactions API verifies the OBO token', 'JWKS signature · issuer · scope read_transactions'),
+        hop('txapi', 'saga', 'CALL', 'TRANSACTIONS', 'The user’s transactions come back', 'tax year 2026'),
+        work('saga', 'RELIEF TOTALS', '{saga} totals spend per relief category', 'app/tax.py · medical · commuting · home energy · professional travel · kept in session state, out of the LLM’s hands'),
+        ...llm('saga', 'explain what would be shared', 'QUESTION', 'ask before anything leaves the bank', o),
+        hop('saga', 'app', 'CALL', 'REPLY', '{saga} asks before sharing anything', 'nothing has left the bank yet', {
+          hold: 1800,
+          chat: [{ t: 'typing', on: false }, { t: 'bot', html: '<p>I’ve totalled your 2026 deductible spend: medical $1,240, commuting $860, home energy $430. To get a draft assessment I’d share <strong>only your gross income and these totals</strong> with the Ministry of Finance, with no transactions, merchants or dates. Shall I send them?</p>' }]
+        }),
+        hop('user', 'app', 'CALL', 'PROMPT', 'The user agrees', 'a second turn in the same conversation', { chat: [{ t: 'user', text: 'Yes, send them.' }] }),
+        hop('app', 'saga', 'CALL', 'WS MESSAGE', 'The app sends the answer to {saga}', 'WebSocket /chat', { chat: [{ t: 'typing', on: true }] }),
+        ...llm('saga', 'act on the agreement', 'TOOL CALL', 'PrepareTaxReturn (no arguments: the figures come from session state)', o),
+        ...agentToken('agent-tax', 'TAX_AGENT_CLIENT_ID', 'AGENT → MINISTRY', o),
+        hop('saga', 'tax', 'AGENT', 'AGENT TOKEN', '{saga} calls the Ministry of Finance’s Tax Agent', 'POST /prepare-return · gross_income + qualifying_spend only · X-Transaction-Id', { uses: 'agent-tax' }),
+        check('tax', 'AGENT', 'TOKEN VERIFIED', '{tax} verifies who is calling', 'JWKS signature · aud = TAX_AGENT_CLIENT_ID'),
+        work('tax', 'ASSESS()', 'The ministry applies its published relief rules', 'deterministic · draft only, not a filed return'),
+        ...llm('tax', 'phrase the assessment', 'MESSAGE', 'the ministry’s own wording', o),
+        hop('tax', 'saga', 'CALL', 'DRAFT ASSESSMENT', '{tax} returns a draft assessment', 'reference ASG-2026-DRAFT · total deductions · taxable income · estimated saving · deadline'),
+        ...llm('saga', 'report the ministry’s numbers', 'ANSWER', 'exactly as returned, never recomputed', o),
+        hop('saga', 'app', 'CALL', 'REPLY', '{saga} sends the draft to the app', 'one WebSocket message', {
+          hold: 2400,
+          chat: [{ t: 'typing', on: false }, { t: 'bot', html: '<p>The Ministry of Finance prepared a <strong>draft</strong> (ref. ASG-2026-DRAFT): deductions of $2,530 lower your taxable income, for an estimated saving of $633. Keep your medical receipts. This is a draft, not a filed return.</p>' }]
+        }),
+        otel(['saga', 'tax'])
+      ]
+    },
+    {
+      id: 'signin',
+      title: 'Sign in and load the dashboard',
+      // app/src/main.jsx AsgardeoProvider (OIDC + PKCE), then server/server.js
+      // /transactions-summary: userinfo with the user's token, then /admin/transactions
+      // with the server's own client-credentials token.
+      build: (o) => [
+        hop('user', 'app', 'CALL', 'SIGN IN', 'The user clicks Sign in', 'Bank of Asgard App · AsgardeoProvider', { chat: [{ t: 'note', text: 'Redirecting to the Identity Server…' }] }),
+        step('app', 'is', 'USER', 'PKCE CHALLENGE', 'OIDC authorization request', 'GET /oauth2/authorize · SPA client (BOA-Frontend) · code_challenge (S256)'),
+        check('is', 'USER', 'USER AUTHENTICATED', 'The user signs in at the Identity Server', 'login page · adaptive authentication'),
+        step('is', 'app', 'USER', 'AUTH CODE', 'Identity Server redirects back with a code', 'bound to the PKCE challenge'),
+        step('app', 'is', 'USER', 'CODE → TOKEN', 'The app exchanges the code', 'POST /oauth2/token · code_verifier, no client secret'),
+        hop('is', 'app', 'USER', 'USER TOKEN', 'ID and access tokens issued', 'sub = the user · held in the browser', { issues: { key: 'user', text: 'USER' }, chat: [{ t: 'note', text: 'Signed in.' }] }),
+        hop('app', 'server', 'USER', 'USER TOKEN', 'The dashboard asks for a summary', 'GET /transactions-summary · Bearer user token', { uses: 'user' }),
+        hop('server', 'is', 'USER', 'USER TOKEN', 'The server resolves who the user is', 'GET /oauth2/userinfo'),
+        hop('is', 'server', 'CALL', 'USERINFO', 'The user’s sub comes back', 'sub = the user'),
+        ...(o.cached
+          ? [check('server', 'APP', 'CACHED APP TOKEN', 'The server’s own token is still valid', 'client credentials, cached', { issues: { key: 'app', text: 'APP' } })]
+          : [step('server', 'is', 'APP', 'CLIENT CREDS', 'The server gets its own token', 'POST /oauth2/token · grant client_credentials'),
+             hop('is', 'server', 'APP', 'APP TOKEN', 'App token issued', 'the server acts as itself, not as the user', { issues: { key: 'app', text: 'APP' } })]),
+        hop('server', 'txapi', 'APP', 'APP TOKEN', 'The server reads the latest transactions', 'GET /admin/transactions?user_sub=…&limit=5', { uses: 'app' }),
+        check('txapi', 'APP', 'TOKEN VERIFIED', 'Transactions API verifies the app token', 'JWKS signature · issuer'),
+        hop('txapi', 'server', 'CALL', 'TRANSACTIONS', 'Five recent transactions come back', 'total · recent · monthly_counts'),
+        hop('server', 'app', 'CALL', 'SUMMARY', 'The dashboard renders', 'the assistant panel is ready; {saga} has not been called yet', { hold: 1400, chat: [{ t: 'note', text: 'Dashboard loaded: 5 recent transactions.' }] })
+      ]
+    }
+  ];
+
+  // ---------------------------------------------------------------------------
+  // Script → frames. A frame is the set of hops that animate together.
+  // ---------------------------------------------------------------------------
+  // The gateway fronts MCP and the Transactions API as well as the LLM (gateway-setup:
+  // boa-agencies, boa-transactions, with MCP_GATEWAY_ENABLED and the API URLs rewritten
+  // by --write-env), so every hop to or from them goes through it. Auth is passthrough:
+  // the service still verifies the token itself.
+  const PROXIED = { txapi: { route: '/boa-transactions', note: 'passthrough auth: the API still verifies the token' },
+    mcp: { route: '/boa-agencies', note: 'Streamable HTTP /mcp upstream · passthrough auth' } };
+  function viaGateway(h) {
+    if (h.local) return [h];
+    if (PROXIED[h.to] && h.from !== 'gw') {
+      return [Object.assign({}, h, { to: 'gw', label: h.label + ' (through the gateway)' }),
+        Object.assign({}, h, { from: 'gw', uses: null, issues: null, chat: null, label: 'Gateway proxies to ' + NODES[h.to].name, detail: PROXIED[h.to].route + ' · ' + PROXIED[h.to].note })];
+    }
+    if (PROXIED[h.from] && h.to !== 'gw') {
+      return [Object.assign({}, h, { to: 'gw', chat: null, label: h.label + ' (to the gateway)' }),
+        Object.assign({}, h, { from: 'gw', label: 'Gateway returns the response', detail: PROXIED[h.from].route })];
+    }
+    return [h];
+  }
+
+  function buildFrames(sc, o) {
+    const frames = [];
+    const flat = (list) => list.reduce((acc, h) => acc.concat(viaGateway(h)), []);
+    sc.build(o).forEach((item) => {
+      if (item.par) {
+        const tracks = item.par.map(flat);
+        const n = Math.max(...tracks.map((t) => t.length));
+        for (let j = 0; j < n; j++) {
+          const hops = tracks.map((t) => t[j]).filter(Boolean);
+          frames.push({ hops, title: item.title });
+        }
+      } else {
+        flat([item]).forEach((h) => frames.push({ hops: [h] }));
+      }
+    });
+    frames.forEach((f, i) => {
+      f.i = i;
+      f.hops.forEach((h, k) => { h.f = i; h.k = k; h.id = (i + 1) + (f.hops.length > 1 ? 'abcd'[k] : ''); });
+    });
+    return frames;
+  }
+
+  // ---------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------
+  const params = new URLSearchParams(location.search);
+  const opts = { cached: params.get('cached') === '1', guard: params.get('guard') === '1' };
+  let scenario = SCENARIOS.find((s) => s.id === params.get('scenario')) || SCENARIOS[0];
+  let frames = [];
+  let nodes = {};          // id -> { g, wallet, pulse, ...spec }
+  let lanes = {};          // "a>b" -> path element
+  let cur = -1;            // last completed frame
+  let flight = null;       // { f, elapsed, dur, parts }
+  let gapLeft = 0;
+  let playing = false;
+  let speed = 1;
+  let lastFrame = 0;
+  let stopAfter = null;
+  let typedFrame = -1;     // frame whose bot reply should be typed out
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // TEMPO scales every duration at 1× (flights, badges, pauses, typing). The speed
+  // buttons then multiply it: 0.5× is twice as slow as 1×, 2× twice as fast.
+  const TEMPO = 2;
+  const FLIGHT_MS = reduceMotion ? 1 : 1150 * TEMPO;
+  const FAST_MS = reduceMotion ? 1 : 640 * TEMPO;
+  const CHECK_MS = reduceMotion ? 300 : 1050 * TEMPO;
+  const PAR_DELAY = reduceMotion ? 0 : 320 * TEMPO;
+
+  // ---------------------------------------------------------------------------
+  // Geometry
+  // ---------------------------------------------------------------------------
+  function svgEl(tag, attrs, parent) {
+    const el = document.createElementNS(NS, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+  const f1 = (v) => v.toFixed(1);
+
+  // Where the line from node n's centre towards point t leaves its box (plus a gap).
+  function edge(n, t) {
+    const dx = t.x - n.x, dy = t.y - n.y, pad = 6;
+    const k = Math.min(dx ? (n.w / 2 + pad) / Math.abs(dx) : Infinity, dy ? (n.h / 2 + pad) / Math.abs(dy) : Infinity);
+    return { x: n.x + dx * k, y: n.y + dy * k };
+  }
+
+  // Catmull-Rom through the points, as cubic Béziers.
+  function smooth(P) {
+    let d = 'M' + f1(P[0].x) + ' ' + f1(P[0].y);
+    for (let i = 0; i < P.length - 1; i++) {
+      const p0 = P[i - 1] || P[i], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2] || p2;
+      d += ' C' + f1(p1.x + (p2.x - p0.x) / 6) + ' ' + f1(p1.y + (p2.y - p0.y) / 6) +
+        ' ' + f1(p2.x - (p3.x - p1.x) / 6) + ' ' + f1(p2.y - (p3.y - p1.y) / 6) + ' ' + f1(p2.x) + ' ' + f1(p2.y);
+    }
+    return d;
+  }
+
+  // mode 'wire': the neutral connection; 'lane': the directional lane, bowed to its
+  // own side so a request and its reply never share a wire.
+  function pathFor(a, b, mode) {
+    const A = NODES[a], B = NODES[b];
+    let v = VIA[a + '|' + b], rev = false;
+    if (!v && VIA[b + '|' + a]) { v = VIA[b + '|' + a]; rev = true; }
+    if (v) {
+      let pts = v.pts.map((p) => ({ x: p[0], y: p[1] }));
+      if (rev) {
+        pts.reverse();
+        if (mode === 'lane') pts = pts.map((p) => ({ x: p.x + v.off[0], y: p.y + v.off[1] }));
+      }
+      return smooth([edge(A, pts[0])].concat(pts, [edge(B, pts[pts.length - 1])]));
+    }
+    if (mode === 'wire') {
+      const p = edge(A, B), q = edge(B, A);
+      return 'M' + f1(p.x) + ' ' + f1(p.y) + ' L' + f1(q.x) + ' ' + f1(q.y);
+    }
+    const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1, bow = Math.min(40, len * 0.12);
+    const m = { x: (A.x + B.x) / 2 - dy / len * bow, y: (A.y + B.y) / 2 + dx / len * bow };
+    const p = edge(A, m), q = edge(B, m);
+    return 'M' + f1(p.x) + ' ' + f1(p.y) + ' Q' + f1(m.x) + ' ' + f1(m.y) + ' ' + f1(q.x) + ' ' + f1(q.y);
+  }
+
+  function getLane(a, b) {
+    const key = a + '>' + b;
+    if (!lanes[key]) lanes[key] = svgEl('path', { 'class': 'lane', d: pathFor(a, b, 'lane') }, $('[data-layer="lanes"]'));
+    return lanes[key];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scene: zones, wires and nodes are drawn once; lanes appear as hops use them.
+  // ---------------------------------------------------------------------------
+  function drawStatic() {
+    const zl = $('[data-layer="zones"]'), wl = $('[data-layer="wires"]'), nl = $('[data-layer="nodes"]');
+    ZONES.forEach((z) => {
+      const g = svgEl('g', { 'class': 'zone ' + (z.cls || '') }, zl);
+      svgEl('rect', { x: z.x, y: z.y, width: z.w, height: z.h, rx: 14 }, g);
+      if (z.label) {
+        const t = svgEl('text', { x: z.x + 14, y: z.labelY === 'bottom' ? z.y + z.h - 12 : z.y + 20 }, g);
+        t.textContent = z.label;
+      }
+      (z.note || []).forEach((line, i) => {
+        const t = svgEl('text', { 'class': 'zone-note', x: z.x + 14, y: z.y + z.h - 30 + i * 14 }, g);
+        t.textContent = line;
+      });
+    });
+    WIRES.forEach((w) => {
+      const el = svgEl('path', { 'class': 'wire', d: pathFor(w[0], w[1], 'wire') }, wl);
+      el.dataset.a = w[0]; el.dataset.b = w[1];
+    });
+    Object.keys(NODES).forEach((id) => {
+      const n = Object.assign({ id }, NODES[id]);
+      const g = svgEl('g', { 'class': 'node ' + (n.cls || ''), transform: 'translate(' + n.x + ' ' + n.y + ')' }, nl);
+      n.pulse = svgEl('rect', { 'class': 'node-pulse', x: -n.w / 2, y: -n.h / 2, width: n.w, height: n.h, rx: 14 }, g);
+      svgEl('rect', { 'class': 'node-box', x: -n.w / 2, y: -n.h / 2, width: n.w, height: n.h, rx: 12 }, g);
+      const ix = -n.w / 2 + 28;
+      svgEl('path', { 'class': 'node-icon', d: ICONS[n.icon], transform: 'translate(' + ix + ' 0) scale(' + (n.cls === 'is-hub' ? 1.05 : 0.9) + ')' }, g);
+      const tx = -n.w / 2 + 54;
+      if (n.inline) {
+        svgEl('text', { 'class': 'node-name', x: tx, y: 5 }, g).textContent = n.name;
+        svgEl('text', { 'class': 'node-role', x: tx + 120, y: 4 }, g).textContent = n.role;
+      } else {
+        const lines = n.extra ? [-9, 7, 21] : [-2, 14];
+        if (n.cls === 'is-hub') lines.splice(0, 3, -12, 6, 21);
+        svgEl('text', { 'class': 'node-name', x: tx, y: lines[0] }, g).textContent = n.name;
+        svgEl('text', { 'class': 'node-role', x: tx, y: lines[1] }, g).textContent = n.role;
+        if (n.extra) svgEl('text', { 'class': 'node-extra', x: tx, y: lines[2] }, g).textContent = n.extra;
+      }
+      n.wallet = svgEl('g', { transform: 'translate(0 ' + (n.h / 2 + 22) + ')' }, g);
+      n.g = g;
+      nodes[id] = n;
+    });
+  }
+
+  function buildScene() {
+    $('[data-layer="lanes"]').textContent = '';
+    $('[data-layer="tokens"]').textContent = '';
+    lanes = {};
+    const live = {};
+    frames.forEach((f) => f.hops.forEach((h) => { live[h.from] = true; live[h.to] = true; if (!h.local) getLane(h.from, h.to); }));
+    Object.keys(nodes).forEach((id) => nodes[id].g.classList.toggle('is-idle', !live[id]));
+    document.querySelectorAll('.wire').forEach((w) => w.classList.toggle('is-live', !!(live[w.dataset.a] && live[w.dataset.b])));
+  }
+
+  // Tokens each system holds after frame `upto`, drawn under its box.
+  function renderWallets(upto, fresh) {
+    const held = {};
+    for (let i = 0; i <= upto; i++) {
+      frames[i].hops.forEach((h) => {
+        if (!h.issues) return;
+        const w = held[h.to] || (held[h.to] = []);
+        if (!w.some((t) => t.key === h.issues.key)) w.push({ key: h.issues.key, text: h.issues.text, kind: h.kind, at: i, label: h.label });
+      });
+    }
+    Object.keys(nodes).forEach((id) => {
+      const g = nodes[id].wallet, list = held[id] || [];
+      g.textContent = '';
+      list.forEach((t) => { t.w = t.text.length * 7.4 + 18; });
+      const gap = 6;
+      let x = -(list.reduce((s, t) => s + t.w, 0) + (list.length - 1) * gap) / 2;
+      list.forEach((t) => {
+        // Position on the outer group, animation on the inner one: a CSS transform would
+        // replace the transform attribute.
+        const slot = svgEl('g', { transform: 'translate(' + f1(x) + ' -12)' }, g);
+        x += t.w + gap;
+        const chip = svgEl('g', { 'class': 'wallet-chip' + (t.at === fresh ? ' is-new' : ''), 'data-key': t.key }, slot);
+        chip.style.setProperty('--c', KINDS[t.kind].css);
+        svgEl('title', {}, chip).textContent = KINDS[t.kind].legend + ' (from: ' + t.label + ')';
+        svgEl('rect', { width: t.w, height: 23, rx: 11.5 }, chip);
+        svgEl('text', { x: t.w / 2, y: 15.8, 'text-anchor': 'middle' }, chip).textContent = t.text;
+      });
+    });
+  }
+
+  function renderLanes(upto) {
+    Object.keys(lanes).forEach((k) => lanes[k].classList.remove('is-used'));
+    for (let i = 0; i <= upto; i++) {
+      frames[i].hops.forEach((h) => {
+        if (h.local) return;
+        const lane = lanes[h.from + '>' + h.to];
+        lane.classList.add('is-used');
+        lane.style.setProperty('--c', KINDS[h.kind].css);
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Flights: every hop of the frame at once (parallel tracks staggered so two chips
+  // on the same lane stay apart). A check is a badge on the receiving system.
+  // ---------------------------------------------------------------------------
+  function launch(fi) {
+    if (follow) focusFrame(frames[fi]);
+    const f = frames[fi], layer = $('[data-layer="tokens"]');
+    const parts = f.hops.map((h, k) => {
+      const delay = k * PAR_DELAY;
+      const color = KINDS[h.kind].css;
+      markActive(h, true);
+      if (h.uses) {
+        const holder = nodes[h.local ? h.to : h.from];
+        const parked = holder && holder.wallet.querySelector('[data-key="' + h.uses + '"]');
+        if (parked) { parked.classList.remove('is-used'); void parked.getBBox(); parked.classList.add('is-used'); }
+      }
+      if (h.local) {
+        const n = nodes[h.to];
+        const below = k > 0;
+        const slot = svgEl('g', { transform: 'translate(' + f1(n.x) + ' ' + f1(below ? n.y + n.h / 2 + 26 : n.y - n.h / 2 - 26) + ')' }, layer);
+        const badge = svgEl('g', { 'class': 'check' + (h.work ? ' is-work' : '') }, slot);
+        badge.style.setProperty('--c', color);
+        badge.style.animationDelay = delay + 'ms';
+        const w = h.chip.length * 8.4 + (h.work ? 30 : 52);
+        svgEl('rect', { 'class': 'check-pill', x: -w / 2, y: -16, width: w, height: 32, rx: 16 }, badge);
+        if (!h.work) svgEl('path', { 'class': 'check-mark', d: 'M-7 0 L-2 5 L7 -5', transform: 'translate(' + (-w / 2 + 20) + ' 0)' }, badge);
+        svgEl('text', { 'class': 'check-text', x: h.work ? 0 : 12, y: 4.5, 'text-anchor': 'middle' }, badge).textContent = h.chip;
+        return { h, local: true, slot, delay, dur: CHECK_MS };
+      }
+      const lane = lanes[h.from + '>' + h.to];
+      lane.style.setProperty('--c', color);
+      const total = lane.getTotalLength();
+      const trail = svgEl('path', { 'class': 'trail', d: lane.getAttribute('d'), filter: 'url(#afGlow)' }, layer);
+      const chip = svgEl('g', { 'class': h.step ? 'is-step' : '' }, layer);
+      [trail, chip].forEach((el) => el.style.setProperty('--c', color));
+      trail.style.opacity = 0;
+      svgEl('circle', { 'class': 'token-halo', r: 26, filter: 'url(#afGlow)' }, chip);
+      const w = Math.max(54, h.chip.length * 9 + 24);
+      svgEl('rect', { 'class': 'token-pill', x: -w / 2, y: -15, width: w, height: 30, rx: 15 }, chip);
+      svgEl('text', { 'class': 'token-text', y: 5.2, 'text-anchor': 'middle' }, chip).textContent = h.chip;
+      chip.style.opacity = 0;
+      lane.classList.add('is-hot');
+      return { h, lane, total, trail, chip, delay, dur: h.fast ? FAST_MS : FLIGHT_MS };
+    });
+    flight = { f: fi, elapsed: 0, parts, dur: Math.max(...parts.map((p) => p.delay + p.dur)) };
+    setNow(f);
+    renderFeed(fi);
+    renderChat(cur, fi);
+    moveFlight();
+  }
+
+  function ease(t) { return t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+  function moveFlight() {
+    flight.parts.forEach((p) => {
+      if (p.local) return;
+      const t = (flight.elapsed - p.delay) / p.dur;
+      if (t < 0) return;
+      const s = ease(Math.min(1, t)) * p.total;
+      const pt = p.lane.getPointAtLength(s);
+      p.chip.style.opacity = t >= 1 ? 0 : 1;
+      p.chip.setAttribute('transform', 'translate(' + f1(pt.x) + ' ' + f1(pt.y) + ')');
+      const tail = Math.min(140, p.total * 0.35);
+      p.trail.setAttribute('stroke-dasharray', tail + ' ' + (p.total + tail));
+      p.trail.setAttribute('stroke-dashoffset', f1(tail - s));
+      p.trail.style.opacity = t >= 1 ? 0 : .85;
+    });
+  }
+
+  function land() {
+    const f = frames[flight.f];
+    clearFlight();
+    cur = f.i;
+    f.hops.forEach((h) => {
+      const dest = nodes[h.to];
+      dest.pulse.style.setProperty('--c', KINDS[h.kind].css);
+      dest.pulse.classList.remove('go'); void dest.pulse.getBBox(); dest.pulse.classList.add('go');
+    });
+    typedFrame = playing ? f.i : -1;
+    renderAll(f.hops.some((h) => h.issues) ? f.i : -2);
+    gapLeft = Math.max(...f.hops.map((h) => h.hold || 0), 300) * TEMPO;
+    if (stopAfter !== null && cur >= stopAfter) { stopAfter = null; play(false); }
+  }
+
+  function clearFlight() {
+    if (!flight) return;
+    flight.parts.forEach((p) => {
+      if (p.local) {
+        const slot = p.slot;
+        slot.firstChild.classList.add('is-leaving');
+        setTimeout(() => slot.remove(), 500);
+      } else {
+        p.trail.remove(); p.chip.remove();
+        p.lane.classList.remove('is-hot');
+      }
+      markActive(p.h, false);
+    });
+    flight = null;
+  }
+
+  function markActive(h, on) {
+    (h.local ? [h.to] : [h.from, h.to]).forEach((id) => {
+      const g = nodes[id].g;
+      g.classList.toggle('is-active', on);
+      g.style.setProperty('--c', KINDS[h.kind].css);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Camera: the SVG viewBox. Wheel / buttons zoom, drag pans, Fit resets; Follow
+  // eases the view onto the systems of the current step. The view eases towards
+  // `target` in the animation loop.
+  // ---------------------------------------------------------------------------
+  const FULL = { x: 0, y: 0, w: 1600, h: 900 };
+  const ASPECT = FULL.h / FULL.w, MIN_W = 480, MARGIN = 120;
+  let view = Object.assign({}, FULL), target = Object.assign({}, FULL), follow = false;
+  const svgRoot = $('[data-af-svg]');
+
+  function clampView(v) {
+    const w = Math.max(MIN_W, Math.min(FULL.w, v.w)), h = w * ASPECT;
+    const x = Math.max(FULL.x - MARGIN, Math.min(FULL.w + MARGIN - w, v.x));
+    const y = Math.max(FULL.y - MARGIN, Math.min(FULL.h + MARGIN - h, v.y));
+    return w >= FULL.w ? Object.assign({}, FULL) : { x, y, w, h };
+  }
+  function applyView() {
+    svgRoot.setAttribute('viewBox', [view.x, view.y, view.w, view.h].map(f1).join(' '));
+    $('[data-af-zoom-level]').textContent = Math.round(FULL.w / view.w * 100) + '%';
+  }
+  function setTarget(v, instant) {
+    target = clampView(v);
+    if (instant || reduceMotion) { view = Object.assign({}, target); applyView(); }
+  }
+  // Ease the view towards the target; returns nothing, redraws when it moved.
+  function stepCamera(dt) {
+    const k = 1 - Math.exp(-dt / 260);
+    let moved = false;
+    ['x', 'y', 'w', 'h'].forEach((key) => {
+      const d = target[key] - view[key];
+      if (Math.abs(d) > 0.05) { view[key] += d * k; moved = true; } else view[key] = target[key];
+    });
+    if (moved) applyView();
+  }
+  // Zoom by `factor` around point p (viewBox units), keeping p where it is on screen.
+  function zoomAt(factor, p) {
+    const w = Math.max(MIN_W, Math.min(FULL.w, target.w * factor)), f = w / target.w;
+    setTarget({ x: p.x - (p.x - target.x) * f, y: p.y - (p.y - target.y) * f, w });
+  }
+  const centre = () => ({ x: target.x + target.w / 2, y: target.y + target.h / 2 });
+
+  // The box around a frame's systems, padded for chips, badges and wallets. The
+  // Agent Manager band is as wide as the stage, so only the part under the emitters counts.
+  function focusFrame(f) {
+    if (!f) { setTarget(FULL); return; }
+    const ids = [];
+    f.hops.forEach((h) => { if (!h.local) ids.push(h.from); ids.push(h.to); });
+    const xs = ids.filter((id) => id !== 'amp').map((id) => NODES[id].x);
+    const boxes = ids.map((id) => {
+      const n = NODES[id];
+      if (id !== 'amp') return { x0: n.x - n.w / 2, x1: n.x + n.w / 2, y0: n.y - n.h / 2, y1: n.y + n.h / 2 };
+      const cx = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : n.x;
+      return { x0: cx - 160, x1: cx + 160, y0: n.y - n.h / 2, y1: n.y + n.h / 2 };
+    });
+    const b = boxes.reduce((a, c) => ({ x0: Math.min(a.x0, c.x0), x1: Math.max(a.x1, c.x1), y0: Math.min(a.y0, c.y0), y1: Math.max(a.y1, c.y1) }));
+    const pad = 70;
+    let w = b.x1 - b.x0 + pad * 2, h = b.y1 - b.y0 + pad * 2 + 50;
+    w = Math.max(w, h / ASPECT, 640);
+    setTarget({ x: (b.x0 + b.x1) / 2 - w / 2, y: (b.y0 + b.y1) / 2 - w * ASPECT / 2, w });
+  }
+  function refocus() { if (follow) focusFrame(flight ? frames[flight.f] : (cur >= 0 ? frames[cur] : null)); }
+  function setFollow(on) {
+    follow = on;
+    $('[data-af-follow]').setAttribute('aria-pressed', String(on));
+    try { localStorage.setItem('af-follow', on ? '1' : '0'); } catch (e) { /* not remembered */ }
+    if (on) refocus(); else setTarget(FULL);
+  }
+
+  // Screen → viewBox coordinates (handles the letterboxing of preserveAspectRatio).
+  function toSvg(e) {
+    const m = svgRoot.getScreenCTM();
+    return m ? new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse()) : centre();
+  }
+  svgRoot.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (follow) setFollow(false);
+    zoomAt(Math.exp(e.deltaY * 0.0015), toSvg(e));
+  }, { passive: false });
+  let drag = null;
+  svgRoot.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    drag = { x: e.clientX, y: e.clientY, view: Object.assign({}, target), scale: (svgRoot.getScreenCTM() || { a: 1 }).a };
+    svgRoot.setPointerCapture(e.pointerId);
+    svgRoot.classList.add('is-dragging');
+  });
+  svgRoot.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = (e.clientX - drag.x) / drag.scale, dy = (e.clientY - drag.y) / drag.scale;
+    if (follow && Math.hypot(dx, dy) > 4) setFollow(false);
+    setTarget({ x: drag.view.x - dx, y: drag.view.y - dy, w: drag.view.w }, true);
+  });
+  const endDrag = () => { drag = null; svgRoot.classList.remove('is-dragging'); };
+  svgRoot.addEventListener('pointerup', endDrag);
+  svgRoot.addEventListener('pointercancel', endDrag);
+  svgRoot.addEventListener('dblclick', () => { setFollow(false); setTarget(FULL); });
+
+  // ---------------------------------------------------------------------------
+  // Playback
+  // ---------------------------------------------------------------------------
+  function frame(now) {
+    const dt = lastFrame ? Math.min(100, now - lastFrame) : 0;
+    lastFrame = now;
+    stepCamera(dt);
+    if (playing && frames.length) {
+      if (flight) {
+        flight.elapsed += dt * speed;
+        moveFlight();
+        if (flight.elapsed >= flight.dur) land();
+      } else if ((gapLeft -= dt * speed) <= 0) {
+        if (cur + 1 < frames.length) launch(cur + 1);
+        else play(false);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function play(on) {
+    if (on && cur >= frames.length - 1 && !flight) seek(-1);
+    playing = on && frames.length > 0;
+    $('[data-af-play]').innerHTML = playing
+      ? '<svg viewBox="0 0 16 16"><path d="M3 2h3.5v12H3zM9.5 2H13v12H9.5z"/></svg>Pause'
+      : '<svg viewBox="0 0 16 16"><path d="M3 2v12l11-6z"/></svg>Play';
+  }
+
+  // Jump to "frame k done" (k = -1: nothing yet), no animation.
+  function seek(k) {
+    clearFlight();
+    cur = Math.max(-1, Math.min(frames.length - 1, k));
+    gapLeft = cur < 0 ? 500 * TEMPO : 0;
+    typedFrame = -1;
+    renderAll(-2);
+    refocus();
+  }
+
+  // Forward animates exactly one frame, then pauses; back jumps one frame, no animation.
+  function stepBy(dir) {
+    play(false);
+    if (dir > 0) {
+      if (flight) { stopAfter = null; flight.elapsed = flight.dur; moveFlight(); land(); return; }
+      if (cur + 1 < frames.length) { stopAfter = cur + 1; launch(cur + 1); play(true); }
+    } else {
+      stopAfter = null;
+      seek(flight ? cur : cur - 1);
+    }
+  }
+
+  function load() {
+    frames = buildFrames(scenario, opts);
+    buildScene();
+    buildFeed();
+    seek(-1);
+    // Options that change nothing in this scenario are greyed out.
+    const uses = (pred) => frames.some((f) => f.hops.some(pred));
+    $('[data-af-opt="guard"]').setAttribute('aria-disabled', String(!uses((h) => h.from === 'saga' && h.to === 'gw')));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chat panel: replays the chat events of every landed frame.
+  // ---------------------------------------------------------------------------
+  function renderChat(upto, active) {
+    const body = $('[data-af-chat]');
+    const state = { items: [], typing: false, consents: {} };
+    for (let i = 0; i <= upto; i++) {
+      frames[i].hops.forEach((h) => (h.chat || []).forEach((e) => {
+        if (e.t === 'typing') state.typing = e.on;
+        else if (e.t === 'consent-ok') { if (state.consents[e.id]) state.consents[e.id].done = true; }
+        else {
+          const item = Object.assign({ f: i }, e);
+          if (e.t === 'consent') state.consents[e.id] = item;
+          state.items.push(item);
+        }
+      }));
+    }
+    const pressing = active !== undefined && active >= 0 ? frames[active].hops.map((h) => h.press).filter(Boolean) : [];
+    body.textContent = '';
+    if (!state.items.length && !state.typing) {
+      const empty = document.createElement('div');
+      empty.className = 'chat-empty';
+      empty.textContent = 'Press Play to send: ' + scenario.title.replace(/ ·.*$/, '');
+      body.appendChild(empty);
+    }
+    state.items.forEach((m) => {
+      let el;
+      if (m.t === 'user') {
+        el = div('msg is-user'); el.textContent = m.text;
+      } else if (m.t === 'note') {
+        el = div('msg-note'); el.textContent = m.text;
+      } else if (m.t === 'bot') {
+        el = div('msg is-bot');
+        el.innerHTML = '<span class="msg-who">' + esc(NAMES.coordinator) + '</span>' + m.html;
+        if (m.f === typedFrame && !reduceMotion) typeOut(el);
+      } else if (m.t === 'consent') {
+        el = div('consent' + (m.done ? ' is-done' : '') + (pressing.indexOf(m.id) >= 0 ? ' is-pressing' : ''));
+        const title = div('consent-title'); title.textContent = m.title; el.appendChild(title);
+        const sc = div('consent-scopes');
+        m.scopes.forEach((s) => { const c = document.createElement('span'); c.textContent = s; sc.appendChild(c); });
+        el.appendChild(sc);
+        const btn = document.createElement('span'); btn.className = 'consent-btn';
+        btn.textContent = m.done ? '✓ Authorised' : 'Authorise';
+        el.appendChild(btn);
+      }
+      body.appendChild(el);
+    });
+    if (state.typing) {
+      const t = div('typing'); t.innerHTML = '<i></i><i></i><i></i>'; body.appendChild(t);
+    }
+    body.scrollTop = body.scrollHeight;
+    $('[data-af-chat-state]').textContent = state.typing ? 'working…' : '';
+  }
+  function div(cls) { const d = document.createElement('div'); d.className = cls; return d; }
+
+  // Word-by-word reveal of a reply that just arrived.
+  function typeOut(el) {
+    let i = 0;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const texts = [];
+    while (walker.nextNode()) if (!walker.currentNode.parentNode.classList.contains('msg-who')) texts.push(walker.currentNode);
+    texts.forEach((node) => {
+      const frag = document.createDocumentFragment();
+      node.textContent.split(/(\s+)/).forEach((part) => {
+        if (!part) return;
+        if (/^\s+$/.test(part)) { frag.appendChild(document.createTextNode(part)); return; }
+        const s = document.createElement('span'); s.className = 'w'; s.textContent = part;
+        s.style.animationDelay = (i++ * 28 * TEMPO / speed) + 'ms';
+        frag.appendChild(s);
+      });
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Feed, banner, timeline, legend
+  // ---------------------------------------------------------------------------
+  function buildFeed() {
+    const list = $('[data-af-hops]'), ticks = $('[data-af-ticks]');
+    list.textContent = ''; ticks.textContent = '';
+    frames.forEach((f) => {
+      f.hops.forEach((h) => {
+        const li = document.createElement('li');
+        li.className = 'hop' + (h.step ? ' is-step' : '');
+        li.style.setProperty('--c', KINDS[h.kind].css);
+        li.dataset.f = f.i;
+        const n = document.createElement('span'); n.className = 'hop-n'; n.textContent = h.id;
+        const body = document.createElement('div');
+        [['hop-label', h.label], ['hop-route', route(h)], ['hop-meta', h.detail]].forEach((p) => {
+          const d = div(p[0]); d.textContent = p[1]; body.appendChild(d);
+        });
+        const tag = document.createElement('span'); tag.className = 'hop-chip'; tag.textContent = h.chip;
+        body.firstChild.appendChild(tag);
+        if (h.scopes && h.scopes.length) {
+          const sc = div('hop-scopes');
+          h.scopes.forEach((s) => { const c = document.createElement('span'); c.textContent = s; sc.appendChild(c); });
+          body.appendChild(sc);
+        }
+        li.appendChild(n); li.appendChild(body);
+        li.addEventListener('click', () => { play(false); seek(f.i); });
+        list.appendChild(li);
+      });
+      const h0 = f.hops[0];
+      const t = document.createElement('button');
+      t.type = 'button';
+      t.className = 'tick' + (h0.step ? ' is-step' : '') + (f.hops.length > 1 ? ' is-par' : '');
+      t.style.setProperty('--c', KINDS[h0.kind].css);
+      t.title = (f.i + 1) + '. ' + (f.title ? f.title + ': ' : '') + f.hops.map((h) => h.label).join(' / ');
+      t.setAttribute('aria-label', t.title);
+      t.addEventListener('click', () => { play(false); seek(f.i); });
+      ticks.appendChild(t);
+    });
+    $('[data-af-hop-count]').textContent = frames.length + ' steps';
+    renderLegend();
+  }
+
+  function renderFeed(active) {
+    const items = document.querySelectorAll('.hop'), ticks = document.querySelectorAll('.tick');
+    let first = null;
+    items.forEach((li) => {
+      const fi = +li.dataset.f;
+      li.classList.toggle('is-done', fi <= cur);
+      li.classList.toggle('is-current', fi === active);
+      if (fi === active && !first) first = li;
+    });
+    ticks.forEach((t, i) => { t.classList.toggle('is-done', i <= cur); t.classList.toggle('is-current', i === active); });
+    if (first) {
+      const box = first.parentNode;
+      const top = first.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+      if (top < box.scrollTop || top + first.offsetHeight > box.scrollTop + box.clientHeight) {
+        box.scrollTo({ top: top - box.clientHeight / 3, behavior: reduceMotion || !playing ? 'auto' : 'smooth' });
+      }
+    }
+    $('[data-af-count]').textContent = Math.max(0, active + 1) + ' / ' + frames.length;
+  }
+
+  function renderAll(fresh) {
+    renderWallets(cur, fresh);
+    renderLanes(cur);
+    renderFeed(flight ? flight.f : cur);
+    renderChat(cur, flight ? flight.f : undefined);
+    if (!flight) setNow(cur >= 0 ? frames[cur] : null);
+  }
+
+  function setNow(f) {
+    const box = $('[data-af-now]');
+    const n = $('[data-af-now-n]'), label = $('[data-af-now-label]'), meta = $('[data-af-now-meta]'), clock = $('[data-af-now-clock]');
+    if (!f) {
+      box.style.removeProperty('--c');
+      n.textContent = '–';
+      label.textContent = scenario.title;
+      meta.textContent = frames.length + ' steps · press Play, or step through with →';
+      clock.textContent = '';
+      return;
+    }
+    const h0 = f.hops[0];
+    box.style.setProperty('--c', KINDS[h0.kind].css);
+    n.textContent = f.i + 1;
+    if (f.hops.length > 1) {
+      label.textContent = (f.title || 'In parallel') + ' · ' + f.hops.map((h) => h.label).join(' | ');
+      meta.textContent = f.hops.map((h) => route(h) + ' · ' + h.chip).join('   |   ');
+    } else {
+      label.textContent = h0.label;
+      meta.textContent = route(h0) + (h0.detail ? ' · ' + h0.detail : '');
+    }
+    clock.textContent = (f.i + 1) + '/' + frames.length;
+  }
+
+  function route(h) {
+    return h.local ? 'at ' + NODES[h.to].name : NODES[h.from].name + ' → ' + NODES[h.to].name;
+  }
+
+  function renderLegend() {
+    const legend = $('[data-af-legend]'), seen = {};
+    let steps = false, badges = false;
+    legend.textContent = '';
+    frames.forEach((f) => f.hops.forEach((h) => { seen[h.kind] = true; if (h.step) steps = true; if (h.local) badges = true; }));
+    const add = (cls, color, text) => {
+      const s = document.createElement('span'), i = document.createElement('i');
+      if (cls) i.className = cls;
+      if (color) i.style.setProperty('--c', color);
+      s.appendChild(i); s.appendChild(document.createTextNode(text)); legend.appendChild(s);
+    };
+    Object.keys(KINDS).forEach((k) => { if (seen[k]) add('', KINDS[k].css, KINDS[k].legend); });
+    if (steps) add('is-step', '', 'OAuth step (dashed)');
+    if (badges) add('is-badge', '', 'Check by the receiver (badge)');
+    const hint = document.createElement('span'); hint.className = 'af-hint';
+    hint.textContent = 'space · play/pause   ← → · step   R · restart   F · follow   + − 0 · zoom (or wheel, drag)   T · theme   D · details';
+    legend.appendChild(hint);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Wiring
+  // ---------------------------------------------------------------------------
+  const select = $('[data-af-scenario]');
+  SCENARIOS.forEach((s) => {
+    const o = document.createElement('option'); o.value = s.id; o.textContent = s.title; select.appendChild(o);
+  });
+  select.value = scenario.id;
+  select.addEventListener('change', () => { scenario = SCENARIOS.find((s) => s.id === select.value); stopAfter = null; load(); play(true); });
+
+  function segment(el, value, onPick) {
+    el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === String(value))));
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      el.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      onPick(b.dataset.v);
+    });
+  }
+  segment($('[data-af-speed]'), 1, (v) => { speed = parseFloat(v); });
+  segment($('[data-af-opt="cached"]'), opts.cached ? '1' : '0', (v) => { opts.cached = v === '1'; stopAfter = null; load(); play(true); });
+  segment($('[data-af-opt="guard"]'), opts.guard ? '1' : '0', (v) => { opts.guard = v === '1'; stopAfter = null; load(); play(true); });
+
+  // View: theme and the details panel, remembered per browser (best effort).
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode: not remembered */ } }
+  };
+  const SUN = '<svg class="is-line" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>Light';
+  const MOON = '<svg class="is-line" viewBox="0 0 16 16"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z"/></svg>Dark';
+  function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    // The button names the theme it switches to.
+    $('[data-af-theme]').innerHTML = t === 'dark' ? SUN : MOON;
+    store.set('af-theme', t);
+  }
+  function setDetails(show) {
+    $('.af-main').classList.toggle('is-full', !show);
+    $('[data-af-details]').setAttribute('aria-pressed', String(show));
+    store.set('af-details', show ? '1' : '0');
+    if (show) renderFeed(flight ? flight.f : cur);
+  }
+  setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+  setDetails(params.has('details') ? params.get('details') !== '0' : store.get('af-details') !== '0');
+  $('[data-af-theme]').addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
+  $('[data-af-details]').addEventListener('click', () => setDetails($('.af-main').classList.contains('is-full')));
+
+  $('[data-af-follow]').addEventListener('click', () => setFollow(!follow));
+  document.querySelectorAll('[data-af-zoom]').forEach((b) => b.addEventListener('click', () => zoomBy(b.dataset.afZoom)));
+  function zoomBy(how) {
+    if (follow) setFollow(false);
+    if (how === 'fit') setTarget(FULL);
+    else zoomAt(how === 'in' ? 1 / 1.3 : 1.3, centre());
+  }
+
+  $('[data-af-play]').addEventListener('click', () => { stopAfter = null; play(!playing); });
+  $('[data-af-restart]').addEventListener('click', () => { stopAfter = null; seek(-1); play(true); });
+  $('[data-af-back]').addEventListener('click', () => stepBy(-1));
+  $('[data-af-fwd]').addEventListener('click', () => stepBy(1));
+  document.addEventListener('keydown', (e) => {
+    if (e.target.closest && e.target.closest('select, input')) return;
+    if (e.key === ' ') { e.preventDefault(); stopAfter = null; play(!playing); }
+    else if (e.key === 'ArrowRight') stepBy(1);
+    else if (e.key === 'ArrowLeft') stepBy(-1);
+    else if (e.key === 'r' || e.key === 'R') { stopAfter = null; seek(-1); play(true); }
+    else if (e.key === 't' || e.key === 'T') $('[data-af-theme]').click();
+    else if (e.key === 'd' || e.key === 'D') $('[data-af-details]').click();
+    else if (e.key === 'f' || e.key === 'F') setFollow(!follow);
+    else if (e.key === '+' || e.key === '=') zoomBy('in');
+    else if (e.key === '-' || e.key === '_') zoomBy('out');
+    else if (e.key === '0') zoomBy('fit');
+  });
+
+  $('[data-af-coordinator]').textContent = NAMES.coordinator;
+  drawStatic();
+  load();
+  {
+    let f0 = params.get('follow');
+    if (f0 === null) { try { f0 = localStorage.getItem('af-follow'); } catch (e) { f0 = null; } }
+    setFollow(f0 === '1');
+    applyView();
+  }
+  // ?at=N opens paused after step N (deep links for a talk, and screenshots);
+  // ?play=0 opens paused at the start; ?at=N&play=1 plays on from step N.
+  if (params.has('at')) { seek(parseInt(params.get('at'), 10) - 1); play(params.get('play') === '1'); }
+  else play(params.get('play') !== '0');
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -7,6 +7,8 @@ queried from Agent Manager with amctl on every request (agent_info.py), with no
 fallback copy. /api/session leaves the amctl session refreshed. /api/token-audit
 returns the demo's token audit trail (.demo-logs/token-audit.jsonl), oldest first,
 for token-flow.html.
+
+architecture-flow.html is a static page (scripted scenarios, no API calls).
 """
 
 import json

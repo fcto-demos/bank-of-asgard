@@ -127,12 +127,13 @@ body { -webkit-font-smoothing: antialiased; }
 
       <!-- One column per agent. data-agent is the agent's name in Agent Manager: the
            lookup key for /api/agent?name= (serve.py → agent_info.py → amctl).
-           data-nickname is the name shown on the slide for that agent; left empty,
-           the slide shows the agent's display name from Agent Manager. -->
+           data-name-key picks the name shown on the slide from agent-names.js
+           (coordinator, savings, tax); an empty or missing name shows the agent's
+           display name from Agent Manager. -->
       <div class="an-grid">
         <i class="an-sep an-sep--1" aria-hidden="true"></i><i class="an-sep an-sep--2" aria-hidden="true"></i>
 
-        <section class="an-card" data-agent="transactionagent" data-nickname="Saga" style="--an-delay:.1s">
+        <section class="an-card" data-agent="transactionagent" data-name-key="coordinator" style="--an-delay:.1s">
           <div class="an-holo" aria-hidden="true">
             <span class="an-role">COORDINATOR</span>
             <i class="an-corner an-corner--l"></i><i class="an-corner an-corner--r"></i>
@@ -155,7 +156,7 @@ body { -webkit-font-smoothing: antialiased; }
           </div>
         </section>
 
-        <section class="an-card" data-agent="savingsagent" data-nickname="Picsou" style="--an-delay:.5s">
+        <section class="an-card" data-agent="savingsagent" data-name-key="savings" style="--an-delay:.5s">
           <div class="an-holo" aria-hidden="true">
             <span class="an-role">SAVINGS EXPERT</span>
             <i class="an-corner an-corner--l"></i><i class="an-corner an-corner--r"></i>
@@ -178,7 +179,7 @@ body { -webkit-font-smoothing: antialiased; }
           </div>
         </section>
 
-        <section class="an-card" data-agent="tax-agent" data-nickname="Penible" style="--an-delay:.9s">
+        <section class="an-card" data-agent="tax-agent" data-name-key="tax" style="--an-delay:.9s">
           <div class="an-holo" aria-hidden="true">
             <span class="an-role">TAXES EXPERT</span>
             <i class="an-corner an-corner--l"></i><i class="an-corner an-corner--r"></i>
@@ -206,9 +207,16 @@ body { -webkit-font-smoothing: antialiased; }
   </div>
 </div>
 
+<script src="agent-names.js"></script>
 <script>
 (function () {
   'use strict';
+
+  // Slide names from agent-names.js, stored as data-nickname (read below).
+  document.querySelectorAll('.an-card[data-name-key]').forEach(function (card) {
+    var name = (window.AGENT_NAMES || {})[card.getAttribute('data-name-key')];
+    if (name) card.setAttribute('data-nickname', name);
+  });
 
   // ---------------------------------------------------------------------------
   // LIVE DATA — each column's sheet is read from Agent Manager with amctl on every

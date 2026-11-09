@@ -478,13 +478,13 @@ echo "frontend:$!" >> "$PID_FILE"
 
 wait_for_http "http://localhost:$PORT_FRONTEND" "frontend" 90
 
-# ── Start presentation server (agent-manager-chef) ────────────────────────────
-# Serves the animated Token Flow page (reads .demo-logs/token-audit.jsonl) and the
-# "Inside our agents" slide (reads Agent Manager through amctl). Standard library only,
-# bound to 127.0.0.1 by serve.py itself.
+# ── Start presentation server (animations) ────────────────────────────────────
+# Serves the Token Flow page (reads .demo-logs/token-audit.jsonl), the Architecture
+# Flow page (static) and the "Inside our agents" slide (reads Agent Manager through
+# amctl). Standard library only, bound to 127.0.0.1 by serve.py itself.
 section "Starting presentation server (port $PORT_SLIDES)"
 
-(cd "$ROOT/agent-manager-chef" && python3 serve.py "$PORT_SLIDES" \
+(cd "$ROOT/animations" && python3 serve.py "$PORT_SLIDES" \
     > "$LOG_DIR/presentation.log" 2>&1) &
 echo "presentation:$!" >> "$PID_FILE"
 check_launched "$!" "presentation server" "$LOG_DIR/presentation.log"

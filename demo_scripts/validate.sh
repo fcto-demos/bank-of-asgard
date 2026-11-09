@@ -241,7 +241,7 @@ check_port $PORT_API      "transactions-api"
 check_port $PORT_AGENT    "transactions-agent"
 check_port $PORT_MCP      "agencies-mcp-server"
 check_port $PORT_SAVINGS  "savings-goals-agent"
-check_port $PORT_SLIDES   "presentation server — stop agent-manager-chef/start-presentation.sh if it is running"
+check_port $PORT_SLIDES   "presentation server — stop animations/start-presentation.sh if it is running"
 # Optional service — only checked when its venv is present (see start-demo.sh).
 [[ -f "$ROOT/tax-agent/venv/bin/python" ]] && check_port $PORT_TAX "tax-agent" || true
 

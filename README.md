@@ -276,7 +276,7 @@ Leaving `TAX_CONSENT_SCOPE` unset falls back to `read_transactions`: the flow wo
 | `8012` | Agencies MCP Server (FastMCP SSE)    | `agencies-mcp-server/server.py` → port constant, `docker-compose.yml` → port mapping |
 | `8013` | Savings Goals Agent (FastAPI)        | `savings-goals-agent/server.py` → port constant              |
 | `8014` | Tax Agent — Ministry of Finance (FastAPI) | `tax-agent/server.py` → port constant, `transactions-agent/.env` → `TAX_AGENT_URL` |
-| `8027` | Presentation server (Token Flow + Inside our agents pages) | `PORT_SLIDES` in the demo scripts; `agent-manager-chef/start-presentation.sh` takes the port as its first argument |
+| `8027` | Presentation server (Token Flow, Architecture Flow and Inside our agents pages) | `PORT_SLIDES` in the demo scripts; `animations/start-presentation.sh` takes the port as its first argument |
 
 When changing a port, also update:
 
@@ -898,12 +898,18 @@ cd ..
 ./demo_scripts/stop-demo.sh
 ```
 
-`start-demo.sh` also starts the presentation server from `agent-manager-chef/` (`serve.py`, standard library only, bound to `127.0.0.1`), which serves two pages:
+`start-demo.sh` also starts the presentation server from `animations/` (`serve.py`, standard library only, bound to `127.0.0.1`), which serves three pages:
 
 - **Token Flow** — `http://localhost:8027/token-flow.html`: the token audit trail animated. Each hop is a token travelling between systems, coloured by token type (OBO gold, Agent cyan, API key violet). OAuth protocol steps (PKCE challenge, auth code, OBO exchange) are dashed chips, tokens are solid, and a receiving agent's token check shows as a ✓ or ✕ badge on that agent. Pick a transaction, then play, step (← →) or change the speed.
+- **Architecture Flow** — `http://localhost:8027/architecture-flow.html`: every component (app, backend server, the coordinator and its two in-process sub-agents, the savings and tax agents, Agencies MCP, Transactions API, AI Gateway, LLM, Identity Server, Agent Manager), with a sample request animated across them. Pick a request: a financial check-up, finding a branch (MCP), preparing a tax return (cross-organisation), or signing in. The page uses the same token colours and chip rules as Token Flow, and the assistant chat plays alongside. The AI Gateway is drawn fronting the LLM, the Agencies MCP server and the Transactions API (the `gateway-setup/` deployment with the MCP and REST proxies), so every call to them goes through it. Two toggles change the run: **Tokens** (first call with consent and token exchanges, or cached) and **AI Guardrails** (v1 or v2). The scenarios are scripted from the code, not read from the audit log, so the page also works offline when opened as a file. To read the diagram up close, zoom with the mouse wheel or the **− Fit +** buttons (`+`, `-`, `0`) and drag to pan, or turn on **Follow** (`F`): the view then eases onto the systems of each step as it plays. The header also has a **Light / Dark** theme switch (`T`) and a **Details** button (`D`) that hides the chat and step list so the diagram fills the page. Theme, Details and Follow are remembered by the browser. `?scenario=checkup|agencies|tax|signin&at=N` opens paused on step N; `?theme=light|dark`, `?details=0` and `?follow=1` set the view from the URL.
+
+  ![Architecture Flow playing the financial check-up: consent, token exchanges, the two sub-agents in parallel, the savings agent and the final reply](animations/architecture-flow.gif)
+
 - **Inside our agents** — `http://localhost:8027/inside-our-agents.html`: each agent's live sheet from Agent Manager, read with `amctl`. It needs a valid session (`amctl login`); without one, each column shows the error.
 
-If you already run `agent-manager-chef/start-presentation.sh` on its own, stop it first, since the pre-flight check fails when port 8027 is taken. To add the server to a demo that was started before it was part of the scripts, run `./demo_scripts/restart.sh presentation`.
+The agents' display names on both Architecture Flow and Inside our agents (Saga, Savvy and Ouch by default) live in one file, `animations/agent-names.js`. Edit it and reload the page; an empty name makes Inside our agents show the agent's display name from Agent Manager.
+
+If you already run `animations/start-presentation.sh` on its own, stop it first, since the pre-flight check fails when port 8027 is taken. To add the server to a demo that was started before it was part of the scripts, run `./demo_scripts/restart.sh presentation`.
 
 #### Rogue agent demo (v2)
 

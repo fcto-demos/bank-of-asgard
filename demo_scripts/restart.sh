@@ -346,7 +346,7 @@ case "$SERVICE" in
         section "Restarting presentation server (port $PORT_SLIDES)"
         stop_service "presentation"
         free_port $PORT_SLIDES
-        (cd "$ROOT/agent-manager-chef" && python3 serve.py "$PORT_SLIDES" \
+        (cd "$ROOT/animations" && python3 serve.py "$PORT_SLIDES" \
             > "$LOG_DIR/presentation.log" 2>&1) &
         register_pid "presentation" "$!"
         check_launched "$!" "presentation"
