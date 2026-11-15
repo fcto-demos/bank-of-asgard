@@ -77,7 +77,7 @@ It presents results as prose or formatted lists, never raw JSON, in British Engl
 
 **name:** Suggest a savings goal
 
-**description:** Takes money identified as recoverable — typically forgotten subscriptions — and delegates to the Savings Goals Agent, returning a named goal, projected balances at 1, 5 and 10 years, and a recommendation. A real cross-process agent call.
+**description:** Takes money identified as recoverable — typically forgotten subscriptions — and delegates to the Savings Goals Agent, returning a named goal, projected balances at 1, 5 and 10 years, and a recommendation. A real cross-process agent call over A2A 1.0.
 
 **tags:** `savings`, `goal-setting`, `projections`, `delegation`
 
@@ -117,7 +117,7 @@ Unlike the two specialist agents, this one is **not** protected by a bearer toke
 | Read profile | OBO | SCIM2 self-service read |
 | Update profile | OBO | SCIM2 self-service write (`/scim2/Me`, not the admin scope) |
 | Summarise deductible spend | OBO | tax consent scope |
-| Call the Savings Goals Agent | agent token | audienced for `SAVINGS_AGENT_CLIENT_ID` |
+| Call the Savings Goals Agent (A2A) | agent token | audienced for `SAVINGS_AGENT_CLIENT_ID` |
 | Call the Tax Filing Agent | agent token | audienced for `TAX_AGENT_CLIENT_ID` |
 | Call the Agencies MCP server | agent token | audienced for the MCP client ID |
 
@@ -131,4 +131,4 @@ Every account-specific skill here is gated on interactive consent: the OBO flow 
 
 ## Deferred: A2A transport
 
-The endpoint is a WebSocket at `/chat` carrying `{"type": "message", "content": "..."}` frames, not an A2A transport. Transport, a served card and a public `url` come later — the content above is what the card will be filled from. Confirm the field names against the A2A spec revision in force when that work starts.
+This agent is an A2A *client*: it calls the Savings Goals Agent over A2A 1.0 (`app/a2a_client.py`; card read from `SAVINGS_AGENT_A2A_URL`), and the Tax Filing Agent is still plain REST. It is not yet an A2A *server*. Its own endpoint is a WebSocket at `/chat` carrying `{"type": "message", "content": "..."}` frames, not an A2A transport. Transport, a served card and a public `url` come later — the content above is what the card will be filled from. Confirm the field names against the A2A spec revision in force when that work starts.

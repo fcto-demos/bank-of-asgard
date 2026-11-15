@@ -405,7 +405,7 @@ body { display: flex; flex-direction: column; background: var(--page); color: va
     subs:    { x: 452,  y: 562, w: 232, h: 56, name: 'Subscription Detective', role: 'IN-PROCESS SUB-AGENT', icon: 'search', cls: 'is-sub' },
     spend:   { x: 708,  y: 562, w: 232, h: 56, name: 'Spending Health', role: 'IN-PROCESS SUB-AGENT', icon: 'pulse', cls: 'is-sub' },
     txapi:   { x: 1060, y: 300, w: 212, h: 64, name: 'Transactions API', role: 'RESOURCE API · :8010', extra: 'GET /transactions', icon: 'db' },
-    savings: { x: 1060, y: 492, w: 212, h: 64, name: '{savings}', role: 'SAVINGS AGENT · :8013', extra: 'POST /suggest-goal', icon: 'coins' },
+    savings: { x: 1060, y: 492, w: 212, h: 64, name: '{savings}', role: 'SAVINGS AGENT · :8013', extra: 'A2A · SendMessage', icon: 'coins' },
     mcp:     { x: 1060, y: 684, w: 212, h: 64, name: 'Agencies MCP', role: 'MCP SERVER · :8012', extra: 'tool: get_agencies', icon: 'plug' },
     tax:     { x: 1420, y: 492, w: 236, h: 64, name: '{tax}', role: 'TAX AGENT · :8014', extra: 'POST /prepare-return', icon: 'scroll', cls: 'is-mof' },
     amp:     { x: 800,  y: 846, w: 1540, h: 50, name: 'Agent Manager', role: 'OTEL TRACES · EVALUATIONS · ONE TRACE ACROSS AGENTS (traceparent)', icon: 'chart', cls: 'is-band', inline: true }
@@ -595,7 +595,7 @@ body { display: flex; flex-direction: column; background: var(--page); color: va
         ] },
         ...llm('saga', 'decide the next step', 'TOOL CALL', 'both summaries are in → SuggestSavingsGoal', o),
         ...agentToken('agent-sav', 'SAVINGS_AGENT_CLIENT_ID', 'AGENT → {SAVINGS}', o),
-        hop('saga', 'savings', 'AGENT', 'AGENT TOKEN', '{saga} asks {savings} for a savings goal', 'POST /suggest-goal · both summaries + monthly amount · X-Transaction-Id · traceparent', { uses: 'agent-sav' }),
+        hop('saga', 'savings', 'AGENT', 'AGENT TOKEN', '{saga} asks {savings} for a savings goal', 'A2A SendMessage (JSON-RPC) · both summaries + monthly amount · X-Transaction-Id · traceparent', { uses: 'agent-sav' }),
         check('savings', 'AGENT', 'TOKEN VERIFIED', '{savings} verifies the agent token', 'RS256 via IS JWKS · aud = SAVINGS_AGENT_CLIENT_ID · proves which agent is calling'),
         work('savings', 'PROJECT @ 3% APY', '{savings} projects 1, 5 and 10-year balances', 'projections.py · deterministic, no LLM'),
         ...llm('savings', 'name the goal', 'GOAL', '{goal_name, message} · {savings} uses its own gateway key', o),

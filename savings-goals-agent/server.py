@@ -27,6 +27,7 @@ from traceloop.sdk.tracing import set_conversation_id
 from pydantic import BaseModel, PrivateAttr
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from a2a_server import AGENT_CARD_PATH, build_agent_card, mount_a2a
 from audit_log import emit_token_event, register_actor_name, set_transaction
 from gateway import GatewayTokenManager, GatewayBearerAuth, GatewayApiKeyAuth
 from projections import project_milestones
@@ -66,6 +67,16 @@ if SKIP_TOKEN_VALIDATION:
         "SKIP_TOKEN_VALIDATION=true: bearer JWTs are NOT signature/audience-checked here — "
         "relying on the upstream gateway having validated them"
     )
+
+# Base URL the A2A Agent Card advertises (its supportedInterfaces). Callers that fetch the
+# card send their messages there, so set it to the URL they reach this agent on directly.
+# Behind the WSO2 AI Gateway's agent proxy it hardly matters: the proxy serves the card in
+# passthrough mode and rewrites these URLs to its own.
+A2A_PUBLIC_URL = os.environ.get("A2A_PUBLIC_URL", "http://localhost:8013")
+
+# Reachable without credentials: liveness probes have no token, and A2A discovery needs the
+# Agent Card to be public (the gateway's card route runs no auth either).
+_PUBLIC_PATHS = {"/health", AGENT_CARD_PATH}
 
 # The resource label "savings_agent" (used as a destination in transactions-agent's
 # auth_manager.py) and this service's own name both refer to the same real entity —
@@ -240,7 +251,7 @@ def _caller_trace_context(request: Request) -> Iterator[None]:
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """Validates every request except /health against either a bearer JWT or, if
+    """Validates every request except /health and the Agent Card against either a bearer JWT or, if
     INBOUND_API_KEY is set, a static API key — either credential is accepted, neither is
     required over the other. With SKIP_TOKEN_VALIDATION, a bearer token only has to be
     present, not valid. No SSE/streaming responses on this service, so
@@ -255,8 +266,9 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         # so the validation audit events below are tagged with the right transaction_id.
         set_transaction(request.headers.get("x-transaction-id"))
         # Liveness probes (start-demo.sh, container healthchecks) have no token to present
-        # and the response exposes nothing — same exemption as tax-agent/server.py.
-        if request.url.path == "/health":
+        # and the response exposes nothing — same exemption as tax-agent/server.py. The
+        # Agent Card is public by A2A design: it describes how to authenticate.
+        if request.url.path in _PUBLIC_PATHS and request.method in ("GET", "HEAD"):
             return await call_next(request)
 
         # Debug: dump every inbound header with its full value, credentials included —
@@ -517,7 +529,9 @@ class SuggestGoalRequest(BaseModel):
     transaction_id: str | None = None
 
 
-app = FastAPI(title="Bank of Asgard — Savings Goals Agent", version="1.0.0")
+AGENT_VERSION = "1.1.0"
+
+app = FastAPI(title="Bank of Asgard — Savings Goals Agent", version=AGENT_VERSION)
 app.add_middleware(BearerAuthMiddleware)
 
 
@@ -528,6 +542,18 @@ async def health():
 
 @app.post("/suggest-goal")
 async def suggest_goal(req: SuggestGoalRequest):
+    """Plain REST entry point, kept for callers not on A2A yet. The Coordinator uses A2A."""
+    return await _suggest_goal(req)
+
+
+async def _suggest_goal_a2a(data: dict) -> dict:
+    """A2A entry point (see a2a_server.py): the same request, from a message's data part.
+    A body that doesn't match SuggestGoalRequest raises pydantic's ValidationError, which
+    the executor turns into a JSON-RPC invalid-params error."""
+    return await _suggest_goal(SuggestGoalRequest.model_validate(data))
+
+
+async def _suggest_goal(req: SuggestGoalRequest) -> dict:
     set_transaction(req.transaction_id)
 
     logger.info ("--> Entering savings agent code")
@@ -635,6 +661,14 @@ async def _suggest_goal_v2(req: SuggestGoalRequest, prompt_input: dict) -> dict:
         "questions": questions,
         "message": message,
     }
+
+
+mount_a2a(app, _suggest_goal_a2a, build_agent_card(
+    public_url=A2A_PUBLIC_URL,
+    version=AGENT_VERSION,
+    token_url=f"{IDP_BASE_URL.rstrip('/')}/oauth2/token",
+    api_key_header=INBOUND_API_KEY_HEADER if INBOUND_API_KEY else None,
+))
 
 
 if __name__ == "__main__":

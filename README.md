@@ -472,7 +472,9 @@ TRANSACTIONS_AGENT_SECRET="AGENTSECRET_123"
 # Savings Goals Agent — dedicated client-credentials OAuth2 app, same pattern as MCP_CLIENT_ID
 # EXPECTED_AUDIENCE in savings-goals-agent/.env must equal this value
 SAVINGS_AGENT_CLIENT_ID="SAVINGS_123"
-SAVINGS_AGENT_URL="http://localhost:8013/suggest-goal"
+# Called over A2A 1.0 — the agent's BASE URL, not an endpoint (the Agent Card is read from
+# <base>/.well-known/agent-card.json). Through the gateway: https://<GATEWAY_HOST>/boa-savings
+SAVINGS_AGENT_A2A_URL="http://localhost:8013"
 
 # Ministry of Finance Tax Agent — a cross-organisation call. Unset TAX_AGENT_CLIENT_ID
 # to drop both tax tools from the assistant.
@@ -554,6 +556,9 @@ IDP_BASE_URL=https://api.asgardeo.io/t/<ORG_NAME>
 EXPECTED_AUDIENCE=SAVINGS_123
 # SSL_VERIFY=false   # only for self-signed certs in local dev
 
+# Base URL the A2A Agent Card advertises — see "A2A" below
+# A2A_PUBLIC_URL=http://localhost:8013
+
 # WSO2 API Gateway client credentials (only when gateway.enabled: true in llm_config.yaml).
 # Always uses the unsecured v1 endpoint (GATEWAY_BASE_URL) — this service never sees raw
 # user chat input, so it's not subject to the AI guardrails applied to GATEWAY_BASE_URL_SECURED.
@@ -580,6 +585,29 @@ AMP_AGENT_API_KEY=<AMP_SAVINGS_AGENT_API_KEY>
 # OTEL_EXPORTER_OTLP_CERTIFICATE=~/.openchoreo/ca.pem
 ```
 
+#### A2A
+
+The Savings Goals Agent is an [A2A](https://a2a-protocol.org) 1.0 agent (a2a-sdk 1.x), and the Coordinator calls it over A2A. On port 8013 it serves:
+
+| Path | What |
+|------|------|
+| `GET /.well-known/agent-card.json` | Agent Card: skill `suggest-savings-goal`, both bindings, security schemes. Public, no token. |
+| `POST /` | JSON-RPC binding (`SendMessage`, ...) |
+| `POST /v1/message:send` | HTTP+JSON binding (and the rest of `/v1/...`) |
+| `POST /suggest-goal` | The previous plain REST route, kept for callers not on A2A yet |
+
+Every A2A request needs the `A2A-Version: 1.0` header (the a2a-sdk client adds it) and the same credential as before: a bearer agent token whose audience is `EXPECTED_AUDIENCE`, or the inbound API key when one is set. The request is one message with a single data part carrying the fields the REST body had. The reply is one message with a data part holding the same JSON the REST route returns (`status`, `goal_name`, `suggested_monthly_amount`, `projected_balances`, `message`), plus a text part with the recommendation. There are no tasks or streaming: the agent answers in one shot.
+
+```bash
+curl -s http://localhost:8013/.well-known/agent-card.json | jq '.supportedInterfaces'
+curl -s -X POST http://localhost:8013/ -H 'A2A-Version: 1.0' -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":
+  {"messageId":"m1","role":"ROLE_USER","parts":[{"data":{"subscription_summary":"3 forgotten subscriptions",
+  "spending_summary":"dining up 8%","monthly_recoverable":47.97}}]}}}'
+```
+
+The Coordinator reads the card from `SAVINGS_AGENT_A2A_URL` (in `transactions-agent/.env`) once, then sends its messages to the JSON-RPC endpoint the card advertises. That endpoint is `A2A_PUBLIC_URL` on a direct call. Set `A2A_PUBLIC_URL` to the URL callers really use, such as the agent's Agent Manager endpoint, or they'll be sent to `localhost:8013`. Behind the WSO2 AI Gateway's agent proxy, the gateway rewrites the card's URLs to its own (see [Savings Goals Agent over A2A](#savings-goals-agent-over-a2a) below). The card text mirrors `savings-goals-agent/description.md`.
+
 ### Trace structure (LangChain agent)
 
 With AMP on, the LangChain assistant's traces follow the [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (still at *Development* status), so the kind of each tool call is visible from the span under its `execute_tool {tool}` span rather than from a custom attribute:
@@ -603,7 +631,7 @@ Correlation uses only standard OpenTelemetry fields, no Traceloop-specific attri
 - **Turn:** each prompt is its own trace, so the trace ID identifies the turn.
 - **Remote agents:** calls to the Savings and Tax agents always carry a W3C `traceparent` and a W3C `baggage` header (`gen_ai.conversation.id=<session>`), with or without `--http-tracing`. Both agents read them, so their spans join the Coordinator's trace under its `invoke_agent` span and carry the same `gen_ai.conversation.id`.
 
-The `X-Transaction-Id` header and the `transaction_id` field in the body are no longer used for tracing. They hold a per-turn ID that keys the token audit log (the **Token Flow** page) and the Savings Agent's per-turn round cap.
+The `X-Transaction-Id` header and the `transaction_id` field in the body (for the Savings Agent, in the A2A message's data part) are no longer used for tracing. They hold a per-turn ID that keys the token audit log (the **Token Flow** page) and the Savings Agent's per-turn round cap.
 
 ### Self-signed OTLP endpoints
 
@@ -713,15 +741,16 @@ Supported by all five services — `transactions-agent/{langchain,autogen,strand
 If you run a WSO2 AI Gateway (1.2+) managed by AI Workspace, [gateway-setup/](gateway-setup/README.md) provisions everything for you. That covers:
 - the LLM proxies: v1 passthrough, and v2 with guardrails (request size, prompt injection, semantic topic guard, content safety, date-of-birth redaction);
 - one application and API key per agent;
-- the agencies MCP proxy and the transactions REST API.
+- the agencies MCP proxy and the transactions REST API;
+- optionally, the Savings Goals Agent's A2A agent proxy, on a standalone A2A gateway's controller (AI Workspace can't manage A2A gateways yet; see [Savings Goals Agent over A2A](#savings-goals-agent-over-a2a)).
 
 They can be deployed to separate LLM, MCP and API gateways, in the project of your choice. It also writes each agent's gateway settings:
 
 ```bash
-export ADMIN_PASSWORD='...'
-./gateway-setup/provision.py --list-targets     # find project and gateway ids, fill gateway-setup/gateway.env
-./gateway-setup/provision.py --check            # read-only pre-flight
-./gateway-setup/provision.py --write-env        # install, verify, update the agents' .env files
+read -rs ADMIN_PASSWORD && export ADMIN_PASSWORD
+python3 ./gateway-setup/provision.py --list-targets     # find project and gateway ids, fill gateway-setup/.env
+python3 ./gateway-setup/provision.py --check            # read-only pre-flight
+python3 ./gateway-setup/provision.py --write-env        # install, verify, update the agents' .env files
 BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh langchain   # gateways in containers must reach the services
 ```
 
@@ -837,6 +866,18 @@ Either way the services run natively on your machine while the gateway runs in a
 
 When `MCP_GATEWAY_ENABLED` is unset or `false`, the agent connects directly to `AGENCIES_MCP_URL` (useful for local dev without the gateway).
 
+### 	Savings Goals Agent over A2A
+
+The WSO2 AI Gateway (2026.10.0, with agent governance) can front A2A agents with an **agent proxy**. AI Workspace can't manage A2A gateways yet, so the Savings Goals Agent's proxy goes onto a standalone gateway through that gateway's controller REST API. `python3 ./gateway-setup/provision.py --only a2a --write-env` creates it when `A2A_CONTROLLER_URL`, `A2A_CONTROLLER_USERNAME` and `A2A_GATEWAY_URL` are set in `gateway-setup/.env` and the controller password is exported in your shell (`read -rs A2A_CONTROLLER_PASSWORD && export A2A_CONTROLLER_PASSWORD`; it is never read from a file) (see [gateway-setup/README.md](gateway-setup/README.md#agent-proxy-a2a)). It needs no AI Workspace login, and it writes `SAVINGS_AGENT_A2A_URL=<A2A_GATEWAY_URL>/boa-savings` into `transactions-agent/.env`. The proxy:
+
+- forwards to `http://host.docker.internal:8013` (`SAVINGS_A2A_UPSTREAM`), on both bindings: JSON-RPC at `/boa-savings` and HTTP+JSON at `/boa-savings/v1`;
+- serves the agent's own card in passthrough mode, with its URLs rewritten to the gateway's. The Coordinator reads the card through the proxy, so it also sends its messages through the proxy, and every call goes through the proxy's policies;
+- leaves authentication to the agent by default (`A2A_AUTH=passthrough`): the Coordinator's agent token goes through, and the Savings Agent validates it as before. `A2A_AUTH=jwt-auth` makes the gateway validate it too.
+
+To set it up by hand instead, `POST` an `Agent` resource to the controller's `/api/management/v1/agents`. Use the same context, upstream and transports (`JSONRPC` at `/`, `HTTP+JSON` at `/v1`), and no `agentCard` block, so the card is passthrough. Then set the proxy URL as `SAVINGS_AGENT_A2A_URL`. Either way the gateway runs in a container, so start the services with `BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh …`.
+
+To call the agent directly again, set `SAVINGS_AGENT_A2A_URL=http://localhost:8013`.
+
 ### Demo scripts (recommended for local development)
 
 The `demo_scripts/` directory provides s helper scripts that manage the full stack — transactions-api, agencies-mcp-server, savings-goals-agent, tax-agent, selected agent, Express server, and frontend — as native processes with health-checked startup, clean teardown, and single-service restart.
@@ -915,7 +956,7 @@ If you already run `animations/start-presentation.sh` on its own, stop it first,
 
 With `--v2`, the Savings Goals agent never understands its inputs and keeps asking for more information, whatever it is sent. It's meant for demoing a product that detects rogue agents: excessive tokens, iterations or tool calls. Ask the assistant for a financial check-up (LangChain only — the other implementations don't have `SuggestSavingsGoal`) and the runaway happens in two places:
 
-- **Inside the Savings agent:** each `/suggest-goal` request runs several "clarification" LLM rounds, re-sending the inputs on top of a growing conversation, and returns `status: needs_more_info` with a list of `questions` instead of a goal. The questions are always about transaction data (per-merchant breakdowns, other date ranges, largest debits), never about things only the customer knows. That keeps the Coordinator looping through its own tools rather than handing the questions to the user.
+- **Inside the Savings agent:** each request (A2A `SendMessage`, or `/suggest-goal`) runs several "clarification" LLM rounds, re-sending the inputs on top of a growing conversation, and returns `status: needs_more_info` with a list of `questions` instead of a goal. The questions are always about transaction data (per-merchant breakdowns, other date ranges, largest debits), never about things only the customer knows. That keeps the Coordinator looping through its own tools rather than handing the questions to the user.
 - **Between agents:** the Coordinator's v2 prompt tells it never to ask the user and to keep satisfying the Savings agent. It re-runs `AnalyzeSubscriptions` and `AnalyzeSpendingHealth` (each a sub-agent LLM call over 300 transactions), calls `GetMyTransactions` for whatever breakdown was requested, and calls `SuggestSavingsGoal` again, round after round. The user only gets a reply once the safety cap below stops the loop.
 
 `DEMO_MAX_ITERATIONS` (default `5`, set in `savings-goals-agent/.env` and `transactions-agent/.env`) is the demo's own safety cap. Each `SuggestSavingsGoal` round costs the Coordinator several model and tool steps, so even the default takes the Coordinator's turn well past a 10-iteration threshold. The Savings agent stops calling its LLM after that many rounds per user turn and returns canned questions. The Coordinator stops calling `SuggestSavingsGoal` after that many calls per turn and tells the user the advisor couldn't complete the request. Separately, every Coordinator turn (v1 included) is capped at `max(50, 10 × DEMO_MAX_ITERATIONS)` model calls. That is a backstop against a true runaway, set well above what a normal turn or the capped v2 loop needs. `DEMO_MAX_ITERATIONS` must be a positive integer, or the Coordinator refuses to start. A Savings agent request that times out (90s) or can't be reached is reported back to the Coordinator, which tells the user the advisor is unavailable rather than failing the turn.

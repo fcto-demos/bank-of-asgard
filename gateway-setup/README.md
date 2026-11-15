@@ -1,6 +1,6 @@
 # Installing Bank of Asgard on an existing WSO2 AI Gateway
 
-`gateway-setup/` provisions everything Bank of Asgard needs on a WSO2 AI Gateway you already run, through the AI Workspace control plane (Platform API). One command creates the LLM proxies, guardrails, applications, API keys, the agencies MCP proxy and the transactions REST API, deploys them to the gateways you name, checks that each one answers, and writes the matching settings for each agent.
+`gateway-setup/` provisions everything Bank of Asgard needs on a WSO2 AI Gateway you already run, through the AI Workspace control plane (Platform API). One command creates the LLM proxies, guardrails, applications, API keys, the agencies MCP proxy and the transactions REST API, deploys them to the gateways you name, checks that each one answers, and writes the matching settings for each agent. It can also create the Savings Goals Agent's A2A agent proxy. That one goes onto a standalone gateway through its controller REST API, since AI Workspace can't manage A2A gateways yet.
 
 It is plain Python 3 (standard library only, Python 3.9+): nothing to install.
 
@@ -15,9 +15,26 @@ All ids and contexts start with `RESOURCE_PREFIX` (default `boa`), and everythin
 | LLM proxy v2 | `boa-llm-v2` at `/boa-llm-v2` | LLM gateways | Guardrails (below): `GATEWAY_BASE_URL_SECURED`, used when the chat's **AI Guardrails** toggle is on |
 | Applications | `boa-transactions-agent`, `boa-savings-goals-agent`, `boa-tax-agent` | — | One per service, each with its own API keys |
 | MCP proxy | `boa-agencies-mcp` at `/boa-agencies` | MCP gateways | `agencies-mcp-server` (Streamable HTTP, `/mcp`): `MCP_GATEWAY_URL` |
+| Agent proxy (A2A) | `boa-savings-agent` at `/boa-savings` | the A2A gateway (its controller, not AI Workspace) | `savings-goals-agent` over A2A 1.0, JSON-RPC at `/boa-savings` and HTTP+JSON at `/boa-savings/v1`, Agent Card in passthrough mode: `SAVINGS_AGENT_A2A_URL` |
 | REST API | `boa-transactions-api` at `/boa-transactions` | API gateways | `transactions-api`, all operations of `transactions-api/openapi.yaml`: `TRANSACTIONS_API_BASE_URL` |
 
-LLM and MCP traffic can go to different gateways, and each list can name several gateways. The agents are pointed at the first gateway of each list.
+LLM, MCP and API traffic can go to different gateways, and each list can name several gateways. The agents are pointed at the first gateway of each list.
+
+### Agent proxy (A2A)
+
+AI Workspace can't manage A2A gateways yet. So the `a2a` part skips it and creates the proxy as an `Agent` resource on one standalone AI gateway with agent governance (2026.10.0), through that gateway's controller REST API: `<A2A_CONTROLLER_URL>/api/management/v1/agents`, with HTTP Basic auth. The part runs when `A2A_CONTROLLER_URL` is set, and `--only a2a` needs no AI Workspace login at all.
+
+| Setting | Meaning |
+|---|---|
+| `A2A_CONTROLLER_URL` | The controller REST API (container port 9090), e.g. `http://localhost:39090` |
+| `A2A_CONTROLLER_USERNAME` / `A2A_CONTROLLER_PASSWORD` | The admin that the gateway's `scripts/setup.sh` created. The password is printed once: export it in your shell, it is never read from a file. |
+| `A2A_GATEWAY_URL` | The HTTPS ingress as the agents reach it, e.g. `https://local-aigw.apis.coach:38443`. `SAVINGS_AGENT_A2A_URL` becomes this plus `/boa-savings`. |
+| `SAVINGS_A2A_UPSTREAM` | Where the gateway reaches the agent (default `http://host.docker.internal:8013`) |
+| `A2A_AUTH`, `A2A_TIMEOUT` | See "Agent authentication" below. The proxy's timeout defaults to `90s`, matching the Coordinator's, since the v2 demo mode runs several LLM rounds per request. |
+
+An Agent has no description field, so the installer marks its own with the annotation `bank-of-asgard.gateway-setup/managed-by`, which `teardown.py` checks. The gateway serves the agent's card in passthrough mode: it fetches the card from the agent on each request and rewrites its URLs from the scheme and host the caller used. So the Coordinator, which reads the card from `SAVINGS_AGENT_A2A_URL`, sends its messages through the proxy too. No `config.toml` setting is needed, even when the gateway's host port differs from its container port. The gateway strips only the context, so the binding prefixes (`/`, `/v1`) must be the paths the agent serves; `a2a_server.py` uses exactly those. The gateway speaks A2A 1.0 only and rejects operation requests without an `A2A-Version: 1.0` header; the Coordinator's a2a-sdk client always sends it.
+
+On this laptop, the A2A gateway is a third gateway beside the LLM and MCP ones, with host ports offset by +30000: HTTPS ingress 38443, HTTP 38080, controller 39090. Its listener uses the same `*.apis.coach` certificate as the others.
 
 Both proxies also carry `llm-cost` (turn it off with `PROXY_LLM_COST=false`). It prices every call from the gateway's `model_prices.json` and records the cost in the request's analytics metadata as `x-llm-cost` (USD). That's where Moesif, or any other analytics publisher, finds it; it's never sent back in a response header. A provider created by the installer carries `llm-cost` too. A reused provider is never written, so `--check` warns if it lacks one. A cost budget on a proxy needs the proxy's own `llm-cost`: the provider's runs on the request the proxy forwards to it, and its result never reaches the proxy.
 
@@ -57,25 +74,25 @@ The installer configures resources. It does not build gateway images or edit gat
 
 Leave a guardrail out of `V2_GUARDRAILS` if your gateway lacks its setting. Some policies, attached without their settings, make the gateway fail every request on that route.
 
-**4. Network.** The gateways run in containers while `agencies-mcp-server` (8012) and `transactions-api` (8010) run on your machine, so the gateways must be able to reach them:
+**4. Network.** The gateways run in containers while `agencies-mcp-server` (8012), `savings-goals-agent` (8013) and `transactions-api` (8010) run on your machine, so the gateways must be able to reach them:
 
 - Set `UPSTREAM_HOST` to how containers reach your machine: `host.docker.internal` for Docker Desktop and Rancher Desktop (the default) or `host.containers.internal` for Podman. On Linux Docker, add `extra_hosts: ["host.docker.internal:host-gateway"]` to the gateway runtime service.
 - Docker Desktop and Rancher Desktop forward `host.docker.internal` to your machine's loopback, so the services' default `127.0.0.1` binding works. Elsewhere (Linux Docker, Podman), or if the install reports the backend unreachable, start them listening on all interfaces: `BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh <agent>`.
-- If the gateways share a Docker network with the containerised services (`docker-compose.yml`), point `AGENCIES_MCP_UPSTREAM` and `TRANSACTIONS_API_UPSTREAM` at the container names instead.
+- If the gateways share a Docker network with the containerised services (`docker-compose.yml`), point `AGENCIES_MCP_UPSTREAM`, `SAVINGS_A2A_UPSTREAM` and `TRANSACTIONS_API_UPSTREAM` at the container names instead.
 
 ## Install
 
 ```bash
-# 1. Settings: the first run creates gateway-setup/gateway.env (gitignored) from the example.
-export ADMIN_PASSWORD='...'                          # AI Workspace admin password
-./gateway-setup/provision.py --list-targets          # projects and gateway ids
-$EDITOR gateway-setup/gateway.env                    # AIW_URL, PROJECT_ID, *_GATEWAY_IDS, provider key...
+# 1. Settings: the first run creates gateway-setup/.env (gitignored) from the example.
+read -rs ADMIN_PASSWORD && export ADMIN_PASSWORD      # AI Workspace admin password (not echoed, not in history)
+python3 ./gateway-setup/provision.py --list-targets          # projects and gateway ids
+$EDITOR gateway-setup/.env                           # AIW_URL, PROJECT_ID, *_GATEWAY_IDS, provider key...
 
 # 2. Read-only pre-flight: settings, project, gateways, policies, id/context collisions
-./gateway-setup/provision.py --check
+python3 ./gateway-setup/provision.py --check
 
 # 3. Install (idempotent: run it again after any change)
-./gateway-setup/provision.py --write-env             # --env-file .env.is to update a start-demo profile
+python3 ./gateway-setup/provision.py --write-env             # --env-file .env.is to update a start-demo profile
 ```
 
 Then:
@@ -89,7 +106,7 @@ Useful options:
 
 | Option | Effect |
 |---|---|
-| `--only llm,mcp,api` | Install just some parts. By default the LLM part always runs, and MCP and the REST API run when their gateway lists are set. |
+| `--only llm,mcp,a2a,api` | Install just some parts. By default the LLM part always runs; MCP and the REST API run when their gateway lists are set, and A2A when `A2A_CONTROLLER_URL` is. `--only a2a` skips AI Workspace entirely. |
 | `--create-project` | Create `PROJECT_ID` if it does not exist. |
 | `--rotate-keys` | Issue new API keys. Otherwise a key from a previous run is kept as long as the gateway accepts it, so re-running never breaks running agents. |
 | `--force` | Overwrite resources with our ids that the installer did not create. `--check` reports these as blockers. |
@@ -98,7 +115,7 @@ Useful options:
 
 | Service | Variables |
 |---|---|
-| `transactions-agent` | `GATEWAY_BASE_URL`, `GATEWAY_BASE_URL_SECURED`, `GATEWAY_AUTH_MODE`, `GATEWAY_API_KEY`, `GATEWAY_API_KEY_SECURED`, `MCP_GATEWAY_ENABLED`, `MCP_GATEWAY_URL`, `TRANSACTIONS_API_BASE_URL` |
+| `transactions-agent` | `GATEWAY_BASE_URL`, `GATEWAY_BASE_URL_SECURED`, `GATEWAY_AUTH_MODE`, `GATEWAY_API_KEY`, `GATEWAY_API_KEY_SECURED`, `MCP_GATEWAY_ENABLED`, `MCP_GATEWAY_URL`, `SAVINGS_AGENT_A2A_URL`, `TRANSACTIONS_API_BASE_URL` |
 | `savings-goals-agent`, `tax-agent` | `GATEWAY_BASE_URL`, `GATEWAY_AUTH_MODE`, `GATEWAY_API_KEY` |
 | `server` | `TRANSACTIONS_API_URL` |
 
@@ -111,7 +128,7 @@ If the gateway uses a self-signed certificate, add `SSL_CERT_FILE=<its CA>` to t
 - **`AGENT_AUTH_MODE=apikey` (default).** Each proxy requires `X-API-Key`. The installer issues one key per service and per proxy and links each key to the service's application, so the gateway's analytics attribute traffic per agent. The transactions agent gets separate v1 and v2 keys.
 - **`AGENT_AUTH_MODE=oauth`.** The proxies carry `jwt-auth` against `JWT_KEY_MANAGER`. The agents keep fetching client-credentials tokens: set `GATEWAY_TOKEN_ENDPOINT`, `GATEWAY_CLIENT_ID` and `GATEWAY_CLIENT_SECRET` from an application in that identity provider.
 
-For MCP and the REST API, the gateway forwards the caller's own token by default (`MCP_AUTH=passthrough`, `API_AUTH=passthrough`), and `agencies-mcp-server` and `transactions-api` validate it as they always do. Set `mcp-auth` or `jwt-auth` to have the gateway validate it as well.
+For MCP, A2A and the REST API, the gateway forwards the caller's own token by default (`MCP_AUTH=passthrough`, `A2A_AUTH=passthrough`, `API_AUTH=passthrough`), and `agencies-mcp-server`, `savings-goals-agent` and `transactions-api` validate it as they always do. Set `mcp-auth` or `jwt-auth` to have the gateway validate it as well. With `A2A_AUTH=jwt-auth`, `JWT_AUDIENCES` (if set) must include `SAVINGS_AGENT_CLIENT_ID`: that's the audience of the Coordinator's token for the Savings Agent. The `JWT_KEY_MANAGER` it names must also be defined in the A2A gateway's own `config.toml`, which is a separate gateway.
 
 ## Verify
 
@@ -122,7 +139,8 @@ The install finishes by probing each gateway:
 | Each API key | Accepted by the gateway. |
 | v2 | Lets an ordinary banking question through and blocks a prompt injection. |
 | v2 with a tool-result turn | Does not block it (see the next section). |
-| MCP proxy and REST API | Reach their backends. A 502/503 means the gateway cannot connect; see Network above. |
+| MCP proxy, agent proxy and REST API | Reach their backends. A 502/503 means the gateway cannot connect; see Network above. |
+| Agent Card through the agent proxy | Its `supportedInterfaces` point at the gateway, so callers don't bypass the proxy. |
 
 Then, in the app:
 
@@ -183,8 +201,8 @@ Every other proxy routed through that provider (other projects' too) needs the s
 ## Remove
 
 ```bash
-./gateway-setup/teardown.py --dry-run     # what would go
-./gateway-setup/teardown.py               # undeploy and delete
+python3 ./gateway-setup/teardown.py --dry-run     # what would go
+python3 ./gateway-setup/teardown.py               # undeploy and delete
 ```
 
 Teardown only removes resources whose description carries the installer's marker, unless you pass `--force`. It never deletes a provider you reused, or the project.

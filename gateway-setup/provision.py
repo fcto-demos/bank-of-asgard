@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Install Bank of Asgard's gateway resources onto an existing WSO2 AI Gateway.
 
-    ./gateway-setup/provision.py --list-targets     projects and gateways, to fill gateway.env
-    ./gateway-setup/provision.py --check            read-only pre-flight, exits non-zero on blockers
-    ./gateway-setup/provision.py                    install / update (idempotent)
-    ./gateway-setup/provision.py --only llm,mcp     just some parts: llm, mcp, api
-    ./gateway-setup/provision.py --write-env        also merge the agents' settings into their .env
-    ./gateway-setup/provision.py --rotate-keys      issue fresh API keys even if the stored ones work
-    ./gateway-setup/provision.py --env-only --write-env   just (re)write the agents' .env, no gateway calls
+    python3 ./gateway-setup/provision.py --list-targets     projects and gateways, to fill gateway-setup/.env
+    python3 ./gateway-setup/provision.py --check            read-only pre-flight, exits non-zero on blockers
+    python3 ./gateway-setup/provision.py                    install / update (idempotent)
+    python3 ./gateway-setup/provision.py --only llm,mcp     just some parts: llm, mcp, a2a, api
+    python3 ./gateway-setup/provision.py --write-env        also merge the agents' settings into their .env
+    python3 ./gateway-setup/provision.py --rotate-keys      issue fresh API keys even if the stored ones work
+    python3 ./gateway-setup/provision.py --env-only --write-env   just (re)write the agents' .env, no gateway calls
 
-Everything is read from gateway-setup/gateway.env (or the environment). What gets
+Everything is read from gateway-setup/.env (or the environment). What gets
 created, and why each guardrail is configured the way it is: gateway-setup/README.md
 and gateway-setup/resources.json.
 """
@@ -27,6 +27,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import a2a_controller as a2a
 import platform_api as pa
 from platform_api import MANAGED_MARKER, api, setting, setting_list
 
@@ -37,9 +38,12 @@ CATALOGUE: dict[str, Any] = json.loads((pa.HERE / "resources.json").read_text())
 # =============================================================================
 PREFIX = setting("RESOURCE_PREFIX", "boa")
 PROJECT_ID = setting("PROJECT_ID")
+# Gateways managed through AI Workspace. The a2a part is not among them: it goes straight
+# to a standalone gateway's controller (a2a_controller.py, A2A_CONTROLLER_URL).
 GATEWAYS = {"llm": setting_list("LLM_GATEWAY_IDS"),
             "mcp": setting_list("MCP_GATEWAY_IDS"),
             "api": setting_list("API_GATEWAY_IDS")}
+PARTS = ("llm", "mcp", "a2a", "api")
 
 LLM_PROVIDER = setting("LLM_PROVIDER", "anthropic").lower()
 EXISTING_PROVIDER_ID = setting("EXISTING_LLM_PROVIDER_ID")
@@ -135,21 +139,28 @@ def _llm_settings_errors() -> list[str]:
     return errors
 
 
+def aiw_parts(parts: list[str]) -> list[str]:
+    """The parts installed through AI Workspace — all but a2a."""
+    return [p for p in parts if p in GATEWAYS]
+
+
 def settings_errors(parts: list[str]) -> list[str]:
     errors = []
-    if not PROJECT_ID:
+    if aiw_parts(parts) and not PROJECT_ID:
         errors.append("PROJECT_ID is not set")
-    for part in parts:
+    for part in aiw_parts(parts):
         if not GATEWAYS[part]:
             errors.append(f"{part.upper()}_GATEWAY_IDS is empty — set it, or leave '{part}' out of --only")
     if "llm" in parts:
         errors += _llm_settings_errors()
     if "mcp" in parts and MCP_AUTH not in ("passthrough", "mcp-auth"):
         errors.append(f"MCP_AUTH={MCP_AUTH!r} — use 'passthrough' or 'mcp-auth'")
+    if "a2a" in parts:
+        errors += a2a.settings_errors()
     if "api" in parts and API_AUTH not in ("passthrough", "jwt-auth"):
         errors.append(f"API_AUTH={API_AUTH!r} — use 'passthrough' or 'jwt-auth'")
     needs_km = (("llm" in parts and AUTH_MODE == "oauth") or ("mcp" in parts and MCP_AUTH == "mcp-auth")
-                or ("api" in parts and API_AUTH == "jwt-auth"))
+                or ("a2a" in parts and a2a.AUTH == "jwt-auth") or ("api" in parts and API_AUTH == "jwt-auth"))
     if needs_km and not JWT_KEY_MANAGER:
         errors.append("JWT_KEY_MANAGER is not set — the name of the jwt-auth key manager in the "
                       "gateway's config.toml ([[policy_configurations.jwtauth_v1.keymanagers]])")
@@ -438,8 +449,8 @@ def check(parts: list[str], create_project: bool = False, force: bool = False) -
         print(f"  BLOCKER    {err}")
     if errors:
         return False
-    problems, project_ids = _check_project(create_project)
-    problems += _check_gateways(parts)
+    problems, project_ids = _check_project(create_project) if aiw_parts(parts) else (0, [])
+    problems += _check_gateways(aiw_parts(parts))
     if "llm" in parts:
         problems += _check_provider()
         print(f"  v2 chain   {', '.join(p['name'] for p in guardrail_policies()) or '(none)'}")
@@ -448,7 +459,10 @@ def check(parts: list[str], create_project: bool = False, force: bool = False) -
         print(f"  mcp        upstream {AGENCIES_MCP_UPSTREAM} (auth: {MCP_AUTH})")
     if "api" in parts:
         print(f"  api        upstream {TRANSACTIONS_API_UPSTREAM} (auth: {API_AUTH})")
-    problems += _check_plan(parts, project_ids, force)
+    if aiw_parts(parts):
+        problems += _check_plan(aiw_parts(parts), project_ids, force)
+    if "a2a" in parts:
+        problems += a2a.check(force)
     print(f"\n{problems} blocker(s)")
     return problems == 0
 
@@ -739,6 +753,14 @@ def install_mcp(state: dict) -> None:
     save_state(state)
 
 
+# =============================================================================
+# Install — A2A agent proxy (Savings Goals Agent), on the A2A gateway's controller
+# =============================================================================
+def install_a2a(state: dict) -> None:
+    a2a.install(state, jwt_auth_policy() if a2a.AUTH == "jwt-auth" else None)
+    save_state(state)
+
+
 def openapi_operations(spec: Path) -> list[dict]:
     """The operations of transactions-api/openapi.yaml, read with two regexes so the
     installer needs no YAML library: path keys at 2-space indent, methods at 4."""
@@ -813,6 +835,11 @@ def verify(parts: list[str], state: dict) -> int:
         for gid, url in gateway_urls("mcp").items():
             verdict, status, _ = mcp_probe(url)
             warnings += _report(f"MCP on {gid}", verdict, status, AGENCIES_MCP_UPSTREAM)
+    if "a2a" in parts:
+        verdict, status, card = a2a.card_probe()
+        warnings += _report(f"A2A agent card on {a2a.GATEWAY_URL}", verdict, status, a2a.UPSTREAM)
+        if verdict == "live":
+            warnings += _check_card_rewritten(card, f"{a2a.GATEWAY_URL}{a2a.AGENT['context']}")
     if "api" in parts:
         for gid, url in gateway_urls("api").items():
             verdict, status, _, _ = api_probe(url)
@@ -831,6 +858,22 @@ def _report(label: str, verdict: str, status: int, upstream: str) -> int:
     else:
         print(f"  WARNING    {label}: {verdict} ({status})")
     return 1
+
+
+def _check_card_rewritten(card: Any, proxy_url: str) -> int:
+    """The card served through the proxy must point callers back at the proxy — otherwise
+    the Coordinator would read it and then talk to the agent directly, past every policy."""
+    interfaces = card.get("supportedInterfaces") if isinstance(card, dict) else None
+    if not interfaces:
+        print("  WARNING    the agent card has no supportedInterfaces — is the upstream the Savings Goals Agent?")
+        return 1
+    bypassing = [i.get("url") for i in interfaces if not str(i.get("url", "")).startswith(proxy_url)]
+    if bypassing:
+        print(f"  WARNING    the card served by the gateway still points at {', '.join(map(str, bypassing))} — "
+              f"callers would bypass the proxy; check the proxy's agentCard rewriteUrls")
+        return 1
+    print(f"  OK         the card points callers at the gateway ({proxy_url})")
+    return 0
 
 
 def _guardrail_message(body: Any) -> dict:
@@ -927,6 +970,8 @@ def service_settings(state: dict) -> dict[str, dict[str, str]]:
             if state.get("mcp"):
                 values["MCP_GATEWAY_ENABLED"] = "true"
                 values["MCP_GATEWAY_URL"] = state["mcp"]["url"]
+            if state.get("a2a"):
+                values["SAVINGS_AGENT_A2A_URL"] = state["a2a"]["url"]
             if state.get("api"):
                 values["TRANSACTIONS_API_BASE_URL"] = state["api"]["url"]
         out[consumer] = values
@@ -993,7 +1038,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--list-targets", action="store_true", help="list projects and gateways, then exit")
     parser.add_argument("--check", action="store_true", help="read-only pre-flight check")
-    parser.add_argument("--only", default="", help="comma-separated subset of: llm, mcp, api")
+    parser.add_argument("--only", default="", help="comma-separated subset of: llm, mcp, a2a, api")
     parser.add_argument("--create-project", action="store_true", help="create PROJECT_ID if it does not exist")
     parser.add_argument("--force", action="store_true",
                         help="overwrite resources with our ids that gateway-setup did not create")
@@ -1009,12 +1054,14 @@ def parse_args() -> argparse.Namespace:
 def selected_parts(only: str) -> list[str]:
     if only:
         parts = [p.strip() for p in only.split(",") if p.strip()]
-        unknown = [p for p in parts if p not in GATEWAYS]
+        unknown = [p for p in parts if p not in PARTS]
         if unknown:
-            sys.exit(f"--only: unknown part(s) {unknown} — use llm, mcp, api")
+            sys.exit(f"--only: unknown part(s) {unknown} — use {', '.join(PARTS)}")
         return parts
-    # By default: the LLM proxies always, MCP and the REST API when gateways are given.
-    return ["llm"] + [p for p in ("mcp", "api") if GATEWAYS[p]]
+    # By default: the LLM proxies always; MCP and the REST API when their gateways are
+    # given; A2A when the A2A gateway's controller is.
+    return ["llm"] + [p for p in ("mcp", "a2a", "api")
+                      if (a2a.enabled() if p == "a2a" else GATEWAYS[p])]
 
 
 def write_agent_settings(state: dict, args: argparse.Namespace) -> None:
@@ -1022,6 +1069,21 @@ def write_agent_settings(state: dict, args: argparse.Namespace) -> None:
     write_snippets(settings)
     if args.write_env:
         write_env(settings, args.env_file)
+
+
+def install(parts: list[str], rotate_keys: bool) -> dict:
+    if aiw_parts(parts):
+        ensure_project()
+    state = load_state()
+    if "llm" in parts:
+        install_llm(state, rotate_keys)
+    if "mcp" in parts:
+        install_mcp(state)
+    if "a2a" in parts:
+        install_a2a(state)
+    if "api" in parts:
+        install_api(state)
+    return state
 
 
 def main() -> None:
@@ -1033,25 +1095,20 @@ def main() -> None:
         print("### agent settings (from the last install)")
         write_agent_settings(state, args)
         return
-    pa.login()
+    parts = selected_parts(args.only)
+    # AI Workspace only for the parts it manages: `--only a2a` needs no AI Workspace login.
+    if args.list_targets or aiw_parts(parts):
+        pa.login()
     if args.list_targets:
         list_targets()
         return
-    parts = selected_parts(args.only)
     if args.check:
         sys.exit(0 if check(parts, args.create_project, args.force) else 1)
 
     if not check(parts, args.create_project, args.force):
         sys.exit("\npre-flight check failed — nothing was changed")
     print()
-    ensure_project()
-    state = load_state()
-    if "llm" in parts:
-        install_llm(state, args.rotate_keys)
-    if "mcp" in parts:
-        install_mcp(state)
-    if "api" in parts:
-        install_api(state)
+    state = install(parts, args.rotate_keys)
     warnings = verify(parts, state)
 
     print("### agent settings")

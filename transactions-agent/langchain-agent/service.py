@@ -49,6 +49,7 @@ from fastapi import FastAPI, WebSocket, HTTPException
 from pydantic import BaseModel, PrivateAttr
 from starlette.websockets import WebSocketDisconnect
 
+from app.a2a_client import A2AAgentClient, A2AUnreachableError, http_status
 from app.audit_log import emit_token_event, register_actor_name, set_session, set_transaction
 from app.gateway import GatewayAuth, build_gateway_auths, guardrail_reason
 from app.prompt import (
@@ -151,7 +152,15 @@ savings_asgardeo_config = AsgardeoConfig(
     redirect_uri=redirect_uri
 ) if savings_agent_client_id else None
 
-SAVINGS_AGENT_URL = os.environ.get('SAVINGS_AGENT_URL', 'http://localhost:8013/suggest-goal')
+# The Savings Agent is called over A2A: this is its base URL (the Agent Card is read from
+# <base>/.well-known/agent-card.json), either the agent itself or the WSO2 AI Gateway's
+# agent proxy in front of it. SAVINGS_AGENT_URL was the old REST endpoint (/suggest-goal).
+SAVINGS_AGENT_A2A_URL = os.environ.get('SAVINGS_AGENT_A2A_URL', 'http://localhost:8013')
+if os.environ.get('SAVINGS_AGENT_URL') and not os.environ.get('SAVINGS_AGENT_A2A_URL'):
+    logger.warning(
+        "SAVINGS_AGENT_URL is no longer used — the Savings Agent is called over A2A. Set "
+        "SAVINGS_AGENT_A2A_URL to its base URL (no /suggest-goal); using %s", SAVINGS_AGENT_A2A_URL,
+    )
 
 # DEMO_VERSION (imported from app/prompt.py, the single place it's read — see there for
 # context). In v2 the Savings Agent goes rogue (never proposes a goal, always asks for
@@ -187,6 +196,9 @@ _RECURSION_LIMIT = 2 * _MAX_MODEL_CALLS_PER_TURN + 1
 # v2 runs up to 3 LLM rounds per Savings Agent request on a growing context, so allow
 # well beyond a single LLM call's latency.
 _SAVINGS_AGENT_TIMEOUT = httpx.Timeout(90.0, connect=5.0)
+_savings_agent = A2AAgentClient(
+    SAVINGS_AGENT_A2A_URL, name="Savings Agent", timeout=_SAVINGS_AGENT_TIMEOUT, verify=_ssl_verify,
+)
 
 # Dedicated OAuth2 app for the Ministry of Finance Tax agent — same pattern again, but
 # this one crosses an ORGANISATIONAL boundary, not just a process one: the Coordinator is
@@ -413,11 +425,10 @@ def _invoke_remote_agent_span(agent_name: str, provider: str, url: str) -> Itera
         try:
             yield
         except Exception as e:
-            span.set_attribute(
-                ERROR_TYPE,
-                str(e.response.status_code) if isinstance(e, httpx.HTTPStatusError)
-                else type(e).__qualname__,
-            )
+            # The HTTP status when there is one — raw httpx (Tax Agent) or wrapped by the
+            # a2a-sdk (Savings Agent) — else the exception type.
+            status = http_status(e)
+            span.set_attribute(ERROR_TYPE, str(status) if status else type(e).__qualname__)
             raise
 
 
@@ -456,10 +467,10 @@ def _audit_agent_call(resource: str, token: OAuthToken) -> Iterator[None]:
     try:
         yield
     except Exception as e:
+        status = http_status(e)
         emit_token_event(
             event="agent_call_failed", success=False,
-            error=(f"HTTP {e.response.status_code}" if isinstance(e, httpx.HTTPStatusError)
-                   else type(e).__qualname__),
+            error=f"HTTP {status}" if status else type(e).__qualname__,
             **audit,
         )
         raise
@@ -479,9 +490,11 @@ async def _suggest_savings_goal(
     transaction_id: str | None = None,
     conversation_id: str | None = None,
 ) -> str:
-    """Call the standalone Savings Goals agent service with findings from the other
+    """Call the standalone Savings Goals agent over A2A with findings from the other
     two sub-agents and return its recommendation. A real cross-process agent call —
-    unlike the other two sub-agents, this one runs in a separate service/venv/port.
+    unlike the other two sub-agents, this one runs in a separate service/venv/port. One
+    A2A SendMessage (JSON-RPC binding) whose data part carries the payload below; the
+    reply's data part has the same fields the old REST route returned.
 
     user_sub (decoded from the user's OBO token, not LLM-supplied — see
     websocket_endpoint's wrapper closures) lets the Savings Agent's audit log tie this
@@ -491,7 +504,7 @@ async def _suggest_savings_goal(
     transaction_id (this turn's ID) keys the Savings Agent's audit events and its per-turn
     round cap. Tracing uses the standard headers instead: traceparent joins its spans to
     this trace, and conversation_id (the session) travels as gen_ai.conversation.id
-    baggage — see _trace_context_headers."""
+    baggage — see _trace_context_headers — and as the A2A message's contextId."""
     headers = {"Authorization": f"Bearer {token.access_token}"}
     # Also sent as a header (not just in the body) so the Savings Agent's bearer-auth
     # middleware — which runs before the body is parsed — can tag its own
@@ -506,20 +519,17 @@ async def _suggest_savings_goal(
         "transaction_id": transaction_id,
     }
     try:
-        async with httpx.AsyncClient(verify=_ssl_verify) as client:
-            with (
-                _invoke_remote_agent_span("Savings Agent", _SAVINGS_AGENT_PROVIDER, SAVINGS_AGENT_URL),
-                _audit_agent_call("savings_agent", token),
-            ):
-                response = await client.post(
-                    SAVINGS_AGENT_URL, headers=headers | _trace_context_headers(conversation_id),
-                    json=payload, timeout=_SAVINGS_AGENT_TIMEOUT,
-                )
-                response.raise_for_status()
-            result = response.json()
-    except httpx.TransportError as e:
+        with (
+            _invoke_remote_agent_span("Savings Agent", _SAVINGS_AGENT_PROVIDER, SAVINGS_AGENT_A2A_URL),
+            _audit_agent_call("savings_agent", token),
+        ):
+            result = await _savings_agent.send_data(
+                payload, headers=headers | _trace_context_headers(conversation_id),
+                context_id=conversation_id,
+            )
+    except A2AUnreachableError as e:
         # Timeout or unreachable — hand it back to the model rather than failing the turn.
-        logger.warning("Savings Agent call failed (%s): %r", type(e).__name__, e)
+        logger.warning("Savings Agent call failed: %s", e)
         return (
             "The Savings Agent did not respond. Do not call SuggestSavingsGoal again this "
             "turn — tell the user the savings advisor is unavailable right now."
@@ -534,13 +544,14 @@ async def _suggest_savings_goal(
         questions = "; ".join(str(q) for q in raw_questions)
         return (
             f"The Savings Agent could not suggest a goal yet and needs more transaction "
-            f"data: {result['message']} Data requested: {questions}. These are questions "
-            f"about the user's transactions for you to answer with your own tools — do not "
-            f"ask the user."
+            f"data: {result.get('message', '')} Data requested: {questions}. These are "
+            f"questions about the user's transactions for you to answer with your own tools — "
+            f"do not ask the user."
         )
+    # A reply without a data part comes back as {"message": <its text>} — see a2a_client.
     return (
-        f"{result['message']} (Goal: {result['goal_name']}, "
-        f"projected balances: {result['projected_balances']})"
+        f"{result.get('message', '')} (Goal: {result.get('goal_name')}, "
+        f"projected balances: {result.get('projected_balances')})"
     )
 
 

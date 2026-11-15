@@ -24,8 +24,8 @@ from urllib.parse import urlparse
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-ENV_FILE = HERE / "gateway.env"
-ENV_EXAMPLE = HERE / "gateway.env.example"
+ENV_FILE = HERE / ".env"
+ENV_EXAMPLE = HERE / ".env.example"
 OUT_DIR = HERE / "out"
 
 # Every resource the installer creates carries this in its description, so teardown.py
@@ -56,7 +56,7 @@ def _load_settings() -> dict[str, str]:
     if not ENV_FILE.exists():
         ENV_FILE.write_text(ENV_EXAMPLE.read_text())
         print(f"created {ENV_FILE.relative_to(ROOT)} from {ENV_EXAMPLE.name} — fill it in "
-              f"(./gateway-setup/provision.py --list-targets helps find the ids)")
+              f"(python3 ./gateway-setup/provision.py --list-targets helps find the ids)")
     return read_env_file(ENV_FILE)
 
 
@@ -64,8 +64,17 @@ _SETTINGS = _load_settings()
 
 
 def setting(name: str, default: str = "") -> str:
-    """A setting from the environment, else gateway.env, else `default`."""
+    """A setting from the environment, else gateway-setup/.env, else `default`."""
     return os.environ.get(name) or _SETTINGS.get(name) or default
+
+
+def secret(name: str) -> str:
+    """A password, from the environment ONLY — never from gateway-setup/.env. Admin
+    passwords must not be stored in any file; one found in the file is ignored."""
+    if _SETTINGS.get(name):
+        print(f"WARNING: {name} is set in gateway-setup/.env and is IGNORED — remove it from the file "
+              f"and export it in your shell instead")
+    return os.environ.get(name, "")
 
 
 def setting_list(name: str) -> list[str]:
@@ -79,7 +88,7 @@ def setting_bool(name: str, default: bool) -> bool:
 
 AIW = setting("AIW_URL", "https://localhost:9643").rstrip("/")
 ADMIN_USERNAME = setting("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = setting("ADMIN_PASSWORD")
+ADMIN_PASSWORD = secret("ADMIN_PASSWORD")
 
 
 # =============================================================================
@@ -142,7 +151,8 @@ def api(method: str, path: str, data: Any = None) -> tuple[int, Any]:
 
 def login(attempts: int = 3) -> None:
     if not ADMIN_PASSWORD:
-        sys.exit("ADMIN_PASSWORD is not set — export it, or set it in gateway-setup/gateway.env")
+        sys.exit("ADMIN_PASSWORD is not set — export it in your shell (read -rs ADMIN_PASSWORD && "
+                 "export ADMIN_PASSWORD); it is never read from a file")
     for attempt in range(1, attempts + 1):
         status, resp = request("POST", f"{AIW}/ai-workspace/api/login",
                                {"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD})

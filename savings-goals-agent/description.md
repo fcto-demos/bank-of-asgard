@@ -1,21 +1,21 @@
 # Savings Goals Agent
 
-Source of truth for this agent's A2A card copy. When `server.py` or `projections.py` changes what the agent can do, update this file in the same step.
+Source of truth for this agent's A2A card copy. The served card is built in `a2a_server.py` (`build_agent_card`) from this text. When `server.py`, `a2a_server.py` or `projections.py` changes what the agent can do, update this file and the card in the same step.
 
 ## Card fields
+
+A2A 1.0 field names, as the card at `/.well-known/agent-card.json` serves them.
 
 | Field | Value |
 | --- | --- |
 | `name` | Savings Goals Agent |
-| `version` | `1.0.0` (matches `FastAPI(version=...)` in `server.py`) |
+| `version` | `1.1.0` (`AGENT_VERSION` in `server.py`, also the FastAPI version) |
 | `provider.organization` | Bank of Asgard |
-| `url` | `http://localhost:8013` in local development |
-| `documentationUrl` | `savings-goals-agent/openapi.yaml` |
+| `supportedInterfaces` | `JSONRPC` at `A2A_PUBLIC_URL` (default `http://localhost:8013`), then `HTTP+JSON` at `A2A_PUBLIC_URL/v1`, both `protocolVersion: 1.0`. Behind the gateway's agent proxy, the gateway rewrites both to its own URL. |
 | `defaultInputModes` | `application/json` |
 | `defaultOutputModes` | `application/json`, `text/plain` |
-| `capabilities.streaming` | `false` — one request, one complete response |
+| `capabilities.streaming` | `false`: one request, one complete response |
 | `capabilities.pushNotifications` | `false` |
-| `capabilities.stateTransitionHistory` | `false` |
 
 ## description
 
@@ -45,13 +45,13 @@ The agent is stateless. It holds no customer record, performs no lookup of its o
 
 ## Security
 
-Bearer JWT, validated on every route except `/health`. The token's RS256 signature is checked against the IDP's JWKS and its `aud` claim must equal this service's `EXPECTED_AUDIENCE` — the agent's own client ID. No scopes are required: authorisation here is audience-based, so possession of a token minted *for this agent* is the access decision.
+Bearer JWT, validated on every route except `/health` and the Agent Card, which is public by A2A design. The token's RS256 signature is checked against the IDP's JWKS, and its `aud` claim must equal this service's `EXPECTED_AUDIENCE`, the agent's own client ID. No scopes are required: authorisation is audience-based, so holding a token minted *for this agent* is the access decision.
 
-The only configured caller is the Bank of Asgard Coordinator, which presents an agent token audienced for `SAVINGS_AGENT_CLIENT_ID`. In A2A terms this is a `securityScheme` of type `oauth2` with the `clientCredentials` flow and an empty `scopes` object.
+The only configured caller is the Bank of Asgard Coordinator, which presents an agent token audienced for `SAVINGS_AGENT_CLIENT_ID`. The card declares this as `securitySchemes.agentToken`, an `httpAuthSecurityScheme` with `scheme: Bearer` and `bearerFormat: JWT`, whose description names the IDP's token endpoint. It is HTTP bearer rather than `oauth2` with the `clientCredentials` flow: an oauth2 flow needs a non-empty `scopes` map, and this agent checks none.
 
-Optionally, if `INBOUND_API_KEY` is set, a caller may instead present that value on the `X-API-Key` header (configurable via `INBOUND_API_KEY_HEADER`) — this is an alternative to the bearer JWT above, not a replacement, and is checked with a constant-time comparison. It exists for third-party callers that can't be issued OAuth client credentials for this agent. Left unset (the default), only bearer JWTs are accepted. In A2A terms this adds a second `securityScheme` of type `apiKey` (`in: header`, `name: X-API-Key`); either scheme independently satisfies the request.
+Optionally, if `INBOUND_API_KEY` is set, a caller may instead present that value on the `X-API-Key` header (configurable via `INBOUND_API_KEY_HEADER`). It is an alternative to the bearer JWT, not a replacement, and is checked with a constant-time comparison. It exists for third-party callers that can't be issued OAuth client credentials for this agent. Left unset (the default), only bearer JWTs are accepted. When it is set, the card adds `securitySchemes.apiKey`, an `apiKeySecurityScheme` with `location: header` and `name: X-API-Key`. `securityRequirements` lists the two schemes as separate entries, so either one satisfies the request.
 
-Callers should forward `X-Transaction-Id` so this agent's audit events correlate with the calling turn; the field is also accepted in the request body. For tracing, send the standard W3C `traceparent` header, so this agent's spans join the caller's trace, and a `baggage` header carrying `gen_ai.conversation.id`. `user_sub` identifies whose consented data is being delegated and is decoded by the caller from the user's OBO token — it is recorded for audit and never used to fetch anything.
+Callers should forward `X-Transaction-Id` so this agent's audit events correlate with the calling turn. The field is also accepted in the message's data part. For tracing, send the standard W3C `traceparent` header, so this agent's spans join the caller's trace, and a `baggage` header carrying `gen_ai.conversation.id`. `user_sub` identifies whose consented data is being delegated and is decoded by the caller from the user's OBO token — it is recorded for audit and never used to fetch anything.
 
 ## What a caller actually gets back
 
@@ -65,6 +65,14 @@ If the model returns something that will not parse as JSON, the agent degrades r
 
 `DEMO_VERSION=v2` is a demo-only rogue mode: the agent never proposes a goal and always answers `status: needs_more_info` with `questions`, so a monitoring product can catch a runaway agent. It is not a capability, and stays out of the card.
 
-## Deferred: A2A transport
+## A2A transport
 
-The service speaks plain REST (`POST /suggest-goal`), not A2A. Transport, a served card and a public `url` come later — the content above is what the card will be filled from. Confirm the field names against the A2A spec revision in force when that work starts.
+A2A 1.0 over a2a-sdk 1.x (`a2a_server.py`), on the same FastAPI app and port as before:
+
+- `GET /.well-known/agent-card.json`: the card, public.
+- `POST /`: the JSON-RPC binding.
+- `POST /v1/message:send` and the rest of `/v1/...`: the HTTP+JSON binding.
+
+Every operation request needs `A2A-Version: 1.0`; without it, the SDK answers with a version error. A request is one `SendMessage` whose message has a single data part, holding the fields the REST body had: `subscription_summary`, `spending_summary`, `monthly_recoverable`, and optionally `user_sub` and `transaction_id`. A missing or invalid field returns JSON-RPC `-32602` (invalid params). The reply is a single `Message`, never a `Task`. Its data part carries the fields listed above, and a text part carries `message`.
+
+`POST /suggest-goal` still serves the same request as plain REST (documented in `openapi.yaml`) for callers not on A2A yet; the Coordinator no longer uses it.

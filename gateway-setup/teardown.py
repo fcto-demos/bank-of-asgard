@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """Remove everything gateway-setup/provision.py created, in reverse order.
 
-    ./gateway-setup/teardown.py              undeploy and delete the Bank of Asgard resources
-    ./gateway-setup/teardown.py --dry-run    show what would be removed
-    ./gateway-setup/teardown.py --force      also remove same-named resources it did not create
+    python3 ./gateway-setup/teardown.py              undeploy and delete the Bank of Asgard resources
+    python3 ./gateway-setup/teardown.py --dry-run    show what would be removed
+    python3 ./gateway-setup/teardown.py --force      also remove same-named resources it did not create
 
 Only resources whose description carries provision.py's marker are touched (unless
 --force); a provider reused through EXISTING_LLM_PROVIDER_ID is never deleted, and the
-project is left in place. Same gateway.env as provision.py.
+project is left in place. Same gateway-setup/.env as provision.py.
 """
 from __future__ import annotations
 
 import argparse
 import sys
 
+import a2a_controller as a2a
 import platform_api as pa
 import provision as pv
 from platform_api import MANAGED_MARKER, api
@@ -89,13 +90,16 @@ def main() -> None:
     pa.login()
     print(f"### removing Bank of Asgard gateway resources (prefix {pv.PREFIX!r})")
     failures = sum(not remove(resource, rid, args.force, args.dry_run) for resource, rid in targets())
+    # The A2A agent proxy lives on the standalone A2A gateway, not in AI Workspace.
+    failures += not a2a.remove(args.force, args.dry_run)
     if not args.dry_run and pv.STATE_FILE.exists():
         pv.STATE_FILE.unlink()
         print(f"  removed {pv.STATE_FILE.relative_to(pa.ROOT)} (stored URLs and keys)")
     if failures:
         sys.exit(f"\n{failures} resource(s) could not be removed — see the warnings above")
     print("\ndone. The agents' .env files still point at the gateway: set gateway.enabled: false in "
-          "llm_config.yaml and MCP_GATEWAY_ENABLED=false, or restore the .env.gateway.bak backups.")
+          "llm_config.yaml, MCP_GATEWAY_ENABLED=false and SAVINGS_AGENT_A2A_URL=http://localhost:8013, "
+          "or restore the .env.gateway.bak backups.")
 
 
 if __name__ == "__main__":

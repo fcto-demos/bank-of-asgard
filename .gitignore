@@ -30,8 +30,8 @@ package-lock.json
 .env.bak
 **/config.js.bak
 
-# Gateway installer (gateway-setup/): per-machine settings, issued API keys, .env backups
-gateway-setup/gateway.env
+# Gateway installer (gateway-setup/): its settings are gateway-setup/.env (covered by the .env rules
+# above); issued API keys and .env backups
 gateway-setup/out/
 *.gateway.bak
 
