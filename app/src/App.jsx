@@ -49,7 +49,6 @@ const App = () => {
 
   const TransferFundsPage = lazy(() => import("./pages/transfer-funds"));
   const TransferFundsVerifyPage = lazy(() => import("./pages/transfer-funds-verify"));
-  const TokenFlowPage = lazy(() => import("./pages/token-flow"));
 
   return (
     <SnackbarProvider maxSnack={ 3 }>
@@ -239,15 +238,6 @@ const App = () => {
             }
           />
         }
-        {/* Internal demo tool — deliberately not linked from any nav/menu. */}
-        <Route
-          path={ ROUTES.TOKEN_FLOW }
-          element={
-            <Suspense fallback={<>...</>}>
-              <TokenFlowPage />
-            </Suspense>
-          }
-        />
         <Route path="*" element={ <NotFound /> } />
       </Routes>
 

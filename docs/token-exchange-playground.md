@@ -104,8 +104,8 @@ Recommended: `app/src/pages/token-exchange-playground.jsx`, route `/playground`,
 - **Middle — 4-step stepper:** each step has a **Run** button that calls the service and fills:
   - an **inspector** (outbound request → response, secrets masked), and
   - a **JWT viewer** (header + claims table, with `sub` / `act.sub` / `aud` / `scope` / `exp` highlighted).
-- **Live mini sequence diagram** that fills in as steps complete — reusing the Mermaid builder + theme from the Token Flow page (refactor `buildDiagramText` / `effectiveHop` / `EVENT_LABELS` out of [token-flow.jsx](../app/src/pages/token-flow.jsx) into a shared module).
-- **Components:** `components/playground/StepCard.jsx`, `RequestResponseInspector.jsx`, `JwtViewer.jsx`; `api/playground.js` for the axios calls; route + nav entry following the Token Flow (demo-only) pattern.
+- **Live mini flow diagram** that fills in as steps complete, using the Token Flow page's visual vocabulary ([token-flow.html](../animations/token-flow.html)): colour = token type, solid chip = a token, dashed chip = an OAuth step, token check = a badge on the receiver.
+- **Components:** `components/playground/StepCard.jsx`, `RequestResponseInspector.jsx`, `JwtViewer.jsx`; `api/playground.js` for the axios calls; a demo-only route and nav entry.
 
 ## Security & guardrails
 
@@ -116,7 +116,7 @@ Recommended: `app/src/pages/token-exchange-playground.jsx`, route `/playground`,
 
 ## Phasing
 
-- **Phase 1 — OBO playground:** standalone `token-playground/` service + the page, end-to-end against real Asgardeo (role cards, 4-step stepper, inspector, JWT viewer, live diagram). Refactor the Mermaid builder into a shared module.
+- **Phase 1 — OBO playground:** standalone `token-playground/` service + the page, end-to-end against real Asgardeo (role cards, 4-step stepper, inspector, JWT viewer, live diagram).
 - **Phase 2 — polish:** progressive step reveal, copy-to-clipboard, error/failure states (reuse the red failure styling), tie playground runs into the audit log.
 - **Phase 3 — ID-JAG (later):** a flow toggle ("OBO" vs "Cross-App Access") reusing the same artifact/inspector/JWT components. The artifact model is grant-agnostic, so ID-JAG slots in as a new set of `/playground/idjag/*` endpoints (IdP mints an ID-JAG assertion → requesting app presents it to the resource's token endpoint → scoped access token, no user consent) without reworking the UI. Prerequisite: confirm Asgardeo / WSO2 IS support for the identity-assertion authorization grant, or simulate assertion issuance for the demo.
 

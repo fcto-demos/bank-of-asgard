@@ -7,10 +7,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
-/* ---------- Animated token flow: prototype for the app's /tokenflow page ----------
+/* ---------- Animated token flow, also served as the app's /tokenflow page ----------
    Each audit event is a token travelling from one system to the next, coloured by
    token type. Page chrome uses the app's cream/gold palette; the stage is dark so the
-   tokens glow. Data: /api/token-audit (serve.py) or a .jsonl picked from disk. */
+   tokens glow. Data: /api/token-audit (serve.py), the backend server's /token-audit
+   (app, via config.js), or a .jsonl picked from disk. */
 :root {
   --gold: #997029; --gold-border: #c7a24c; --cream: #faf5e9; --ink: #463a24;
   --page: #f6f0e1; --muted: #8a7a58;
@@ -158,7 +159,7 @@ body { display: flex; flex-direction: column; background: var(--page); color: va
 <header class="tf-head">
   <div>
     <div class="tf-title">Token Flow</div>
-    <div class="tf-sub">Bank of Asgard · animated prototype</div>
+    <div class="tf-sub">Bank of Asgard · token audit trail</div>
   </div>
   <div class="tf-tools">
     <select class="tf-select" data-tf-txn aria-label="Transaction"></select>
@@ -404,15 +405,21 @@ body { display: flex; flex-direction: column; background: var(--page); color: va
       .map(function (id) { return { id: id, epoch: latest[id], count: counts[id] }; });
   }
 
+  // Served by the app at /tokenflow, the page gets the app's config.js and reads the
+  // backend server's /token-audit; served by serve.py, it reads api/token-audit.
+  var appConfig = window.config && window.config.API_SERVICE_URL ? window.config : null;
+  var AUDIT_URL = appConfig ? appConfig.API_SERVICE_URL.replace(/\/+$/, '') + '/token-audit' : 'api/token-audit';
+  var AUDIT_HINT = appConfig ? 'Check that the backend server is running' : 'Start ./start-presentation.sh';
+
   function loadFromServer() {
     showEmpty('');
     setNow({ label: 'Loading the audit log…' });
-    return fetch('api/token-audit', { cache: 'no-store' })
+    return fetch(AUDIT_URL, { cache: 'no-store' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(setEvents)
       .catch(function (e) {
         setEvents([]);
-        showEmpty('Could not read /api/token-audit (' + e.message + '). Start ./start-presentation.sh, or open a log file.', true);
+        showEmpty('Could not read ' + AUDIT_URL + ' (' + e.message + '). ' + AUDIT_HINT + ', or open a log file.', true);
       });
   }
 

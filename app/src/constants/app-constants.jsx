@@ -27,8 +27,8 @@ export const ROUTES = {
   FUND_TRANSFER_VERIFY: "/fund-transfer/verify",
   NOT_FOUND: "/404",
   IDENTITY_VERIFICATION: "/identity-verification",
-  TRANSACTIONS: "/transactions",
-  TOKEN_FLOW: "/tokenflow"
+  TRANSACTIONS: "/transactions"
+  // /tokenflow is not a React route: vite.config.js serves animations/token-flow.html there.
 };
 
 export const SITE_SECTIONS = {
