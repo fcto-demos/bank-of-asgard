@@ -2,6 +2,7 @@
 # restart.sh — stop and restart a single Bank of Asgard service
 # Usage: ./demo_scripts/restart.sh <service>
 # Services: transactions-api | agent | mcp | savings | tax | server | frontend | presentation
+#           (tax = the durable tax agent, durable-tax-agent/)
 
 set -euo pipefail
 
@@ -100,8 +101,9 @@ free_port() {
     local port="$1" timeout="${2:-15}"
     local pid elapsed=0
 
-    # Kill anything still bound to the port
-    pid=$(lsof -ti ":$port" 2>/dev/null || true)
+    # Kill whatever still listens on the port. Only listeners: a bare ":$port" also matches
+    # clients connected to it, such as the browser showing the page.
+    pid=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
     if [[ -n "$pid" ]]; then
         warn "Port $port still held by pid $pid — force-killing"
         kill -KILL $pid 2>/dev/null || true
@@ -110,7 +112,7 @@ free_port() {
     # Wait until the port is confirmed free
     info "Waiting for port $port to be released..."
     while [[ $elapsed -lt $timeout ]]; do
-        if ! lsof -ti ":$port" &>/dev/null; then
+        if ! lsof -tiTCP:"$port" -sTCP:LISTEN &>/dev/null; then
             ok "Port $port is free"
             return 0
         fi
@@ -280,38 +282,50 @@ case "$SERVICE" in
         ;;
 
     tax)
-        # Ministry of Finance tax agent — its own entry in Agent Manager again, so its
-        # own AMP_OTEL_ENDPOINT/AMP_AGENT_API_KEY from its own .env.
+        # The durable tax agent (durable-tax-agent/, Ballerina on Temporal). Its returns
+        # live in Temporal, so a restart picks up every waiting return where it stopped:
+        # restarting it mid-review is part of the durability demo. The Python tax-agent/
+        # is deprecated and no longer started.
         USE_AMP="${USE_AMP:-false}"
-        section "Restarting tax-agent (port $PORT_TAX)"
+        TAX_DIR="$ROOT/durable-tax-agent"
+        PORT_TEMPORAL=7233
+        section "Restarting the durable tax agent (port $PORT_TAX)"
+        command -v bal &>/dev/null || die "bal (Ballerina) not found — install it from https://ballerina.io/downloads/"
+        [[ -f "$TAX_DIR/Config.toml" ]] || die "durable-tax-agent/Config.toml not found — see \"Run locally\" in durable-tax-agent/README.md"
         stop_service "tax"
         free_port $PORT_TAX
-        TAX_PY="$ROOT/tax-agent/venv/bin/python"
-        TAX_ENV="$ROOT/tax-agent/.env"
-        TAX_AMP_INSTRUMENT="$ROOT/tax-agent/venv/bin/amp-instrument"
-        [[ -f "$TAX_PY" ]]  || die "tax-agent venv not found"
-        [[ -f "$TAX_ENV" ]] || die "tax-agent/.env not found"
-        if [[ "$USE_AMP" == "true" ]]; then
-            [[ -f "$TAX_AMP_INSTRUMENT" ]] || die "amp-instrument not found in tax-agent venv"
-            _tax_amp_var() { grep -E "^$1=" "$TAX_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"; }
-            TAX_AMP_OTEL_ENDPOINT=$(_tax_amp_var AMP_OTEL_ENDPOINT)
-            TAX_AMP_AGENT_API_KEY=$(_tax_amp_var AMP_AGENT_API_KEY)
-            TAX_OTEL_CERT=$(_tax_amp_var OTEL_EXPORTER_OTLP_CERTIFICATE || true)
-            TAX_OTEL_CERT="${TAX_OTEL_CERT/#\~/$HOME}"
-            if [[ -n "$TAX_OTEL_CERT" ]]; then
-                [[ -f "$TAX_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $TAX_OTEL_CERT"
-            fi
-            (export AMP_OTEL_ENDPOINT="$TAX_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$TAX_AMP_AGENT_API_KEY"
-             if [[ -n "$TAX_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$TAX_OTEL_CERT"; fi
-             cd "$ROOT/tax-agent" && "$TAX_AMP_INSTRUMENT" "$TAX_PY" server.py \
-                > "$LOG_DIR/tax.log" 2>&1) &
+        if (echo >/dev/tcp/localhost/$PORT_TEMPORAL) 2>/dev/null; then
+            ok "Temporal running on port $PORT_TEMPORAL"
         else
-            (set +u; set -a; source "$TAX_ENV"; set +a; set -u; cd "$ROOT/tax-agent" && "$TAX_PY" server.py \
-                > "$LOG_DIR/tax.log" 2>&1) &
+            command -v temporal &>/dev/null || die "Temporal isn't running on port $PORT_TEMPORAL and the temporal CLI isn't installed — see \"Run Temporal\" in durable-tax-agent/README.md"
+            stop_service "temporal"
+            (cd "$TAX_DIR" && exec temporal server start-dev --db-filename ./temporal.db \
+                > "$LOG_DIR/temporal.log" 2>&1) &
+            register_pid "temporal" "$!"
+            check_launched "$!" "Temporal"
+            wait_for_port $PORT_TEMPORAL "Temporal"
         fi
-        register_pid "tax" "$!"
-        check_launched "$!" "tax-agent"
-        wait_for_port $PORT_TAX "tax-agent"
+        # With --amp, turn on the agent's ballerinax/amp tracing; the endpoint and API key
+        # come from Config.toml's [ballerinax.amp] section. Tracing also needs observability
+        # compiled in: without --observability-included every outgoing HTTP call fails
+        # ("the tracer store is not initialized"), including the agent's model calls.
+        (OBSERVABILITY_FLAG=""
+         if [[ "$USE_AMP" == "true" ]]; then
+             export BAL_CONFIG_VAR_BALLERINA_OBSERVE_TRACINGENABLED=true BAL_CONFIG_VAR_BALLERINA_OBSERVE_TRACINGPROVIDER=amp
+             OBSERVABILITY_FLAG="--observability-included"
+         fi
+         cd "$TAX_DIR" && exec bal run $OBSERVABILITY_FLAG > "$LOG_DIR/tax.log" 2>&1) &
+        TAX_PID=$!
+        register_pid "tax" "$TAX_PID"
+        # bal run compiles first: wait up to 5 minutes, but stop as soon as it exits.
+        info "Waiting for the durable tax agent (bal run compiles first)..."
+        tax_waited=0
+        until (echo >/dev/tcp/localhost/$PORT_TAX) 2>/dev/null; do
+            kill -0 "$TAX_PID" 2>/dev/null || { tail -20 "$LOG_DIR/tax.log" 2>/dev/null | sed 's/^/    /'; die "The durable tax agent exited — see $LOG_DIR/tax.log"; }
+            [[ $tax_waited -lt 300 ]] || die "The durable tax agent did not start within 300s — check $LOG_DIR/tax.log"
+            sleep 2; tax_waited=$((tax_waited + 2))
+        done
+        ok "Durable tax agent is up"
         LOG_FILE="$LOG_DIR/tax.log"
         ;;
 

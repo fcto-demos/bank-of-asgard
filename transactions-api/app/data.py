@@ -86,6 +86,22 @@ def _subscription_events(user_sub: str, rng: random.Random, end_date: datetime,
     return events
 
 
+def _business_trip_events(rng: random.Random, end_date: datetime) -> List[tuple]:
+    """A business trip in the last 60 days: a return flight, then a two- or three-night
+    hotel stay. Every user has one, so their tax return always claims professional travel
+    relief, which needs evidence: the ministry files it provisionally and opens an officer
+    review (the durable Tax Agent's demo path)."""
+    depart = end_date - timedelta(days=rng.randint(10, 60), hours=rng.randint(0, 12))
+    nights = rng.randint(2, 3)
+    return [
+        (depart, "business_travel", "Asgard Airlines", round(rng.uniform(380.0, 620.0), 2),
+         "Business trip: return flight, Asgard Airlines"),
+        (depart + timedelta(days=nights, hours=2), "business_travel", "Bifrost Hotels",
+         round(rng.uniform(140.0, 210.0) * nights, 2),
+         f"Business trip: {nights} nights, Bifrost Hotels"),
+    ]
+
+
 def generate_sample_transactions(
     user_sub: str,
     num: int = 40,
@@ -98,7 +114,8 @@ def generate_sample_transactions(
 
     Recent one-off purchases and salary stay within `days_back` (unchanged behavior).
     Recurring subscriptions independently reach back up to `subscription_months` months,
-    giving long-running monthly patterns for subscription-detection use cases.
+    giving long-running monthly patterns for subscription-detection use cases. Every user
+    also has one business trip in the last 60 days (see _business_trip_events).
     """
     rng = random.Random(abs(hash(user_sub)) % (2 ** 32))
 
@@ -134,13 +151,14 @@ def generate_sample_transactions(
         tx_date = start_date + offset
         category = rng.choices(
             debit_cats,
-            weights=[20, 18, 12, 8, 8, 14, 6, 4],
+            weights=[20, 18, 12, 8, 8, 14, 6, 8],
             k=1
         )[0]
         events.append((tx_date, category))
 
     # Recurring subscriptions — independent of days_back, can reach back much further
     events.extend(_subscription_events(user_sub, rng, end_date, subscription_months))
+    events.extend(_business_trip_events(rng, end_date))
 
     # Sort chronologically
     events.sort(key=lambda e: e[0])
@@ -167,6 +185,11 @@ def generate_sample_transactions(
             category = real_category
             tx_type = "debit"
             description = f"Recurring subscription — {merchant}"
+            balance = round(balance - amount, 2)
+        elif category == "business_travel":
+            _, _, merchant, amount, description = event
+            category = "travel"
+            tx_type = "debit"
             balance = round(balance - amount, 2)
         else:
             lo, hi = DEBIT_AMOUNTS[category]

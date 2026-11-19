@@ -39,7 +39,7 @@ The following products are used in the context of this demo
 | Transactions Agent (plus subagents, Langchain only) | Python + pip | Python 3.13+ |
 | Agencies MCP Server | Python + pip | Python 3.13+ |
 | Savings Goals Agent (Langchain only) | Python + pip | Python 3.13+ |
-| Tax Agent  (Langchain only, optional) | Python + pip | Python 3.13+ |
+| Tax Agent  (Langchain only, optional) | Ballerina + a Temporal server (`durable-tax-agent/`) | Ballerina Swan Lake 2201.13+ |
 | Container-based deployment *(optional)* | Docker or Podman | — |
 
 > All Node dependencies are installed via `npm install` inside `app/` and `server/`.
@@ -66,7 +66,7 @@ Following table summarizes the apps plus credentials setup, and where this infor
 | 4    | **Asgard Assistant application** | Traditional Web Application — public client, token exchange grant | BOA-Agent       | `AGENT_APP_ID` in `transactions-agent/.env`                  |
 | 5    | **MCP Client application** | MCP client app                      | BOA-Agencies    | `MCP_CLIENT_ID` in `transactions-agent/.env`; `EXPECTED_AUDIENCE` in `agencies-mcp-server/.env` |
 | 6    | **Savings Agent ** | Traditional Web Application — Public client, client credentials grant | BOA-Savings     | `SAVINGS_AGENT_CLIENT_ID` in `transactions-agent/.env`; <br />`EXPECTED_AUDIENCE` in `savings-goals-agent/.env` |
-| 7    | **Tax Agent** *(optional)* | Traditional Web Application — Public client, client credentials grant | BOA-Tax | `TAX_AGENT_CLIENT_ID` in `transactions-agent/.env`; <br />`EXPECTED_AUDIENCE` in `tax-agent/.env` |
+| 7    | **Tax Agent** *(optional)* | Traditional Web Application — Public client, client credentials grant | BOA-Tax | `TAX_AGENT_CLIENT_ID` in `transactions-agent/.env`; <br />`expectedAudience` in `durable-tax-agent/Config.toml` |
 
 ## Custom User Attributes
 
@@ -222,7 +222,7 @@ Skip this section to run the demo without the tax flow; both tax tools then stay
 5. Add the allowed origin: `http://localhost:8011`
 6. Ensure token format is JWT.
 7. Under **Advanced**, enable "App Native Authentication"
-8. Copy the generated **Client ID** — You will use it to set `TAX_AGENT_CLIENT_ID` in `transactions-agent/.env` and `EXPECTED_AUDIENCE` in `tax-agent/.env`
+8. Copy the generated **Client ID** — You will use it to set `TAX_AGENT_CLIENT_ID` in `transactions-agent/.env` and `expectedAudience` in `durable-tax-agent/Config.toml`
 
 ### Optional: a dedicated consent scope
 
@@ -245,6 +245,41 @@ The distinct consent prompt still appears, because the token cache is keyed on t
 > The role's audience must match the app's audience level (Organization vs Application), or the scope is silently dropped from the OBO token and the tool fails with a missing-scope error. This is the same audience-matching requirement as elsewhere in this setup.
 
 Leaving `TAX_CONSENT_SCOPE` unset falls back to `read_transactions`: the flow works end to end, but without its own consent prompt.
+
+### The citizen's filing scope
+
+Only the citizen can sign their return. When they first sign, the assistant asks for their consent and gets the citizen's own token for **BOA-Tax** (an OBO token, audience `TAX_AGENT_CLIENT_ID`). The ministry accepts a signature only with that token: it must carry the filing scope, and its `sub` must be the citizen the return was started for. The same token lets the assistant read the citizen's returns later (`CheckMyTaxReturns`). The bank's own agent token can start and follow a return, but never sign for the citizen.
+
+The filing scope lives on its own API resource, since it belongs to the ministry and not to the bank:
+
+1. Create an API resource for the ministry (Console → Resources → API Resources), for example with identifier `http://boa-tax-agent`, and add the scope `file_tax_return`.
+2. On the **BOA-Tax** app, under **Authorization**, authorise that API resource with the `file_tax_return` scope.
+3. Create a role **taxpayer** with the `file_tax_return` permission, with **BOA-Tax** as its application audience. The backend server assigns it to every new user on signup, alongside **Read_Transactions** (`TAXPAYER_ROLE_NAME` in `server/.env` if you name it differently); assign it yourself to users who signed up before. Adding the scope to **Read_Transactions** does not work: that role's audience is **BOA-Agent**, so the scope is silently dropped from BOA-Tax tokens (see the caution above). The symptom is a filing refused with `token lacks scope file_tax_return` and no scopes on the citizen's `tax_agent` hop on the **Token Flow** page.
+4. Set `TAX_FILING_SCOPE=file_tax_return` in `transactions-agent/.env` (the default) and `citizenScope = "file_tax_return"` in the durable agent's `Config.toml`.
+
+If the ministry refuses a signature, the chat says why. Either the consent was given as a different user from the one the return was prepared for, or the token lacks the filing scope. The first usually means the browser is still signed in to the identity provider as the officer from the Ministry inbox, since both pages sign in through **BOA-Tax**. The second means the citizen's role is missing (step 3). In both cases the assistant drops the refused token and shows the **Sign and file** panel again: sign out of the identity provider, or fix the role, then sign again to authorise afresh. The same reason, with the token's subject and scopes beside the return's citizen, appears on the failed `tax_agent` hop on the **Token Flow** page and in the coordinator's log line `The ministry refused tax task …`.
+
+### The tax officer
+
+A ministry officer reviews the evidence for provisional reliefs (professional travel) in the Ministry inbox, `http://localhost:8014/tax-agent/inbox`, which the durable agent serves: the Ministry of Finance's home page, whose **Evidence review** section shows each claim, what accepting or rejecting it does to the tax due, and a declaration the officer signs before deciding. The officer signs in with their own account through **BOA-Tax**, and the ministry accepts a review only from a token carrying the officer scope, from someone other than the return's citizen.
+
+1. On the ministry's API resource (above), add the scope `review_tax_claims`, and authorise it on the **BOA-Tax** app alongside `file_tax_return`.
+2. On **BOA-Tax**, add the redirect URL `http://localhost:8014/tax-agent/inbox` and the allowed origin `http://localhost:8014`. The page exchanges the sign-in code from the browser, so the origin must be allowed.
+3. Create a role **tax-officer** with the `review_tax_claims` permission, at the same audience level as **BOA-Tax**. Don't give it to the bank's users.
+4. Create an officer user (e.g. `officer@ministry.asgard`) and assign them the role.
+5. Set `officerScope = "review_tax_claims"` in the durable agent's `Config.toml`. It is required: it is what tells an officer from a citizen.
+
+`reviewDeadlineMinutes` in the same file is how long the officer has. When it passes, the review ends unanswered and the agent withdraws the relief.
+
+### The Coordinator's scope
+
+Every token issued through **BOA-Tax** has the same audience: the Coordinator's agent token, a citizen's and an officer's. So the ministry's Coordinator endpoints (start a return, follow it) require a scope only the Coordinator's agent identity holds; without it, anyone who can sign in through BOA-Tax could start returns in a citizen's name or read other citizens' returns.
+
+1. On the ministry's API resource, add the scope `coordinate_tax_returns`, and authorise it on the **BOA-Tax** app.
+2. Create a role **tax-coordinator** with the `coordinate_tax_returns` permission, at the same audience level as **BOA-Tax**, and assign it to the **Transactions Agent** agent identity (`TRANSACTIONS_AGENT_ID`). Agents take roles the same way users do. Don't give it to users.
+3. Set `coordinatorScope = "coordinate_tax_returns"` in the durable agent's `Config.toml` (required) and, if you chose another name, `TAX_COORDINATOR_SCOPE` in `transactions-agent/.env`.
+
+The ministry's API resource then carries three scopes, one per kind of caller; `durable-tax-agent/openapi.yaml` documents which operations need which.
 
 
 ## MCP Client
@@ -275,7 +310,7 @@ Leaving `TAX_CONSENT_SCOPE` unset falls back to `read_transactions`: the flow wo
 | `8011` | Asgard Assistant WebSocket (FastAPI) | `script/bank-of-asgard-agent.service` → `--port`, `transactions-agent/.env` → `IDP_REDIRECT_URI` callback path, `transactions-agent/Dockerfile` → `EXPOSE` + `CMD --port`, `docker-compose.yml` → port mapping |
 | `8012` | Agencies MCP Server (FastMCP SSE)    | `agencies-mcp-server/server.py` → port constant, `docker-compose.yml` → port mapping |
 | `8013` | Savings Goals Agent (FastAPI)        | `savings-goals-agent/server.py` → port constant              |
-| `8014` | Tax Agent — Ministry of Finance (FastAPI) | `tax-agent/server.py` → port constant, `transactions-agent/.env` → `TAX_AGENT_URL` |
+| `8014` | Tax Agent — Ministry of Finance (Ballerina, durable) | `durable-tax-agent/main.bal` → listener port, `transactions-agent/.env` → `TAX_AGENT_URL` |
 | `8027` | Presentation server (Token Flow, Architecture Flow and Inside our agents pages) | `PORT_SLIDES` in the demo scripts; `animations/start-presentation.sh` takes the port as its first argument |
 
 When changing a port, also update:
@@ -300,7 +335,7 @@ When changing a port, also update:
 
 > `EXPECTED_AUDIENCE` in `agencies-mcp-server/.env` must equal `MCP_CLIENT_ID` — Asgardeo / IS puts the requesting application's client ID in the `aud` claim.
 > `EXPECTED_AUDIENCE` in `savings-goals-agent/.env` must equal `SAVINGS_AGENT_CLIENT_ID` for the same reason.
-> `EXPECTED_AUDIENCE` in `tax-agent/.env` must equal `TAX_AGENT_CLIENT_ID`, likewise.
+> `expectedAudience` in `durable-tax-agent/Config.toml` must equal `TAX_AGENT_CLIENT_ID`, likewise.
 
 ## Frontend
 
@@ -402,6 +437,10 @@ USER_STORE_NAME="PRIMARY"
 # Default is "Read_Transactions". Override if your role has a different name.
 # TRANSACTIONS_ROLE_NAME="Read_Transactions"
 
+# Name of the IS role also assigned on signup so new users can sign their tax return
+# (see "The citizen's filing scope"). Default is "taxpayer"; set to "" to skip it.
+# TAXPAYER_ROLE_NAME="taxpayer"
+
 # Set to 1 behind a load balancer so rate limiting sees each
 # visitor's real IP. Leave unset when the server is reached directly.
 # TRUST_PROXY=1
@@ -476,11 +515,18 @@ SAVINGS_AGENT_CLIENT_ID="SAVINGS_123"
 # <base>/.well-known/agent-card.json). Through the gateway: https://<GATEWAY_HOST>/boa-savings
 SAVINGS_AGENT_A2A_URL="http://localhost:8013"
 
-# Ministry of Finance Tax Agent — a cross-organisation call. Unset TAX_AGENT_CLIENT_ID
-# to drop both tax tools from the assistant.
-# EXPECTED_AUDIENCE in tax-agent/.env must equal this value
+# Ministry of Finance Tax Agent (durable-tax-agent/) — a cross-organisation call. Unset
+# TAX_AGENT_CLIENT_ID to drop both tax tools from the assistant.
+# The durable agent's expectedAudience must equal this value
 TAX_AGENT_CLIENT_ID="TAX_123"
-TAX_AGENT_URL="http://localhost:8014/prepare-return"
+# The durable agent's base path, not an endpoint
+TAX_AGENT_URL="http://localhost:8014/tax-agent"
+# Scope on the citizen's own token for BOA-Tax, needed to answer the ministry's
+# confirmations; must match the durable agent's citizenScope ("" for none)
+TAX_FILING_SCOPE="file_tax_return"
+# Scope on the Coordinator's own agent token for BOA-Tax, needed to start and follow
+# returns; must match the durable agent's coordinatorScope
+TAX_COORDINATOR_SCOPE="coordinate_tax_returns"
 # Dedicated consent scope for sharing deduction totals with the ministry. Provision it
 # on the AGENT_APP_ID app to get a distinct consent screen; unset falls back to
 # read_transactions (flow still works, without its own prompt).
@@ -637,13 +683,13 @@ The `X-Transaction-Id` header and the `transaction_id` field in the body (for th
 
 When `AMP_OTEL_ENDPOINT` is an `https` URL served by a private CA — an OpenChoreo cluster such as `https://default-default.agents.local.apis.coach:19443/otel`, for example — the span exporter fails with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` and retries forever. Python's HTTP stack uses the `certifi` bundle and never reads the macOS Keychain, so adding the CA there fixes `curl` and the browser but not the agent.
 
-Export the CA to a PEM file and point `OTEL_EXPORTER_OTLP_CERTIFICATE` at it in that agent's `.env` (each service reads its own — `transactions-agent/.env`, `savings-goals-agent/.env`, `tax-agent/.env`).
+Export the CA to a PEM file and point `OTEL_EXPORTER_OTLP_CERTIFICATE` at it in that agent's `.env` (each service reads its own — `transactions-agent/.env`, `savings-goals-agent/.env`).
 
 Build the bundle as **certifi's roots plus the private CA**, not the private CA alone. `OTEL_EXPORTER_OTLP_CERTIFICATE` *replaces* the trust store rather than adding to it, so a bundle holding only the OpenChoreo CA breaks any agent whose endpoint is a public host — for example a service still pointed at `https://opentelemetry.obs.dp.cloud.wso2.com/v1/traces`, which then fails with the same `CERTIFICATE_VERIFY_FAILED`. A combined bundle works for both. On macOS, with the CA already trusted in the System keychain:
 
 ```bash
 mkdir -p ~/.openchoreo
-cat "$(tax-agent/venv/bin/python -c 'import certifi; print(certifi.where())')" > ~/.openchoreo/ca.pem
+cat "$(savings-goals-agent/venv/bin/python -c 'import certifi; print(certifi.where())')" > ~/.openchoreo/ca.pem
 security find-certificate -a -c openchoreo -p /Library/Keychains/System.keychain >> ~/.openchoreo/ca.pem
 ```
 
@@ -673,31 +719,18 @@ What it demonstrates, in the order it happens:
 
 1. **Purpose-bound consent.** `SummarizeDeductibleExpenses` runs under the citizen's own OBO token, requesting `TAX_CONSENT_SCOPE`. Provision a dedicated scope (e.g. `share_tax_data`) on the `AGENT_APP_ID` app and the citizen gets a distinct consent screen naming the purpose, separate from the transaction-reading consent they already gave.
 2. **Data minimisation.** Classification into relief categories happens *inside the bank* (`transactions-agent/app/tax.py`). Only per-category totals and gross income leave — no transactions, merchants, dates or references. The tool reports how many transactions were examined to produce the totals, so the contrast is visible on screen.
-3. **Cross-organisation delegation.** `PrepareTaxReturn` calls the ministry with a token audienced for `TAX_AGENT_CLIENT_ID`, which `tax-agent/server.py` validates against the IDP's JWKS — the ministry can prove which agent called it, and on whose behalf (`user_sub`).
-4. **Reproducible arithmetic.** Every figure comes from `tax-agent/tax_rules.py` (published brackets, per-category rates and caps). The LLM only writes the explanation, and is instructed never to recompute or adjust a number. The figures are held in session state rather than passed through the model's arguments, so it cannot restate or round them.
+3. **Cross-organisation delegation.** `PrepareTaxReturn` calls the ministry with a token audienced for `TAX_AGENT_CLIENT_ID`, which the ministry's agent validates against the IDP's JWKS — the ministry can prove which agent called it, and on whose behalf (`user_sub`).
+4. **Reproducible arithmetic.** Every figure comes from the ministry's published rules (brackets, per-category rates and caps). The LLM only writes the explanation, and is instructed never to recompute or adjust a number. The figures are held in session state rather than passed through the model's arguments, so it cannot restate or round them.
+5. **The citizen signs, not the agent.** `PrepareTaxReturn` only opens the return, bound to the citizen's `user_sub`, and returns the draft. The Coordinator (`transactions-agent/langchain-agent/tax_followup.py`) shows a **Sign and file** panel with the figures that will be filed, and sends the signature with the **citizen's own** token for the ministry, obtained through a consent prompt the first time (see [The citizen's filing scope](#the-citizens-filing-scope)). The ministry checks that token's scope and that its `sub` is the return's citizen, so neither the model nor the bank's agent can file on the citizen's behalf.
+6. **A durable workflow on the ministry's side.** The ministry's agent (`durable-tax-agent/`, Ballerina on Temporal) files at once, but professional travel relief stands only provisionally: a tax officer reviews the evidence in the Ministry inbox (see [The tax officer](#the-tax-officer)), within a deadline. If the officer rejects it, or nobody reviews it in time, the agent amends the filed return on its own. Every demo user's generated transactions include a recent business trip (an Asgard Airlines flight and a Bifrost Hotels stay, `transactions-api/app/data.py`), so every return has a relief for the officer to review. The run outlives the chat, survives the agent being killed or redeployed while it waits, and files and amends exactly once. The chat shows the filing as soon as it happens and the outcome if it arrives while the chat is open; later, asking "how is my tax return going?" reads it from the ministry (`CheckMyTaxReturns`, a tool the assistant calls). A return left unsigned in an earlier chat gets its **Sign and file** panel back in the current one when the user asks.
 
-Create `.env` from `.env.example`:
+The ministry's agent is `durable-tax-agent/`. Set it up as described in [durable-tax-agent/README.md](durable-tax-agent/README.md): Ballerina, a Temporal server and its `Config.toml`. `start-demo.sh` then starts it whenever the coordinator is `langchain`, together with the Temporal dev server if none is running. Its `idpBaseUrl` is `IDP_BASE_URL`, and its `expectedAudience` must equal `TAX_AGENT_CLIENT_ID` in `transactions-agent/.env`. Its gateway key is the `boa-tax-agent` application's, which `gateway-setup/provision.py` writes to `gateway-setup/out/tax-agent.env`. With `--amp`, it traces to its own entry in Agent Manager, configured in the `[ballerinax.amp]` section of its `Config.toml`.
 
-```YAML
-IDP_BASE_URL=https://api.asgardeo.io/t/<ORG_NAME>
-# Must equal TAX_AGENT_CLIENT_ID in transactions-agent/.env.
-EXPECTED_AUDIENCE=TAX_123
-# SSL_VERIFY=false   # only for self-signed certs in local dev
+> [!NOTE]
+>
+> The Python `tax-agent/` is **deprecated**: it was the single-call version, before the durable workflow. The Coordinator no longer calls it and the demo scripts no longer start it, so to show the tax flow, use the durable agent. See [tax-agent/README.md](tax-agent/README.md).
 
-# Gateway credentials — same pattern as the Savings Goals Agent (always the v1/unsecured
-# endpoint: this service never sees raw user chat input, only structured aggregates).
-# GATEWAY_BASE_URL=<GATEWAY_BASE_URL>
-# GATEWAY_AUTH_MODE=oauth   # or apikey + GATEWAY_API_KEY
-# GATEWAY_TOKEN_ENDPOINT=<GATEWAY_TOKEN_ENDPOINT>
-# GATEWAY_CLIENT_ID=<GATEWAY_CLIENT_ID>
-# GATEWAY_CLIENT_SECRET=<GATEWAY_CLIENT_SECRET>
-
-# Its own entry in Agent Manager — a third distinct key.
-AMP_OTEL_ENDPOINT=http://localhost:22893/otel
-AMP_AGENT_API_KEY=<AMP_TAX_AGENT_API_KEY>
-```
-
-The relief categories in `tax-agent/tax_rules.py` (`RELIEF_RULES`) and the bank-side mapping in `transactions-agent/app/tax.py` (`CATEGORY_TO_RELIEF`) must stay in step — the ministry grants relief only for rules it publishes, and silently ignores any category it does not recognise.
+The relief categories in `durable-tax-agent/functions.bal` (`reliefRules`) and the bank-side mapping in `transactions-agent/app/tax.py` (`CATEGORY_TO_RELIEF`) must stay in step — the ministry grants relief only for rules it publishes, and silently ignores any category it does not recognise.
 
 > [!NOTE]
 > Deductions are computed from generated demo transactions, so the totals depend on the seeded data for the signed-in user. With a full year of data a typical run yields a few thousand in deductions on ~50k of income.
@@ -732,7 +765,7 @@ LLM_CONFIG_PATH=/etc/config/llm_config.yaml  # or the file itself
 
 `~` is expanded in both. It replaces the search entirely: if the path doesn't exist the service fails to start rather than falling back to the `openai`/`gpt-4o-mini` default, since that default would silently bypass the gateway. Each service logs the resolved path at startup.
 
-Supported by all five services — `transactions-agent/{langchain,autogen,strands}-agent/service.py`, `savings-goals-agent/server.py`, and `tax-agent/server.py` — each reading its own `.env`.
+Supported by all four Python services — `transactions-agent/{langchain,autogen,strands}-agent/service.py` and `savings-goals-agent/server.py` — each reading its own `.env`. The durable tax agent sets its model in its own `Config.toml` (`llmModel`).
 
 # Using WSO2 AI Gateway (recommended )
 
@@ -880,7 +913,7 @@ To call the agent directly again, set `SAVINGS_AGENT_A2A_URL=http://localhost:80
 
 ### Demo scripts (recommended for local development)
 
-The `demo_scripts/` directory provides s helper scripts that manage the full stack — transactions-api, agencies-mcp-server, savings-goals-agent, tax-agent, selected agent, Express server, and frontend — as native processes with health-checked startup, clean teardown, and single-service restart.
+The `demo_scripts/` directory provides s helper scripts that manage the full stack — transactions-api, agencies-mcp-server, savings-goals-agent, the durable tax agent (with Temporal), selected agent, Express server, and frontend — as native processes with health-checked startup, clean teardown, and single-service restart.
 
 > [!NOTE]
 >
@@ -898,8 +931,9 @@ cd agencies-mcp-server && python3.13 -m venv venv && venv/bin/pip install -r req
 # Savings Goals agent
 cd savings-goals-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
 
-# Tax agent (Ministry of Finance) — optional; skipped by start-demo.sh if absent
-cd tax-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt && cd ..
+# Tax agent (Ministry of Finance) — optional, langchain only: no venv. Install Ballerina
+# and the Temporal CLI, and create durable-tax-agent/Config.toml (see its README).
+# start-demo.sh skips it when any of these is missing.
 
 # Agents (repeat for each framework you want to run)
 cd transactions-agent
@@ -965,7 +999,7 @@ The Savings agent's own count stops at the cap, though: at the default it makes 
 
 When the Savings agent runs in Agent Manager instead of locally, `start-demo.sh` doesn't reach it: set `DEMO_VERSION=v2` (and optionally `DEMO_MAX_ITERATIONS`) as environment variables on its deployment.
 
-Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs. Each service also rotates it to `token-audit.jsonl.1` once it passes 20 MB, so a long-running demo can't grow it without bound. The savings and tax agents only add their own events (such as `validated_incoming`) when they run on the same machine; a Savings Agent deployed to Agent Manager writes them on its own host. The LangChain coordinator therefore logs each agent-to-agent call itself (`agent_call`, then `agent_reply` when it succeeds or `agent_call_failed` on an error), so the hop shows on the Token Flow page wherever the other agent runs.
+Logs are written to `.demo-logs/` (one file per service). Process IDs are tracked in `.demo.pids`. The token audit trail (`.demo-logs/token-audit.jsonl`, which feeds the **Token Flow** page) is truncated on every `start-demo.sh` run, so each demo begins with a clean list of transactions rather than accumulating stale entries from previous runs. Each service also rotates it to `token-audit.jsonl.1` once it passes 20 MB, so a long-running demo can't grow it without bound. The savings and tax agents only add their own events (such as `validated_incoming`) when they run on the same machine; a Savings Agent deployed to Agent Manager writes them on its own host. The LangChain coordinator therefore logs each agent-to-agent call itself (`agent_call`, then `agent_reply` when it succeeds or `agent_call_failed` on an error), so the hop shows on the Token Flow page wherever the other agent runs. Those hops carry the token's `sub` and the scopes it was granted. When the ministry refuses a citizen's signature, the failed hop's error also says why, e.g. `HTTP 403: not the return's citizen (…)` or `HTTP 403: token lacks scope file_tax_return`.
 
 The demo scripts bind the MCP, Savings and Tax services to `127.0.0.1` (they read `BIND_HOST`, which defaults to `0.0.0.0` so containers and Agent Manager deployments stay reachable). Run with `BIND_HOST=0.0.0.0 ./demo_scripts/start-demo.sh` if something off-host, such as a container, must reach them.
 

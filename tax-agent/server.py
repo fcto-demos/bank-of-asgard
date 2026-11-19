@@ -1,5 +1,9 @@
 """Ministry of Finance — Tax Filing Agent.
 
+DEPRECATED: replaced by the durable tax agent in durable-tax-agent/ (Ballerina on
+Temporal), which the Coordinator calls and the demo scripts start. This single-call
+version is no longer started, called or maintained; see tax-agent/README.md.
+
 A deliberately *cross-organisation* agent: it is not part of Bank of Asgard. The bank's
 Coordinator calls it with a token audienced for this service, carrying only the
 aggregate deduction figures the citizen consented to share — never the underlying
@@ -47,6 +51,10 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+logger.warning(
+    "tax-agent is DEPRECATED: the Coordinator calls the durable tax agent (durable-tax-agent/) "
+    "instead, on the same port 8014. Don't run both."
+)
 
 IDP_BASE_URL = os.environ["IDP_BASE_URL"]
 SSL_VERIFY = os.environ.get("SSL_VERIFY", "true").lower() != "false"

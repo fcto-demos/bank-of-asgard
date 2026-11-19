@@ -67,9 +67,8 @@ check_file "$ROOT/app/public/config.js"      "app/public/config.js"      "copy f
 check_file "$ROOT/server/.env"               "server/.env"               "copy from server/.env.example"
 check_file "$ROOT/agencies-mcp-server/.env" "agencies-mcp-server/.env"  "copy from agencies-mcp-server/.env.example"
 check_file "$ROOT/savings-goals-agent/.env" "savings-goals-agent/.env"  "copy from savings-goals-agent/.env.example"
-# tax-agent is optional (see start-demo.sh) — only assert its .env once its venv exists,
-# otherwise an unused optional service would report a missing file on every run.
-[[ -d "$ROOT/tax-agent/venv" ]] && check_file "$ROOT/tax-agent/.env" "tax-agent/.env" "copy from tax-agent/.env.example" || true
+# The durable tax agent is optional (see start-demo.sh): its checks only warn, in their own
+# section below.
 
 # ── Node dependencies ─────────────────────────────────────────────────────────
 section "Node dependencies"
@@ -131,11 +130,33 @@ check_venv "$ROOT/savings-goals-agent/venv/bin/python" \
     "savings-goals-agent" \
     "cd savings-goals-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 
-# Optional — check_venv warns (does not fail) when the venv is absent, which is the
-# right outcome for a service start-demo.sh skips.
-check_venv "$ROOT/tax-agent/venv/bin/python" \
-    "tax-agent" \
-    "cd tax-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
+# ── Durable tax agent (optional) ──────────────────────────────────────────────
+# durable-tax-agent/ runs with `bal run` on Temporal. Everything here only warns: without
+# it, start-demo.sh starts the rest of the demo, minus the tax tools. The Python tax-agent/
+# is deprecated and not checked.
+section "Durable tax agent (optional)"
+
+TAX_READY=true
+if command -v bal &>/dev/null; then
+    pass "Ballerina $(bal version 2>/dev/null | head -1 | grep -oE '[0-9]{4}\.[0-9]+\.[0-9]+' | head -1)"
+else
+    warn "bal (Ballerina) not found — the tax agent will be skipped. Install from https://ballerina.io/downloads/"
+    TAX_READY=false
+fi
+if [[ -f "$ROOT/durable-tax-agent/Config.toml" ]]; then
+    pass "durable-tax-agent/Config.toml"
+else
+    warn "durable-tax-agent/Config.toml not found — the tax agent will be skipped. See \"Run locally\" in durable-tax-agent/README.md"
+    TAX_READY=false
+fi
+if (echo >/dev/tcp/localhost/7233) 2>/dev/null; then
+    pass "Temporal running on port 7233 (start-demo.sh will reuse it)"
+elif command -v temporal &>/dev/null; then
+    pass "temporal CLI (start-demo.sh starts the dev server)"
+else
+    warn "Temporal isn't running on port 7233 and the temporal CLI isn't installed — the tax agent will be skipped. See \"Run Temporal\" in durable-tax-agent/README.md"
+    TAX_READY=false
+fi
 
 # ── Service import dry-run ────────────────────────────────────────────────────
 section "Service import check (dry run)"
@@ -200,21 +221,6 @@ EOF
       || fail "savings-goals-agent import failed — $(echo "$err" | grep -v '^$' | tail -2 | tr '\n' ' ')"
 fi
 
-TAX_PY="$ROOT/tax-agent/venv/bin/python"
-if [[ ! -f "$TAX_PY" ]]; then
-    warn "tax-agent — skipped (no venv)"
-elif [[ ! -f "$ROOT/tax-agent/.env" ]]; then
-    warn "tax-agent — skipped (no .env)"
-else
-    err=$(cd "$ROOT/tax-agent" && "$TAX_PY" - <<'EOF' 2>&1
-import importlib.util
-spec = importlib.util.spec_from_file_location("server", "server.py")
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-EOF
-    ) && pass "tax-agent imports OK" \
-      || fail "tax-agent import failed — $(echo "$err" | grep -v '^$' | tail -2 | tr '\n' ' ')"
-fi
 
 # ── Port availability ─────────────────────────────────────────────────────────
 section "Port availability"
@@ -242,8 +248,8 @@ check_port $PORT_AGENT    "transactions-agent"
 check_port $PORT_MCP      "agencies-mcp-server"
 check_port $PORT_SAVINGS  "savings-goals-agent"
 check_port $PORT_SLIDES   "presentation server — stop animations/start-presentation.sh if it is running"
-# Optional service — only checked when its venv is present (see start-demo.sh).
-[[ -f "$ROOT/tax-agent/venv/bin/python" ]] && check_port $PORT_TAX "tax-agent" || true
+# Optional service — only checked when it can be started (see above).
+$TAX_READY && check_port $PORT_TAX "durable tax agent" || true
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""

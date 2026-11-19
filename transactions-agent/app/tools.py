@@ -74,6 +74,24 @@ TAX_SCOPES = (
 )
 
 
+# Scope on the citizen's own token for the Ministry of Finance's Tax Agent
+# (TAX_AGENT_CLIENT_ID), requested when they first answer one of the ministry's
+# confirmation panels — receipts or filing. Its consent screen is the citizen authorising
+# the ministry to accept their answers; the ministry requires it (citizenScope in
+# durable-tax-agent) and that the token belongs to the return's citizen. It must exist on
+# an API resource authorised for the Tax Agent app in the IDP. Set it to an empty value to
+# request no custom scope (the ministry's citizenScope must then be empty too).
+TAX_FILING_SCOPE = os.environ.get("TAX_FILING_SCOPE", "file_tax_return")
+TAX_FILING_SCOPES = [TAX_FILING_SCOPE] if TAX_FILING_SCOPE else []
+TAX_FILING_COMPLETE_MESSAGE = "Authorisation complete! Sending your answer to the Ministry of Finance..."
+
+# Scope on the Coordinator's own agent token for the Tax Agent, which it needs to start returns
+# and follow them (the ministry's coordinatorScope). Granted to the Coordinator's agent identity
+# (TRANSACTIONS_AGENT_ID) through a role in the IDP: every token for the Tax Agent app has the
+# same audience, so the scope is what tells the Coordinator from a citizen or an officer.
+TAX_COORDINATOR_SCOPE = os.environ.get("TAX_COORDINATOR_SCOPE", "coordinate_tax_returns")
+
+
 def auth_completion_message(scopes: List[str]) -> str:
     """Pick the "authorisation complete" status message for an OBO callback.
 

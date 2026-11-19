@@ -51,6 +51,11 @@ class TokenManager:
         key = self._create_cache_key(config)
         return self.token_store.get(key)
 
+    def remove_token(self, config: AuthConfig) -> None:
+        """Drop a cached token, e.g. one a resource server refused, so the next lookup
+        fetches (or asks consent for) a new one."""
+        self.token_store.pop(self._create_cache_key(config), None)
+
     def _create_cache_key(self, config: AuthConfig) -> Tuple:
         """Create a cache key from auth configuration.
 

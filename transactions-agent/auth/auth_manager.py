@@ -186,6 +186,11 @@ class AutogenAuthManager:
 
         return token
 
+    def forget_token(self, config: AuthConfig) -> None:
+        """Drop the cached token for `config`, so the next get_oauth_token() fetches a new
+        one — for an OBO token, through a fresh consent prompt."""
+        self._token_manager.remove_token(config)
+
     async def process_callback(self, state: str, code: str) -> OAuthToken:
         """Process OAuth authorization callback.
 

@@ -1,0 +1,6 @@
+target/
+generated/
+Config.toml
+# Temporal dev-server database (temporal server start-dev --db-filename ./temporal.db)
+temporal.db*
+trace_enabled.bal

@@ -60,7 +60,8 @@ rm -f "$PID_FILE" "$ROOT/.demo.context"
 
 # ── Port sweep — catch any orphaned children the PID kill missed ──────────────
 for port in $PORT_API $PORT_AGENT $PORT_MCP $PORT_SAVINGS $PORT_TAX $PORT_SERVER $PORT_FRONTEND $PORT_SLIDES; do
-    pid=$(lsof -ti ":$port" 2>/dev/null || true)
+    # Listeners only: a bare ":$port" also matches clients, such as the browser showing the app.
+    pid=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
     if [[ -n "$pid" ]]; then
         kill -KILL $pid 2>/dev/null || true
         $QUIET || warn "Force-killed orphaned process on port $port (pid $pid)"

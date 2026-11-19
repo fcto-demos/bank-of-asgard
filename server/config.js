@@ -33,6 +33,9 @@ export const VITE_REACT_APP_CLIENT_BASE_URL =
   process.env.VITE_REACT_APP_CLIENT_BASE_URL;
 export const USER_STORE_NAME = process.env.USER_STORE_NAME || "PRIMARY";
 export const TRANSACTIONS_ROLE_NAME = process.env.TRANSACTIONS_ROLE_NAME || "Read_Transactions";
+// Role granting file_tax_return for the Tax Agent (BOA-Tax audience), also assigned on
+// signup. Set it to an empty string to skip it, e.g. when the tax demo isn't set up.
+export const TAXPAYER_ROLE_NAME = process.env.TAXPAYER_ROLE_NAME ?? "taxpayer";
 export const TRANSACTIONS_API_URL = process.env.TRANSACTIONS_API_URL || "http://localhost:8010";
 // Express "trust proxy" setting — set to 1 when running behind a single load balancer so
 // rate limiting sees the real client IP. Unset = don't trust X-Forwarded-For.

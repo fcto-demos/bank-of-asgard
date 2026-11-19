@@ -1,0 +1,9 @@
+[package]
+org = "apiscoach"
+name = "durable_tax_agent"
+version = "0.5.0"
+title = "Durable Tax Filing Agent"
+distribution = "2201.13.4"
+
+[build-options]
+observabilityIncluded = true

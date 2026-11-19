@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 import LockIcon from "@mui/icons-material/Lock";
+import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -20,6 +21,23 @@ import { ASSISTANT_TITLE, environmentConfig } from "../../util/environment-util"
 
 const GOLD = "#997029";
 const AGENT_WS_URL = environmentConfig.TRANSACTIONS_AGENT_URL || "ws://localhost:8011";
+
+/**
+ * A Ministry of Finance step waiting for the citizen, relayed by the Coordinator
+ * (transactions-agent/langchain-agent/tax_followup.py's TaxTaskMessage).
+ * @typedef {object} TaxTask
+ * @property {string} task_id
+ * @property {"filing"} kind
+ * @property {string} title
+ * @property {string} description
+ * @property {string[]} evidence_needed reliefs granted provisionally, pending an officer's review
+ * @property {Record<string, number>} figures
+ */
+
+/** Button labels per step: [confirm, decline]. */
+const TAX_TASK_ACTIONS = {
+  filing: ["Sign and file", "Don't file"],
+};
 
 /**
  * @param {object} props
@@ -41,7 +59,10 @@ const ChatComponent = ({
   const [isConnected, setIsConnected] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [pendingAuth, setPendingAuth] = useState(
-    /** @type {{auth_url: string, scopes: string[]} | null} */ (null)
+    /** @type {{auth_url: string, scopes: string[], purpose?: string | null} | null} */ (null)
+  );
+  const [pendingTaxTask, setPendingTaxTask] = useState(
+    /** @type {TaxTask | null} */ (null)
   );
 
   const wsRef = useRef(/** @type {WebSocket | null} */ (null));
@@ -97,6 +118,9 @@ const ChatComponent = ({
         if (data.type === "auth_request") {
           setPendingAuth(data);
           setIsTyping(false);
+        } else if (data.type === "tax_task") {
+          setPendingTaxTask(data);
+          setIsTyping(false);
         } else if (data.type === "message") {
           setIsTyping(false);
           setMessages((prev) => [
@@ -140,6 +164,27 @@ const ChatComponent = ({
       sendMessage();
     }
   };
+
+  // The citizen's answer to a ministry step goes back over the chat socket as JSON; the
+  // Coordinator forwards it to the Tax Agent without involving the model.
+  const answerTaxTask = useCallback(
+    (/** @type {boolean} */ approve) => {
+      if (!pendingTaxTask || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      wsRef.current.send(
+        JSON.stringify({ type: "tax_task_decision", task_id: pendingTaxTask.task_id, approve })
+      );
+      const [confirmLabel, declineLabel] = TAX_TASK_ACTIONS[pendingTaxTask.kind];
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: approve ? confirmLabel : declineLabel },
+      ]);
+      setPendingTaxTask(null);
+      setIsTyping(true);
+    },
+    [pendingTaxTask]
+  );
 
   const handleAuthorize = useCallback(() => {
     if (!pendingAuth?.auth_url) return;
@@ -303,7 +348,8 @@ const ChatComponent = ({
                   Authorisation Required
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                  To read your transactions, the assistant needs your permission.
+                  {pendingAuth.purpose ||
+                    "To read your transactions, the assistant needs your permission."}{" "}
                   Click below to authorise access via WSO2 Identity Platform.
                 </Typography>
                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 1 }}>
@@ -330,6 +376,82 @@ const ChatComponent = ({
                 >
                   Authorise Access
                 </Button>
+              </Box>
+            </Box>
+          </Box>
+        </>
+      )}
+
+      {/* Ministry of Finance confirmation (durable tax return) */}
+      {pendingTaxTask && (
+        <>
+          <Divider />
+          <Box sx={{ px: 2, py: 1.5, bgcolor: "#fffde7" }}>
+            <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
+              <AccountBalanceIcon sx={{ color: GOLD, mt: 0.25, fontSize: 18 }} />
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                  {pendingTaxTask.title}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                  {pendingTaxTask.description}
+                </Typography>
+                {pendingTaxTask.evidence_needed.length > 0 && (
+                  <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.5, mb: 1 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      Provisional until reviewed:
+                    </Typography>
+                    {pendingTaxTask.evidence_needed.map((relief) => (
+                      <Chip
+                        key={relief}
+                        label={relief}
+                        size="small"
+                        variant="outlined"
+                        sx={{ fontSize: "0.65rem", borderColor: GOLD, color: GOLD }}
+                      />
+                    ))}
+                  </Box>
+                )}
+                {Object.keys(pendingTaxTask.figures).length > 0 && (
+                  <Box sx={{ mb: 1 }}>
+                    {Object.entries(pendingTaxTask.figures).map(([label, value]) => (
+                      <Typography key={label} variant="caption" sx={{ display: "block" }}>
+                        {label}: <strong>{value.toLocaleString()}</strong>
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+                <Box sx={{ display: "flex", gap: 1 }}>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={() => answerTaxTask(true)}
+                    disabled={!isConnected}
+                    sx={{
+                      bgcolor: GOLD,
+                      "&:hover": { bgcolor: "#7a5a20" },
+                      textTransform: "none",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {TAX_TASK_ACTIONS[pendingTaxTask.kind][0]}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => answerTaxTask(false)}
+                    disabled={!isConnected}
+                    sx={{
+                      borderColor: GOLD,
+                      color: GOLD,
+                      "&:hover": { borderColor: "#7a5a20" },
+                      textTransform: "none",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {TAX_TASK_ACTIONS[pendingTaxTask.kind][1]}
+                  </Button>
+                </Box>
               </Box>
             </Box>
           </Box>

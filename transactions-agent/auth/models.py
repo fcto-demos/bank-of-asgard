@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -34,8 +34,11 @@ class AuthRequestMessage(BaseModel):
         auth_url: Authorization URL for user to visit
         state: OAuth state parameter for security
         scopes: Required OAuth scopes
+        purpose: What the consent is for, shown by the chat UI in place of its default
+            text (which is about reading transactions)
     """
     type: Literal["auth_request"] = "auth_request"
     auth_url: str
     state: str
     scopes: List[str]
+    purpose: Optional[str] = None

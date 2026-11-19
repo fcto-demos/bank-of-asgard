@@ -8,7 +8,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import cached_property
 from pathlib import Path
-from typing import Literal, Dict, Iterator, List, Any
+from typing import Literal, Dict, Iterator, List, Any, Tuple
+from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit
 
 import httpx
@@ -61,11 +62,15 @@ from app.tools import (
     get_my_profile, update_my_profile,
     PROFILE_AUTH_CONFIG, UPDATE_PROFILE_AUTH_CONFIG,
     GET_MY_PROFILE_DESCRIPTION, UPDATE_MY_PROFILE_DESCRIPTION,
-    auth_completion_message, TAX_SCOPES,
+    auth_completion_message, TAX_SCOPES, TAX_FILING_SCOPES, TAX_FILING_COMPLETE_MESSAGE,
+    TAX_COORDINATOR_SCOPE,
 )
 from app.subagents import subscription_detective, spending_health
 from app.tax import DeductionSummary, format_summary, summarize_deductible_spend
 from tool import SecureLangChainTool, ToolKind
+from tax_followup import (
+    TaxAgentApi, TaxReturnFollowUp, describe_returns, granted_scopes, parse_decision, token_claims,
+)
 from auth import AuthRequestMessage, AutogenAuthManager, AuthSchema, AuthConfig, OAuthTokenType
 
 from asgardeo_ai import AgentConfig
@@ -213,7 +218,17 @@ tax_asgardeo_config = AsgardeoConfig(
     redirect_uri=redirect_uri
 ) if tax_agent_client_id else None
 
-TAX_AGENT_URL = os.environ.get('TAX_AGENT_URL', 'http://localhost:8014/prepare-return')
+# The durable Tax Agent's base path (durable-tax-agent/, Ballerina): PrepareTaxReturn posts
+# to <TAX_AGENT_URL>/prepare-return and tax_followup.py polls the run under it.
+TAX_AGENT_URL = os.environ.get('TAX_AGENT_URL', 'http://localhost:8014/tax-agent')
+if TAX_AGENT_URL.rstrip("/").endswith("/prepare-return"):
+    # The old Python tax-agent's endpoint. Fail loudly rather than post to
+    # <...>/prepare-return/prepare-return and surface it as a generic tool error.
+    raise ValueError(
+        f"TAX_AGENT_URL={TAX_AGENT_URL!r} is the old tax-agent endpoint. It is now the "
+        "durable Tax Agent's base path, e.g. http://localhost:8014/tax-agent"
+    )
+_tax_agent_api = TaxAgentApi(TAX_AGENT_URL, ssl_verify=_ssl_verify)
 
 # TAX_CONSENT_SCOPE — the citizen's consent scope for the tax flow — is defined in
 # app/tools.py alongside the other scope constants, since auth_completion_message keys
@@ -451,26 +466,36 @@ def _trace_context_headers(conversation_id: str | None) -> dict[str, str]:
 
 
 @contextmanager
-def _audit_agent_call(resource: str, token: OAuthToken) -> Iterator[None]:
+def _audit_agent_call(
+    resource: str, token: OAuthToken, kind: str = "AGENT_TOKEN",
+) -> Iterator[None]:
     """Token-audit hops for a call to an agent in another process: `agent_call` as the
     request leaves, then `agent_reply` (agent -> Coordinator, no token) when it succeeds
     or `agent_call_failed` when it errors — the A2A counterpart of tools.py's api_call.
     Logged here, by the caller, because the receiving agent's own events
     (validated_incoming, its LLM calls) only reach this trail when it runs on this
-    machine: an agent deployed to Agent Manager writes them to its own disk."""
+    machine: an agent deployed to Agent Manager writes them to its own disk.
+
+    Both hops carry the token's `sub` and granted scopes, so a refusal can be read against
+    them on the Token Flow page; an exception with an `audit_reason` (TaxRefusal) adds it to
+    the failed hop's error."""
+    claims = token_claims(token.access_token)
     audit = {
         "service": "transactions-agent", "origin": "transactions-agent", "destination": resource,
-        "access_token": token.access_token, "kind": "AGENT_TOKEN", "resource": resource,
+        "access_token": token.access_token, "kind": kind, "resource": resource,
         "requested_by": "transactions-agent",
+        "sub": claims.get("sub"), "scopes": granted_scopes(claims),
     }
     emit_token_event(event="agent_call", **audit)
     try:
         yield
     except Exception as e:
         status = http_status(e)
+        error = f"HTTP {status}" if status else type(e).__qualname__
+        reason = getattr(e, "audit_reason", None)
         emit_token_event(
             event="agent_call_failed", success=False,
-            error=f"HTTP {status}" if status else type(e).__qualname__,
+            error=f"{error}: {reason}" if reason else error,
             **audit,
         )
         raise
@@ -613,18 +638,16 @@ async def _prepare_tax_return(
     user_sub: str | None = None,
     transaction_id: str | None = None,
     conversation_id: str | None = None,
-) -> str:
-    """Send the per-category totals to the Ministry of Finance's Tax Agent.
+) -> dict:
+    """Start a return at the Ministry of Finance's durable Tax Agent with the per-category
+    totals, and return its reply: the run's instanceId and the draft assessment.
 
     The cross-organisation hop. `summary` comes from session state rather than from the
     model, so the figures the ministry receives are exactly the ones computed in
     app/tax.py — the LLM cannot restate, round, or invent them. Note what is sent: gross
     income and one total per relief category, and nothing else. transaction_id and
     conversation_id play the same roles as in _suggest_savings_goal."""
-    headers = {"Authorization": f"Bearer {token.access_token}"}
-    # Also sent as a header (not just in the body) so the Tax Agent's bearer-auth
-    # middleware — which runs before the body is parsed — can tag its own
-    # validated_incoming audit event with the right transaction_id too.
+    headers: dict[str, str] = {}
     if transaction_id:
         headers["X-Transaction-Id"] = transaction_id
     payload = {
@@ -637,33 +660,107 @@ async def _prepare_tax_return(
         "Sharing tax aggregates with Ministry of Finance — categories=%s (no transactions)",
         sorted(summary["qualifying_spend"]),
     )
-    async with httpx.AsyncClient(verify=_ssl_verify) as client:
-        with (
-            _invoke_remote_agent_span("Tax Agent", _TAX_AGENT_PROVIDER, TAX_AGENT_URL),
-            _audit_agent_call("tax_agent", token),
-        ):
-            response = await client.post(
-                TAX_AGENT_URL, headers=headers | _trace_context_headers(conversation_id),
-                json=payload, timeout=30.0,
-            )
-            response.raise_for_status()
-        result = response.json()
+    with (
+        _invoke_remote_agent_span("Tax Agent", _TAX_AGENT_PROVIDER, _tax_agent_api.prepare_url),
+        _audit_agent_call("tax_agent", token),
+    ):
+        return await _tax_agent_api.prepare_return(
+            token, payload, headers | _trace_context_headers(conversation_id),
+        )
+
+
+def _describe_draft(result: dict) -> str:
+    """The PrepareTaxReturn tool result: the ministry's figures, and what happens next."""
     a = result["assessment"]
+    evidence = a.get("evidenceNeeded") or []
+    provisional = (
+        f" Once filed, these reliefs stand only provisionally until a ministry officer reviews "
+        f"their evidence: {', '.join(evidence)}. If the officer rejects it, or nobody reviews it "
+        f"before the deadline, the ministry withdraws them and amends the return." if evidence else ""
+    )
     return (
-        f"{result['message']} (Reference: {result['reference']}, "
-        f"total deductions: {a['total_deductions']}, taxable income: {a['taxable_income']}, "
-        f"estimated saving: {a['estimated_saving']}, deadline: {a['filing_deadline']})"
+        f"The Ministry of Finance has opened tax return {result['instanceId']} and returned "
+        f"this draft assessment for {a['taxYear']}: total deductions {a['totalDeductions']}, "
+        f"taxable income {a['taxableIncome']}, tax before reliefs {a['taxBeforeReliefs']}, "
+        f"tax after reliefs {a['taxAfterReliefs']}, estimated saving {a['estimatedSaving']}, "
+        f"filing deadline {a['filingDeadline']}. The return is NOT filed yet: the ministry asks "
+        f"the user to sign it in a panel in this chat, outside the conversation. Tell the user to "
+        f"sign there. You cannot sign or file on the user's behalf.{provisional} The ministry's "
+        f"updates are posted in the chat."
     )
 
 
-def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) -> list:
+_TAX_FILING_PURPOSE = (
+    "The Ministry of Finance accepts a signature on your tax return only from you. "
+    "Authorise it once to sign your return and to check its progress."
+)
+
+
+def _build_tax_tools(
+    auth_manager: AutogenAuthManager, session_context: dict, websocket: WebSocket,
+    message_handler: Callable[[AuthRequestMessage], Awaitable[None]],
+) -> list:
     """Build the two tax tools for one session, or [] when the tax agent isn't configured.
 
     Kept out of websocket_endpoint so that function stays under the complexity limit, and
-    because the pair only makes sense together — see the two trust boundaries below.
+    because the pair only makes sense together — see the two trust boundaries below. Also
+    creates the session's TaxReturnFollowUp (session_context["tax_followup"]), which relays
+    the durable return's confirmation steps to the chat once PrepareTaxReturn has started it.
     """
     if not tax_asgardeo_config:
         return []
+
+    # PrepareTaxReturn crosses to a DIFFERENT ORGANISATION. Same AGENT_TOKEN pattern as
+    # GetAgencies/SuggestSavingsGoal, audienced for TAX_AGENT_CLIENT_ID, so the ministry
+    # can prove which agent called it — see durable-tax-agent/auth.bal.
+    tax_auth_manager = AutogenAuthManager(
+        config=tax_asgardeo_config,
+        agent_config=agent_config,
+    )
+    # The coordinator scope is what the ministry checks on starting and following returns.
+    tax_auth_config = AuthConfig(
+        scopes=[TAX_COORDINATOR_SCOPE],
+        token_type=OAuthTokenType.AGENT_TOKEN,
+        resource="tax_agent"
+    )
+
+    async def notify(text: str) -> None:
+        # Shown now, and folded into the model's history at the start of the next turn
+        # (run_agent) so follow-up questions about the outcome have it in context.
+        session_context["pending_history"].append(AIMessage(content=text))
+        await websocket.send_json(TextResponse(content=text).model_dump())
+
+    # The citizen's own token for the Tax Agent: same client (audience TAX_AGENT_CLIENT_ID)
+    # but an OBO token, obtained through the citizen's consent on their first answer to a
+    # ministry confirmation panel. Its consent states are routed back to this manager by
+    # /callback (obo_state_managers), not to the session's main one.
+    async def tax_consent_handler(message: AuthRequestMessage) -> None:
+        obo_state_managers[message.state] = (citizen_auth_manager, TAX_FILING_COMPLETE_MESSAGE)
+        await message_handler(message.model_copy(update={"purpose": _TAX_FILING_PURPOSE}))
+
+    citizen_auth_manager = AutogenAuthManager(
+        config=tax_asgardeo_config,
+        agent_config=agent_config,
+        message_handler=tax_consent_handler,
+    )
+    citizen_auth_config = AuthConfig(
+        scopes=TAX_FILING_SCOPES,
+        token_type=OAuthTokenType.OBO_TOKEN,
+        resource="tax_agent"
+    )
+
+    followup = TaxReturnFollowUp(
+        _tax_agent_api,
+        send_json=websocket.send_json,
+        notify=notify,
+        fresh_token=lambda: tax_auth_manager.get_oauth_token(tax_auth_config),
+        citizen_token=lambda: citizen_auth_manager.get_oauth_token(citizen_auth_config),
+        audit_call=lambda token: _audit_agent_call("tax_agent", token, kind="OBO_TOKEN"),
+        citizen_sub=lambda: session_context["user_sub"],
+        citizen_scopes=TAX_FILING_SCOPES,
+        forget_citizen_token=lambda: citizen_auth_manager.forget_token(citizen_auth_config),
+    )
+    session_context["tax_followup"] = followup
 
     async def summarize_deductible_expenses(token: OAuthToken) -> str:
         session_context["user_sub"] = _decode_sub(token.access_token)
@@ -677,18 +774,42 @@ def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) ->
     # tax-agent keeps the field optional server-side for when a real TIN exists.
     async def prepare_tax_return(token: OAuthToken) -> str:
         summary = session_context["tax_summary"]
+        if not session_context["user_sub"]:
+            # The ministry binds the return to this citizen; without it nobody could answer it.
+            return (
+                "The user's identity isn't known yet — call SummarizeDeductibleExpenses "
+                "first, then PrepareTaxReturn."
+            )
         if not summary:
             return (
                 "No deduction summary has been prepared yet — call "
                 "SummarizeDeductibleExpenses first, so the figures sent to the ministry "
                 "are the ones computed from the user's own transactions."
             )
-        return await _prepare_tax_return(
+        result = await _prepare_tax_return(
             token, summary,
             user_sub=session_context["user_sub"],
             transaction_id=session_context["transaction_id"],
             conversation_id=session_context["conversation_id"],
         )
+        followup.watch(result["instanceId"], token)
+        return _describe_draft(result)
+
+    # The citizen's own token again: only they may read their returns at the ministry, and
+    # the outcome of an officer review can arrive long after the chat that started it.
+    async def check_my_tax_returns(token: OAuthToken) -> str:
+        with (
+            _invoke_remote_agent_span("Tax Agent", _TAX_AGENT_PROVIDER, _tax_agent_api.prepare_url),
+            _audit_agent_call("tax_agent", token, kind="OBO_TOKEN"),
+        ):
+            returns = await _tax_agent_api.my_returns(token)
+        # A return left unsigned in an earlier chat has no panel here; follow it again so
+        # its signing panel is shown in this one.
+        followup.resume([
+            item["instanceId"] for item in returns
+            if not item.get("filing") and item.get("status") != "completed"
+        ])
+        return describe_returns(returns)
 
     # SummarizeDeductibleExpenses runs bank-side under the CITIZEN's consent (OBO), with
     # its own scope so the consent screen names the purpose — sharing tax data — rather
@@ -711,35 +832,40 @@ def _build_tax_tools(auth_manager: AutogenAuthManager, session_context: dict) ->
         ))
     )
 
-    # PrepareTaxReturn crosses to a DIFFERENT ORGANISATION. Same AGENT_TOKEN pattern as
-    # GetAgencies/SuggestSavingsGoal, audienced for TAX_AGENT_CLIENT_ID, so the ministry
-    # can prove which agent called it — see tax-agent/server.py's _validate_token.
-    tax_auth_manager = AutogenAuthManager(
-        config=tax_asgardeo_config,
-        agent_config=agent_config,
-    )
-
     prepare_tool = SecureLangChainTool(
         prepare_tax_return,
         description=(
             "Send the deduction totals produced by SummarizeDeductibleExpenses to the "
-            "Ministry of Finance's Tax Agent, which applies the published relief rules and "
-            "returns a draft assessment: total deductions, taxable income, estimated tax "
-            "saving, any receipts still needed, and the filing deadline. Only call this "
-            "after SummarizeDeductibleExpenses, and only once the user has agreed to share "
-            "their figures with the ministry. Takes no arguments — the figures are taken "
-            "from the previous step, so never ask the user for them or for a tax ID."
+            "Ministry of Finance's Tax Agent, which opens a tax return, applies the published "
+            "relief rules and returns a draft assessment: total deductions, taxable income, "
+            "estimated tax saving, any receipts still needed, and the filing deadline. The "
+            "ministry then asks the user directly, through confirmation panels in the chat, to "
+            "confirm receipts and the filing. Only call this after SummarizeDeductibleExpenses, "
+            "and only once the user has agreed to share their figures with the ministry. Takes "
+            "no arguments — the figures are taken from the previous step, so never ask the "
+            "user for them or for a tax ID."
         ),
         name="PrepareTaxReturn",
         kind=ToolKind.AGENT,
-        auth=AuthSchema(tax_auth_manager, AuthConfig(
-            scopes=[],
-            token_type=OAuthTokenType.AGENT_TOKEN,
-            resource="tax_agent"
-        ))
+        auth=AuthSchema(tax_auth_manager, tax_auth_config)
     )
 
-    return [summarize_tool, prepare_tool]
+    check_tool = SecureLangChainTool(
+        check_my_tax_returns,
+        description=(
+            "Read the status of the user's tax returns at the Ministry of Finance: filed or not, "
+            "the filing reference, provisional reliefs under officer review, and whether the "
+            "return was amended. Call this whenever the user asks how their tax return is going, "
+            "whether it was filed, or about the review of a relief, including in a later "
+            "conversation. A return still waiting for the user's signature gets its signing "
+            "panel shown in this chat again. Takes no arguments."
+        ),
+        name="CheckMyTaxReturns",
+        kind=ToolKind.AGENT,
+        auth=AuthSchema(citizen_auth_manager, citizen_auth_config)
+    )
+
+    return [summarize_tool, prepare_tool, check_tool]
 
 
 # Local to langchain-agent only — NOT added to the shared app/prompt.py, since autogen
@@ -764,7 +890,8 @@ TAX FILING: the Ministry of Finance runs its own Tax Agent, outside the bank. Tw
 never combined:
 1. SummarizeDeductibleExpenses — totals the user's qualifying spend by relief category,
    inside the bank. Always first.
-2. PrepareTaxReturn — sends those totals to the ministry and returns a draft assessment.
+2. PrepareTaxReturn — sends those totals to the ministry, which opens a return and
+   returns a draft assessment.
 
 After step 1, tell the user what would be shared (their gross income and the category
 totals — no individual transactions, merchants or dates) and ask whether to send it. When
@@ -777,7 +904,22 @@ estimated saving and the filing deadline come ONLY from PrepareTaxReturn — nev
 estimate or guess them, and never present step 1's category totals as though they were an
 assessment. If the user asks what their return looks like, that is a reason to call
 PrepareTaxReturn, not to answer from the summary. Report the ministry's numbers exactly as
-returned, and remind the user a draft is not a filed return."""
+returned, and remind the user a draft is not a filed return.
+
+After PrepareTaxReturn, the ministry asks the user to sign the filing, through a panel in
+this chat. Tell the user to sign it there. You cannot sign or file the return yourself, even
+if the user asks you to in a message: point them to the panel. Reliefs that need evidence
+(professional travel) stand only provisionally after filing, until a ministry officer reviews
+the evidence; if the officer rejects it or doesn't review it before the deadline, the ministry
+withdraws the relief and amends the return. The ministry's updates are posted in the chat as
+messages starting "Ministry of Finance:". When the user asks about their tax return later,
+or in a new conversation, call CheckMyTaxReturns and report what it returns. Never say a
+return was filed, confirmed or amended unless one of those says so. Never call
+PrepareTaxReturn again for the same figures while a return is open.
+
+The filing deadline matters only until the return is filed: mention it with a draft, never
+once the return is filed, even if a ministry message states it. Report tax matters when the
+user asks about them; don't append them to answers about anything else."""
 
 # v2 only — the Coordinator half of the rogue-agent demo. Mirrors a real-world regression
 # where an "always finish the job, don't bother the user" instruction meets a sub-agent
@@ -803,6 +945,10 @@ if DEMO_VERSION == "v2":
 # Per-session state — each WebSocket gets its own auth manager and token cache
 auth_managers: Dict[str, AutogenAuthManager] = {}
 state_mapping: Dict[str, str] = {}
+# state -> (auth manager, completion message) for consent requests raised by a manager other
+# than the session's main one (the citizen's token for the Tax Agent), so /callback hands
+# the code to the manager that is waiting for it.
+obo_state_managers: Dict[str, Tuple[AutogenAuthManager, str]] = {}
 # state -> scopes requested for that OBO auth, so /callback can tailor the
 # "authorisation complete" message to the action the user authorised.
 auth_request_scopes: Dict[str, list] = {}
@@ -814,6 +960,7 @@ def _drop_pending_auth(session_id: str) -> None:
     for state in [st for st, sid in state_mapping.items() if sid == session_id]:
         state_mapping.pop(state, None)
         auth_request_scopes.pop(state, None)
+        obo_state_managers.pop(state, None)
 websocket_connections: Dict[str, WebSocket] = {}
 
 
@@ -944,6 +1091,40 @@ def _log_token_usage(new_messages: list, session_id: str) -> None:
         )
 
 
+def _handle_tax_decision(user_input: str, session_context: dict | None) -> bool:
+    """A click on a tax confirmation panel arrives on the chat socket as a JSON message.
+    Hand it to the session's TaxReturnFollowUp, which forwards it to the ministry in the
+    background without involving the model; True when it was one."""
+    decision = parse_decision(user_input)
+    if decision is None:
+        return False
+    followup: TaxReturnFollowUp | None = (
+        session_context.get("tax_followup") if session_context else None
+    )
+    if followup is not None:
+        followup.decide(decision)
+    return True
+
+
+def _fold_pending_history(chat_history: List, session_context: dict | None) -> None:
+    """Messages posted outside a turn (the ministry's outcome) join the history before
+    the model sees the next user message."""
+    if session_context is not None and session_context["pending_history"]:
+        chat_history.extend(session_context["pending_history"])
+        session_context["pending_history"].clear()
+
+
+def _close_session(session_id: str, session_context: dict) -> None:
+    """Drop a closed chat session's state. Its durable tax returns carry on at the
+    ministry; only this session's polling of them stops."""
+    auth_managers.pop(session_id, None)
+    websocket_connections.pop(session_id, None)
+    _drop_pending_auth(session_id)
+    tax_followup = session_context["tax_followup"]
+    if tax_followup is not None:
+        tax_followup.close()
+
+
 async def run_agent(
     graph: Any,
     websocket: WebSocket,
@@ -958,6 +1139,10 @@ async def run_agent(
         if user_input.strip().lower() == "exit":
             await websocket.close()
             break
+
+        if _handle_tax_decision(user_input, session_context):
+            continue
+        _fold_pending_history(chat_history, session_context)
 
         # The gateway enforces request limits when enabled — see MAX_USER_MESSAGE_CHARS.
         if not _use_gateway and len(user_input) > MAX_USER_MESSAGE_CHARS:
@@ -1045,9 +1230,12 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
     # PrepareTaxReturn sends the figures that were actually computed from the user's
     # transactions, rather than whatever the model paraphrased back into its arguments.
     # savings_calls counts SuggestSavingsGoal calls this turn for _CappedSavingsTool.
+    # tax_followup (set by _build_tax_tools) relays durable tax returns' confirmation steps;
+    # pending_history holds messages it posted between turns, for run_agent to fold in.
     session_context: dict = {
         "user_sub": None, "transaction_id": None, "conversation_id": session_id,
         "tax_summary": None, "savings_calls": 0,
+        "tax_followup": None, "pending_history": [],
     }
 
     async def _analyze_subscriptions_traced(token: OAuthToken) -> str:
@@ -1198,7 +1386,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         session_context=session_context,
     )
 
-    tax_tools = _build_tax_tools(auth_manager, session_context)
+    tax_tools = _build_tax_tools(auth_manager, session_context, websocket, message_handler)
 
     active_llm = llm_secured if secured else llm
     logger.info("Session %s using %s gateway", session_id, "secured" if secured else "base")
@@ -1249,9 +1437,7 @@ async def websocket_endpoint(websocket: WebSocket, secured: bool = False):
         except Exception as send_err:
             logger.debug("Failed to send error response to session %s: %s", session_id, send_err)
     finally:
-        auth_managers.pop(session_id, None)
-        websocket_connections.pop(session_id, None)
-        _drop_pending_auth(session_id)
+        _close_session(session_id, session_context)
 
 
 @app.get("/callback")
@@ -1262,7 +1448,9 @@ async def callback(code: str, state: str):
     if not session_id:
         raise HTTPException(status_code=400, detail="Invalid state.")
 
-    auth_manager = auth_managers.get(session_id)
+    routed = obo_state_managers.pop(state, None)
+    auth_manager = routed[0] if routed else auth_managers.get(session_id)
+    completion_message = routed[1] if routed else auth_completion_message(scopes)
     if not auth_manager:
         raise HTTPException(status_code=400, detail="Invalid session.")
 
@@ -1274,7 +1462,7 @@ async def callback(code: str, state: str):
         if websocket:
             try:
                 await websocket.send_json(TextResponse(
-                    content=auth_completion_message(scopes)
+                    content=completion_message
                 ).model_dump())
             except Exception as ws_err:
                 logger.warning(f"Could not send auth completion message: {ws_err}")

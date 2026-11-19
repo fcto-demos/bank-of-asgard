@@ -27,7 +27,7 @@ import { fileURLToPath } from "url";
 
 import { getAccessToken, getOrganizationToken, requireBearer } from "./middleware/auth.js";
 import { addUserToAdminRole, addUserToRole, assignUserToOrgRole, changeUserOrgRole, createOrganization, deleteOrganization, getAdminRoleIdInOrganization, getOrganizationId, getRoleIdByName, getUserIdInOrganization, isBusinessNameAvailable } from "./controllers/business.js"
-import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, TRUST_PROXY, USER_STORE_NAME, TRANSACTIONS_ROLE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
+import { agent, IDP_BASE_URL, IDP_BASE_URL_SCIM2, GEO_API_KEY, HOST, PORT, TRANSACTIONS_API_URL, TRUST_PROXY, USER_STORE_NAME, TRANSACTIONS_ROLE_NAME, TAXPAYER_ROLE_NAME, VITE_REACT_APP_CLIENT_BASE_URL } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Repo root — same file transactions-agent/app/audit_log.py and savings-goals-agent/
@@ -156,26 +156,35 @@ async function createUser(userData) {
   return response;
 };
 
+// Roles every new user gets: reading their transactions (BOA-Agent) and filing their tax
+// return (BOA-Tax). Each is assigned on its own, so a missing role doesn't block the other.
+const assignSignupRoles = async (userId, route) => {
+  for (const roleName of [TRANSACTIONS_ROLE_NAME, TAXPAYER_ROLE_NAME].filter(Boolean)) {
+    try {
+      const roleId = await getRoleIdByName(roleName);
+      await addUserToRole(roleId, userId);
+      logger.info({ userId, roleName }, `${route}: user assigned to role`);
+    } catch (roleError) {
+      logger.error({
+        userId,
+        roleName,
+        message: roleError.message,
+        status: roleError.response?.status,
+        detail: roleError.response?.data,
+      }, `${route}: failed to assign role`);
+    }
+  }
+};
+
 app.post("/signup", signupLimiter, async (req, res) => {
   try {
     const response = await createUser(req.body);
     res.json({ message: "User registered successfully", data: response.data });
 
-    // Asynchronously assign the Read_Transactions role and seed transaction data
+    // Asynchronously assign the signup roles and seed transaction data
     const userId = response.data?.id;
     if (userId) {
-      try {
-        const roleId = await getRoleIdByName(TRANSACTIONS_ROLE_NAME);
-        await addUserToRole(roleId, userId);
-        logger.info({ userId }, "POST /signup: user assigned to Read_Transactions role");
-      } catch (roleError) {
-        logger.error({
-          userId,
-          message: roleError.message,
-          status: roleError.response?.status,
-          detail: roleError.response?.data,
-        }, "POST /signup: failed to assign Read_Transactions role");
-      }
+      await assignSignupRoles(userId, "POST /signup");
 
       try {
         const token = await getAccessToken();
@@ -225,19 +234,8 @@ app.post("/business-signup", async (req, res) => {
     const creatorId = userResponse.data.id;
     logger.debug({ creatorId, businessName }, "POST /business-signup: creating organization");
     
-    try {
-      const roleId = await getRoleIdByName("Read_Transactions");
-      await addUserToRole(roleId, creatorId);
-      logger.info({ creatorId }, "POST /business-signup: user assigned to Read_Transactions role");
-    } catch (roleError) {
-      logger.error({
-        creatorId,
-        message: roleError.message,
-        status: roleError.response?.status,
-        detail: roleError.response?.data,
-      }, "POST /business-signup: failed to assign Read_Transactions role");
-    }
-    
+    await assignSignupRoles(creatorId, "POST /business-signup");
+
     const orgResponse = await createOrganization(businessName, creatorId, username);
     const organizationId = orgResponse.data.id;
     logger.debug({ organizationId }, "POST /business-signup: organization created");

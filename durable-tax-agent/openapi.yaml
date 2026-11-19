@@ -1,0 +1,299 @@
+openapi: 3.0.1
+info:
+  title: Durable Tax Filing Agent
+  version: 0.2.0
+  description: >-
+    The Ministry of Finance's durable tax agent. The bank's Coordinator starts and follows returns
+    with its agent token; the citizen signs the filing with their own token; a tax officer reviews
+    the evidence for provisional reliefs with theirs.
+# Every operation needs a scope: the token's audience is the same for all callers. The default is
+# the Coordinator's; citizen, officer and public operations override it below.
+security:
+  - ministryAuth: [coordinate_tax_returns]
+paths:
+  /health:
+    get:
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: The service is up
+  /prepare-return:
+    post:
+      operationId: prepareReturn
+      summary: Start a return for a citizen (Coordinator); returns the instance ID and the draft assessment
+      security:
+        - ministryAuth: [coordinate_tax_returns]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrepareReturnRequest"
+            example:
+              gross_income: 52000
+              qualifying_spend: {medical: 900, commuting: 1400, professional_travel: 2000}
+              user_sub: <citizen sub>
+      responses:
+        "201":
+          description: The return was started
+          content:
+            application/json:
+              schema:
+                type: object
+  /tax-returns/{instanceId}:
+    get:
+      operationId: getReturn
+      summary: A return's status, its filing and amendment as soon as they happen, and the final summary (Coordinator)
+      security:
+        - ministryAuth: [coordinate_tax_returns]
+      parameters:
+        - $ref: "#/components/parameters/instanceId"
+      responses:
+        "200":
+          description: The return status
+          content:
+            application/json:
+              schema:
+                type: object
+  /tax-returns/{instanceId}/tasks:
+    get:
+      operationId: listSteps
+      summary: The signature step waiting for the citizen, with the assessment that will be filed (Coordinator)
+      security:
+        - ministryAuth: [coordinate_tax_returns]
+      parameters:
+        - $ref: "#/components/parameters/instanceId"
+      responses:
+        "200":
+          description: Pending citizen steps
+          content:
+            application/json:
+              schema:
+                type: object
+  /approvals/{taskId}:
+    post:
+      operationId: signFiling
+      summary: Sign or decline the filing (the citizen's own token, for the return's citizen)
+      security:
+        - ministryAuth: [file_tax_return]
+      parameters:
+        - $ref: "#/components/parameters/taskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [proceed, reject]
+                feedback:
+                  type: string
+            example:
+              action: proceed
+      responses:
+        "202":
+          description: The signature was recorded
+        "403":
+          description: The token doesn't belong to the return's citizen
+  /my/tax-returns:
+    get:
+      operationId: myReturns
+      summary: The caller's own returns and their status (the citizen's own token)
+      security:
+        - ministryAuth: [file_tax_return]
+      responses:
+        "200":
+          description: The citizen's returns
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+  /officer/claims:
+    get:
+      operationId: listClaims
+      summary: Evidence reviews waiting for an officer, with their deadline (an officer's token)
+      security:
+        - ministryAuth: [review_tax_claims]
+      responses:
+        "200":
+          description: Open claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claims:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        taskId:
+                          type: string
+                        instanceId:
+                          type: string
+                        filingReference:
+                          type: string
+                          description: The filed return's reference, e.g. ASG-2026-8CE098BB
+                        citizen:
+                          type: string
+                          description: The citizen's subject identifier
+                        openedAt:
+                          type: string
+                          format: date-time
+                        deadline:
+                          type: string
+                          format: date-time
+                        claims:
+                          type: array
+                          description: The provisional reliefs under review (category, spend, rate, cap, deduction)
+                          items:
+                            type: object
+                        assessment:
+                          type: object
+                          description: The return as filed
+                        taxIfWithdrawn:
+                          type: number
+                          description: Tax due if the evidence is rejected or the deadline passes
+                        additionalTaxIfWithdrawn:
+                          type: number
+                          description: The increase over the tax due as filed
+  /officer/claims/{taskId}:
+    post:
+      operationId: reviewClaim
+      summary: Accept or reject the evidence for a return's provisional reliefs (an officer's token)
+      security:
+        - ministryAuth: [review_tax_claims]
+      parameters:
+        - $ref: "#/components/parameters/taskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accepted]
+              properties:
+                accepted:
+                  type: boolean
+                note:
+                  type: string
+            example:
+              accepted: false
+              note: No receipts for the March trip
+      responses:
+        "202":
+          description: The review was recorded
+        "403":
+          description: Officers can't review their own return
+  /inbox:
+    get:
+      operationId: inbox
+      summary: The Ministry of Finance home page, with the officer workspace where an officer signs in and reviews claims
+      security: []
+      responses:
+        "200":
+          description: The page
+          content:
+            text/html:
+              schema:
+                type: string
+  /inbox/config:
+    get:
+      operationId: inboxConfig
+      summary: What the home page needs - how it signs officers in, and the published tax rules
+      security: []
+      responses:
+        "200":
+          description: The inbox configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  idpBaseUrl:
+                    type: string
+                  clientId:
+                    type: string
+                  scope:
+                    type: string
+                  taxYear:
+                    type: integer
+                  filingDeadline:
+                    type: string
+                    format: date
+                  reliefs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category:
+                          type: string
+                        label:
+                          type: string
+                        rate:
+                          type: number
+                        cap:
+                          type: number
+                        evidenceRequired:
+                          type: boolean
+                  reviewDeadlineMinutes:
+                    type: integer
+components:
+  securitySchemes:
+    ministryAuth:
+      type: oauth2
+      description: >-
+        Tokens from the identity provider at the agent's idpBaseUrl, whose audience is the agent's
+        expectedAudience (the BOA-Tax client ID). Every caller's token has that audience, so the scope
+        is what tells the Coordinator, a citizen and an officer apart. Besides the scope, a signature must come from
+        the citizen the return was started for, and an officer can't review their own return.
+        The scope names are configured as coordinatorScope, citizenScope and officerScope.
+        Replace ORG_NAME with your organisation, or the host with your identity provider.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://api.asgardeo.io/t/ORG_NAME/oauth2/authorize
+          tokenUrl: https://api.asgardeo.io/t/ORG_NAME/oauth2/token
+          scopes:
+            coordinate_tax_returns: >-
+              Start returns for citizens and follow them. The bank Coordinator's agent identity
+              only.
+            file_tax_return: >-
+              Sign or decline your own tax return, and read your returns. Delegated by the citizen
+              to the bank's assistant (OBO).
+            review_tax_claims: Review the evidence for provisional reliefs. Tax officers only.
+  parameters:
+    instanceId:
+      name: instanceId
+      in: path
+      required: true
+      schema:
+        type: string
+    taskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    PrepareReturnRequest:
+      type: object
+      required: [gross_income, qualifying_spend, user_sub]
+      properties:
+        gross_income:
+          type: number
+        qualifying_spend:
+          type: object
+          additionalProperties:
+            type: number
+        tax_id:
+          type: string
+        user_sub:
+          type: string
+        transaction_id:
+          type: string

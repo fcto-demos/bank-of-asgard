@@ -46,8 +46,9 @@ show_help() {
     echo "                     (omit to keep your existing .env files unchanged)"
     echo "  --amp              Enable WSO2 Agent Manager (AMP) instrumentation"
     echo "                     Supported by: langchain, strands (autogen lacks the required packages)"
-    echo "                     Also instruments savings-goals-agent, which has its own entry in"
-    echo "                     Agent Manager — each agent needs its own AMP_AGENT_API_KEY value."
+    echo "                     Also instruments savings-goals-agent and the durable tax agent, which"
+    echo "                     have their own entries in Agent Manager — each agent needs its own"
+    echo "                     API key (the tax agent's in [ballerinax.amp] in its Config.toml)."
     echo "                     Requires: amp-instrumentation installed in both agent venvs"
     echo "                               AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in transactions-agent/.env"
     echo "                               AMP_OTEL_ENDPOINT and AMP_AGENT_API_KEY in savings-goals-agent/.env"
@@ -161,18 +162,26 @@ SAVINGS_ENV="$ROOT/savings-goals-agent/.env"
 [[ -f "$SAVINGS_PY" ]]  || die "savings-goals-agent venv not found. Run: cd savings-goals-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
 [[ -f "$SAVINGS_ENV" ]] || die "savings-goals-agent/.env not found — copy from savings-goals-agent/.env.example"
 
-# ── Tax agent paths ───────────────────────────────────
-# Optional, unlike the savings agent: when its venv or .env is absent the rest of the
-# demo still starts, minus the two tax tools.
-TAX_PY="$ROOT/tax-agent/venv/bin/python"
-TAX_ENV="$ROOT/tax-agent/.env"
+# ── Tax agent (durable-tax-agent: Ballerina on Temporal) ──────────────────────
+# Optional, unlike the savings agent: without Ballerina, its Config.toml or a way to run
+# Temporal, the rest of the demo still starts, minus the tax tools. Only the langchain
+# coordinator has those tools, so it is skipped for the other agents. The Python tax-agent/
+# is deprecated and no longer started.
+TAX_DIR="$ROOT/durable-tax-agent"
+PORT_TEMPORAL=7233
 TAX_ENABLED=true
-if [[ ! -f "$TAX_PY" ]]; then
+if [[ "$AGENT" != "langchain-agent" ]]; then
     TAX_ENABLED=false
-    warn "tax-agent venv not found — skipping. Run: cd tax-agent && python3.13 -m venv venv && venv/bin/pip install -r requirements.txt"
-elif [[ ! -f "$TAX_ENV" ]]; then
+    info "Tax agent skipped — only the langchain coordinator has the tax tools"
+elif ! command -v bal &>/dev/null; then
     TAX_ENABLED=false
-    warn "tax-agent/.env not found — skipping. Copy from tax-agent/.env.example"
+    warn "bal (Ballerina) not found — skipping the tax agent. Install Ballerina: https://ballerina.io/downloads/"
+elif [[ ! -f "$TAX_DIR/Config.toml" ]]; then
+    TAX_ENABLED=false
+    warn "durable-tax-agent/Config.toml not found — skipping the tax agent. See \"Run locally\" in durable-tax-agent/README.md"
+elif ! (echo >/dev/tcp/localhost/$PORT_TEMPORAL) 2>/dev/null && ! command -v temporal &>/dev/null; then
+    TAX_ENABLED=false
+    warn "Temporal isn't running on port $PORT_TEMPORAL and the temporal CLI isn't installed — skipping the tax agent. See \"Run Temporal\" in durable-tax-agent/README.md"
 fi
 
 # ── Read LLM config ───────────────────────────────────────────────────────────
@@ -200,7 +209,6 @@ AMP_INSTRUMENT="$AGENT_DIR/$AGENT/venv/bin/amp-instrument"
 [[ -f "$AGENT_PY" ]] || die "venv not found for $AGENT — run: python3.13 -m venv transactions-agent/$AGENT/venv && transactions-agent/$AGENT/venv/bin/pip install -r transactions-agent/$AGENT/requirements.txt"
 
 SAVINGS_AMP_INSTRUMENT="$ROOT/savings-goals-agent/venv/bin/amp-instrument"
-TAX_AMP_INSTRUMENT="$ROOT/tax-agent/venv/bin/amp-instrument"
 
 if $USE_AMP; then
     [[ -f "$AMP_INSTRUMENT" ]] || die "amp-instrument not found in $AGENT venv. Install via: $AGENT_DIR/$AGENT/venv/bin/pip install amp-instrumentation"
@@ -214,6 +222,12 @@ if $USE_AMP; then
     grep -q "AMP_OTEL_ENDPOINT" "$SAVINGS_ENV" 2>/dev/null || warn "AMP_OTEL_ENDPOINT not found in savings-goals-agent/.env"
     grep -q "AMP_AGENT_API_KEY" "$SAVINGS_ENV" 2>/dev/null || warn "AMP_AGENT_API_KEY not found in savings-goals-agent/.env"
     ok "AMP instrumentation enabled (transactions-agent + savings-goals-agent, separate keys)"
+
+    # The durable tax agent traces through ballerinax/amp: its endpoint and its own API key
+    # are read from the [ballerinax.amp] section of its Config.toml.
+    if $TAX_ENABLED && ! grep -q '^\[ballerinax\.amp\]' "$TAX_DIR/Config.toml"; then
+        warn "No [ballerinax.amp] section in durable-tax-agent/Config.toml — its traces use the default endpoint, without an API key"
+    fi
 fi
 
 ok "Using agent: ${AGENT_ARG}"
@@ -418,31 +432,55 @@ echo "savings:$!" >> "$PID_FILE"
 
 wait_for_port $PORT_SAVINGS "savings-goals-agent"
 
-# ── Start tax-agent ─────────────────────────────────────
+# ── Start the durable tax agent ───────────────────────────────────────────────
 if $TAX_ENABLED; then
-    section "Starting tax-agent (port $PORT_TAX)"
+    section "Starting the durable tax agent (port $PORT_TAX)"
 
-    if $USE_AMP && [[ -f "$TAX_AMP_INSTRUMENT" ]]; then
-        # Own entry in Agent Manager again — third distinct AMP_AGENT_API_KEY.
-        _tax_amp_var() { grep -E "^$1=" "$TAX_ENV" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'"; }
-        TAX_AMP_OTEL_ENDPOINT=$(_tax_amp_var AMP_OTEL_ENDPOINT)
-        TAX_AMP_AGENT_API_KEY=$(_tax_amp_var AMP_AGENT_API_KEY)
-        TAX_OTEL_CERT=$(_tax_amp_var OTEL_EXPORTER_OTLP_CERTIFICATE || true)
-        TAX_OTEL_CERT="${TAX_OTEL_CERT/#\~/$HOME}"
-        if [[ -n "$TAX_OTEL_CERT" ]]; then
-            [[ -f "$TAX_OTEL_CERT" ]] || die "OTEL_EXPORTER_OTLP_CERTIFICATE points to a missing file: $TAX_OTEL_CERT"
-        fi
-        (export AMP_OTEL_ENDPOINT="$TAX_AMP_OTEL_ENDPOINT" AMP_AGENT_API_KEY="$TAX_AMP_AGENT_API_KEY"
-         if [[ -n "$TAX_OTEL_CERT" ]]; then export OTEL_EXPORTER_OTLP_CERTIFICATE="$TAX_OTEL_CERT"; fi
-         cd "$ROOT/tax-agent" && "$TAX_AMP_INSTRUMENT" "$TAX_PY" server.py \
-            > "$LOG_DIR/tax.log" 2>&1) &
+    # Temporal holds the returns. A Temporal already listening (e.g. one you started
+    # yourself) is reused and left running by stop-demo.sh; otherwise the dev server is
+    # started here, keeping its runs in durable-tax-agent/temporal.db across restarts.
+    if (echo >/dev/tcp/localhost/$PORT_TEMPORAL) 2>/dev/null; then
+        ok "Temporal already running on port $PORT_TEMPORAL — reusing it"
     else
-        (set +u; set -a; source "$TAX_ENV"; set +a; set -u; cd "$ROOT/tax-agent" && "$TAX_PY" server.py \
-            > "$LOG_DIR/tax.log" 2>&1) &
+        (cd "$TAX_DIR" && exec temporal server start-dev --db-filename ./temporal.db \
+            > "$LOG_DIR/temporal.log" 2>&1) &
+        echo "temporal:$!" >> "$PID_FILE"
+        check_launched "$!" "Temporal" "$LOG_DIR/temporal.log"
+        wait_for_port $PORT_TEMPORAL "Temporal"
     fi
-    echo "tax:$!" >> "$PID_FILE"
 
-    wait_for_port $PORT_TAX "tax-agent"
+    # With --amp, turn on the agent's ballerinax/amp tracing; the endpoint and API key
+    # come from Config.toml's [ballerinax.amp] section. Tracing also needs observability
+    # compiled in: without --observability-included every outgoing HTTP call fails
+    # ("the tracer store is not initialized"), including the agent's model calls.
+    (OBSERVABILITY_FLAG=""
+     if $USE_AMP; then
+         export BAL_CONFIG_VAR_BALLERINA_OBSERVE_TRACINGENABLED=true BAL_CONFIG_VAR_BALLERINA_OBSERVE_TRACINGPROVIDER=amp
+         OBSERVABILITY_FLAG="--observability-included"
+     fi
+     cd "$TAX_DIR" && exec bal run $OBSERVABILITY_FLAG > "$LOG_DIR/tax.log" 2>&1) &
+    TAX_PID=$!
+    echo "tax:$TAX_PID" >> "$PID_FILE"
+
+    # bal run compiles before it starts, so allow a few minutes, and stop waiting as soon
+    # as the process ends (a compile or configuration error).
+    info "Waiting for the durable tax agent (bal run compiles first)..."
+    tax_waited=0
+    until (echo >/dev/tcp/localhost/$PORT_TAX) 2>/dev/null; do
+        if ! kill -0 "$TAX_PID" 2>/dev/null; then
+            fail "The durable tax agent exited — last lines of $LOG_DIR/tax.log:"
+            tail -20 "$LOG_DIR/tax.log" 2>/dev/null | sed 's/^/    /'
+            "$SCRIPT_DIR/stop-demo.sh" --quiet 2>/dev/null || true
+            exit 1
+        fi
+        if [[ $tax_waited -ge 300 ]]; then
+            fail "The durable tax agent did not start within 300s — check $LOG_DIR/tax.log"
+            "$SCRIPT_DIR/stop-demo.sh" --quiet 2>/dev/null || true
+            exit 1
+        fi
+        sleep 2; tax_waited=$((tax_waited + 2))
+    done
+    ok "Durable tax agent is up"
 fi
 
 # ── Start server (Express) ────────────────────────────────────────────────────
@@ -505,7 +543,9 @@ echo -e "  ${BOLD}Transactions API${NC}     http://localhost:$PORT_API"
 echo -e "  ${BOLD}Agent ($AGENT_ARG)${NC}           ws://localhost:$PORT_AGENT"
 echo -e "  ${BOLD}Agencies MCP${NC}         sse://localhost:$PORT_MCP"
 echo -e "  ${BOLD}Savings Goals agent${NC} http://localhost:$PORT_SAVINGS"
-$TAX_ENABLED && echo -e "  ${BOLD}Tax agent ${NC} http://localhost:$PORT_TAX" || true
+$TAX_ENABLED && echo -e "  ${BOLD}Tax agent (durable)${NC}  http://localhost:$PORT_TAX/tax-agent" || true
+$TAX_ENABLED && echo -e "  ${BOLD}Ministry of Finance${NC}  http://localhost:$PORT_TAX/tax-agent/inbox" || true
+$TAX_ENABLED && echo -e "  ${BOLD}Temporal UI${NC}          http://localhost:8233" || true
 echo -e "  ${BOLD}Token Flow${NC}           http://localhost:$PORT_SLIDES/token-flow.html"
 echo -e "  ${BOLD}Inside our agents${NC}    http://localhost:$PORT_SLIDES/inside-our-agents.html  (needs an amctl session)"
 echo -e "  ${BOLD}LLM${NC}                  $LLM_PROVIDER / $LLM_MODEL${LLM_VIA}"
@@ -519,7 +559,8 @@ echo -e "    ${BLUE}$LOG_DIR/transactions-api.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/agent.log${NC}          ($AGENT_ARG)"
 echo -e "    ${BLUE}$LOG_DIR/mcp.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/savings.log${NC}"
-$TAX_ENABLED && echo -e "    ${BLUE}$LOG_DIR/tax.log${NC}" || true
+$TAX_ENABLED && echo -e "    ${BLUE}$LOG_DIR/tax.log${NC}            (durable tax agent)" || true
+grep -q '^temporal:' "$PID_FILE" && echo -e "    ${BLUE}$LOG_DIR/temporal.log${NC}" || true
 echo -e "    ${BLUE}$LOG_DIR/server.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/frontend.log${NC}"
 echo -e "    ${BLUE}$LOG_DIR/presentation.log${NC}"
