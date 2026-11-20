@@ -1,5 +1,4 @@
 # The LLM gateway proxy that fronts Anthropic, without a trailing slash, for example
-# `https://local-aigw.apis.coach:8443/boa-llm-v1`. Same value as `GATEWAY_BASE_URL` in `tax-agent/.env`.
 configurable string gatewayBaseUrl = ?;
 
 # The API key the gateway issued to the `boa-tax-agent` application for that proxy.

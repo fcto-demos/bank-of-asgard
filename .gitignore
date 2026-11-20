@@ -76,3 +76,6 @@ app/public/config.asgardeo.js
 agencies-mcp-server/server_poisoned.py
 docs/Migration to Agentic Platform.md
 temporal.db*
+.claude/
+.ruff_cache
+vm_deployment/

@@ -1,33 +1,41 @@
 <img src="./logo.png" width="400" alt="Bank of Asgard" />
 
+------
+
+![wso2-is-now-choreo-labs](./images/wso2-is-now-choreo-labs.png)
+
+------
+
 # Foreword
 
-This demo is an extension/rework of the original Bank of Asgard demo which was built to demonstrate IS CIAM capabilities. The instructions configure the demo only for the purpose of showing WSO2 Agentic platform capabilities. Identity server setup, in particular, is quite different. If you are looking to demo  CIAM/B2B capabilities, get the [original version](https://github.com/asgardeo-samples/bank-of-asgard). 
+This demo is an extension/rework of the original Bank of Asgard demo which was built to demonstrate IS CIAM capabilities. The instructions configure the demo only for the purpose of showing Choreo Labs Agentic platform capabilities. Identity server setup, in particular, is quite different. If you are looking to demo  CIAM/B2B capabilities, get the [original version](https://github.com/asgardeo-samples/bank-of-asgard). 
 
 Using this demo, you can experience:
 
 - AI Guardrails, including gateway-enforced redaction of sensitive profile fields (e.g. date of birth) before they reach the LLM
 - Agentic identity and OBO flows 
+- A2A proxing
 - Agent Management
+- Agentic observabiltiy, FinOps and Insights
 
 # Deployment Architecture
 
 The Asgard assistant is a coordinator agent which can help Asgard customers with transactions information, as well as viewing and updating their basic profile details (name, country, mobile number) via `GetMyProfile`/`UpdateMyProfile`. In its langchain version, it can also give investment recommendations, leveraging sub-agents and the separate savings agent. 
 
-All LLM calls are proxied through the WSO2 AI Gateway. Users management and agent identity are provided by WSO2's Identity platform. Finally, agent observability and governance is provided by Agent Manager.
+All LLM calls are proxied through the AI Gateway. Users management and agent identity are provided by WSO2's Identity platform. Finally, agent observability and governance is provided by Agent Manager.
 
-![](./images/DemoDeployment.jpg)
+![DemoDeployment](./images/DemoDeployment.jpg)
 
 # Requirements
 
-## WSO2 Products
+## Choreo Labs Products
 
 The following products are used in the context of this demo
 
-- WSO2 Identity Platform (on-prem or SaaS) for Agentic Identity, MCP identity and access control.
-- WSO2 AI Gateway for LLM governance and AI guardrails
-- WSO2 Agent Manager for agent observability, governance and hosting
-- WSO2 Moesif for AI and API Analytics
+- Choreo Identity Server 7.2+ (on-prem or SaaS) for Agentic Identity, MCP identity and access control.
+- Choreo AI Gateway [STS 2026-10.0]() on-prem or SaaS  for LLM governance and AI guardrails - The on prem STS version is required as it supports A2A proxies.
+-  Choreo Agent Manager STS version / SaaS for agent observability, governance and hosting
+-   Moesif for AI and API Analytics
 
 ## Tech stack
 
@@ -39,7 +47,7 @@ The following products are used in the context of this demo
 | Transactions Agent (plus subagents, Langchain only) | Python + pip | Python 3.13+ |
 | Agencies MCP Server | Python + pip | Python 3.13+ |
 | Savings Goals Agent (Langchain only) | Python + pip | Python 3.13+ |
-| Tax Agent  (Langchain only, optional) | Ballerina + a Temporal server (`durable-tax-agent/`) | Ballerina Swan Lake 2201.13+ |
+| Tax Agent  (Langchain only, optional) | Ballerina  + a Temporal server (`durable-tax-agent/`) | Ballerina Swan Lake 2201.13+ |
 | Container-based deployment *(optional)* | Docker or Podman | — |
 
 > All Node dependencies are installed via `npm install` inside `app/` and `server/`.
@@ -47,7 +55,7 @@ The following products are used in the context of this demo
 
 ## Identity provider
 
-The following instructions have been last tested in September 2026 against the SaaS Identity Platform (https://console.asgardeo.io) and WSO2 Identity Server **7.2** (VM).
+The following instructions have been last tested in November 2026 against the SaaS Identity Platform (https://console.asgardeo.io) and Choreo Identity Server **7.2** on premises.
 
 # Identity Provider Setup
 
@@ -295,8 +303,6 @@ The ministry's API resource then carries three scopes, one per kind of caller; `
 5. Copy the generated **Client ID** — You will use it to set:
    1. `MCP_CLIENT_ID` in `transactions-agent/.env`
    2. `EXPECTED_AUDIENCE` in `agencies-mcp-server/.env` 
-
-
 
 # Application Setup
 
@@ -656,7 +662,7 @@ The Coordinator reads the card from `SAVINGS_AGENT_A2A_URL` (in `transactions-ag
 
 ### Trace structure (LangChain agent)
 
-With AMP on, the LangChain assistant's traces follow the [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (still at *Development* status), so the kind of each tool call is visible from the span under its `execute_tool {tool}` span rather than from a custom attribute:
+With AMP on, the LangChain assistant's traces follow the [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) so the kind of each tool call is visible from the span under its `execute_tool {tool}` span rather than from a custom attribute:
 
 | Tool kind | Tools | Span under `execute_tool` |
 |-----------|-------|---------------------------|
@@ -671,7 +677,7 @@ HTTP client spans are **off by default**, because Agent Manager doesn't consume 
 
 #### Correlation: conversations, turns and remote agents
 
-Correlation uses only standard OpenTelemetry fields, no Traceloop-specific attributes or headers, so any OTel-aware backend can follow it:
+Correlation uses only standard OpenTelemetry fields so that any OTel-aware backend can follow it:
 
 - **Conversation:** every span carries `gen_ai.conversation.id`, set to the chat session's ID, so all the turns of one session group together. The LangChain and Strands assistants set it once per WebSocket session.
 - **Turn:** each prompt is its own trace, so the trace ID identifies the turn.
@@ -681,7 +687,7 @@ The `X-Transaction-Id` header and the `transaction_id` field in the body (for th
 
 ### Self-signed OTLP endpoints
 
-When `AMP_OTEL_ENDPOINT` is an `https` URL served by a private CA — an OpenChoreo cluster such as `https://default-default.agents.local.apis.coach:19443/otel`, for example — the span exporter fails with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` and retries forever. Python's HTTP stack uses the `certifi` bundle and never reads the macOS Keychain, so adding the CA there fixes `curl` and the browser but not the agent.
+When `AMP_OTEL_ENDPOINT` is an `https` URL served by a private CA,  the span exporter fails with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate` and retries forever.
 
 Export the CA to a PEM file and point `OTEL_EXPORTER_OTLP_CERTIFICATE` at it in that agent's `.env` (each service reads its own — `transactions-agent/.env`, `savings-goals-agent/.env`).
 
@@ -703,7 +709,7 @@ OTEL_EXPORTER_OTLP_CERTIFICATE="~/.openchoreo/ca.pem"
 The variable scopes the trust to OTLP exports only — other TLS calls (gateway, IdP) keep using the default bundle. A leading `~` is expanded by the demo scripts; both `start-demo.sh --amp` and `restart.sh` pass it through to `amp-instrument`, and both fail fast if the file is missing. Each service's cert is exported **inside its own launch subshell**, so one service's bundle can never leak into another's environment. Verify the bundle covers the endpoint with:
 
 ```bash
-openssl s_client -connect default-default.agents.local.apis.coach:19443 </dev/null 2>/dev/null \
+openssl s_client -connect local.amp.test </dev/null 2>/dev/null \
   | openssl x509 > /tmp/leaf.pem && openssl verify -CAfile ~/.openchoreo/ca.pem /tmp/leaf.pem
 ```
 

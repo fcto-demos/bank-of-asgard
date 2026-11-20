@@ -21,8 +21,8 @@ from platform_api import MANAGED_MARKER, secret, setting
 PREFIX = setting("RESOURCE_PREFIX", "boa")
 UPSTREAM_HOST = setting("UPSTREAM_HOST", "host.docker.internal")
 
-# The controller's REST API (the A2A gateway's port 9090, published as 39090 on this
-# laptop), and the HTTPS ingress the agents send A2A traffic to.
+# The controller's REST API (the A2A gateway's container port 9090, or whichever host port
+# it is published on), and the HTTPS ingress the agents send A2A traffic to.
 CONTROLLER_URL = setting("A2A_CONTROLLER_URL").rstrip("/")
 CONTROLLER_USERNAME = setting("A2A_CONTROLLER_USERNAME", "admin")
 CONTROLLER_PASSWORD = secret("A2A_CONTROLLER_PASSWORD")  # environment only, never a file
@@ -55,13 +55,13 @@ def settings_errors() -> list[str]:
     errors = []
     if not CONTROLLER_URL:
         errors.append("A2A_CONTROLLER_URL is not set — the A2A gateway's controller REST API, "
-                      "e.g. http://localhost:39090 — or leave 'a2a' out of --only")
+                      "e.g. http://localhost:9090 — or leave 'a2a' out of --only")
     if not CONTROLLER_PASSWORD:
         errors.append("A2A_CONTROLLER_PASSWORD is not set — the controller admin password the A2A "
                       "gateway's scripts/setup.sh printed; export it in your shell (never stored in a file)")
     if not GATEWAY_URL:
         errors.append("A2A_GATEWAY_URL is not set — the A2A gateway's HTTPS ingress as the agents "
-                      "reach it, e.g. https://local-aigw.apis.coach:38443")
+                      "reach it, e.g. https://gateway.example.com:8443")
     if AUTH not in ("passthrough", "jwt-auth"):
         errors.append(f"A2A_AUTH={AUTH!r} — use 'passthrough' or 'jwt-auth'")
     if not re.fullmatch(r"\d+(\.\d+)?(ms|s|m|h)", TIMEOUT):

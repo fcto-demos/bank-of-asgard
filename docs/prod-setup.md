@@ -1,4 +1,4 @@
-# Production Setup — apis.coach
+# Production Setup — amp.test
 
 Step-by-step guide to deploy Bank of Asgard on a VM behind a DigitalOcean Load Balancer.
 
@@ -9,8 +9,8 @@ Step-by-step guide to deploy Bank of Asgard on a VM behind a DigitalOcean Load B
 ```
 Browser
   │
-  ├─ https://app.apis.coach:444  ──►  DO LB  ──►  VM:5173  (Vite preview — frontend SPA)
-  └─ wss://boa-agent.apis.coach:445  ─►  DO LB  ──►  VM:8011  (uvicorn — transactions agent)
+  ├─ https://app.amp.test:444  ──►  DO LB  ──►  VM:5173  (Vite preview — frontend SPA)
+  └─ wss://boa-agent.amp.test:445  ─►  DO LB  ──►  VM:8011  (uvicorn — transactions agent)
 
 VM also runs (directly, no LB):
   └─ localhost:3002   Node/Express backend server
@@ -27,8 +27,8 @@ Add two A records pointing to the DO LB public IP:
 
 | Hostname | Type | Value |
 |---|---|---|
-| `app.apis.coach` | A | `<LB public IP>` |
-| `boa-agent.apis.coach` | A | `<LB public IP>` |
+| `app.amp.test` | A | `<LB public IP>` |
+| `boa-agent.amp.test` | A | `<LB public IP>` |
 
 ---
 
@@ -47,7 +47,7 @@ In **DO Console → Networking → Load Balancers**:
 
 ### TLS certificate
 
-Attach certificates for `app.apis.coach` and `boa-agent.apis.coach` under the **SSL** tab. Use Let's Encrypt via DO if you don't already have certs.
+Attach certificates for `app.amp.test` and `boa-agent.amp.test` under the **SSL** tab. Use Let's Encrypt via DO if you don't already have certs.
 
 ### Idle timeout (critical for WebSocket)
 
@@ -105,11 +105,11 @@ cp ~/bank-of-asgard/app/public/config.prod.js ~/bank-of-asgard/app/public/config
 Open `config.js` and fill in the two placeholder values:
 
 ```js
-API_BASE_URL:     "https://api.apis.coach",   // URL where server/ is exposed
-API_SERVICE_URL:  "https://api.apis.coach",   // same
+API_BASE_URL:     "https://api.amp.test",   // URL where server/ is exposed
+API_SERVICE_URL:  "https://api.amp.test",   // same
 ```
 
-All other values are already set for the `apis.coach` domain.
+All other values are already set for the `amp.test` domain.
 
 ### 4b. Run the deploy script
 
@@ -138,8 +138,8 @@ Edit `.env` and set the following values:
 
 ```dotenv
 AGENT_APP_ID=<your-client-id>
-IDP_BASE_URL=https://identity.dev.apis.coach:9445
-IDP_REDIRECT_URI=https://boa-agent.apis.coach:445/callback   # ← must match Asgardeo app settings
+IDP_BASE_URL=https://identity.dev.amp.test:9445
+IDP_REDIRECT_URI=https://boa-agent.amp.test:445/callback   # ← must match Asgardeo app settings
 
 TRANSACTIONS_AGENT_ID=<agent-client-id>
 TRANSACTIONS_AGENT_SECRET=<agent-client-secret>
@@ -183,7 +183,7 @@ This will:
 In your Asgardeo console, update the **Allowed redirect URLs** for the agent application to include:
 
 ```
-https://boa-agent.apis.coach:445/callback
+https://boa-agent.amp.test:445/callback
 ```
 
 Remove any `localhost` entries that were used for local development.
@@ -246,8 +246,8 @@ systemctl --user stop bank-of-asgard-agent
 
 | Service | Local | Public |
 |---|---|---|
-| Frontend | `http://0.0.0.0:5173` | `https://app.apis.coach:444` |
-| Agent WebSocket | `http://0.0.0.0:8011` | `wss://boa-agent.apis.coach:445` |
+| Frontend | `http://0.0.0.0:5173` | `https://app.amp.test:444` |
+| Agent WebSocket | `http://0.0.0.0:8011` | `wss://boa-agent.amp.test:445` |
 | Backend server | `http://localhost:6000` | (configure separately) |
 | Transactions API | `http://localhost:8010` | (internal only) |
 

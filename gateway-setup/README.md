@@ -26,15 +26,15 @@ AI Workspace can't manage A2A gateways yet. So the `a2a` part skips it and creat
 
 | Setting | Meaning |
 |---|---|
-| `A2A_CONTROLLER_URL` | The controller REST API (container port 9090), e.g. `http://localhost:39090` |
+| `A2A_CONTROLLER_URL` | The controller REST API (container port 9090), e.g. `http://localhost:9090` |
 | `A2A_CONTROLLER_USERNAME` / `A2A_CONTROLLER_PASSWORD` | The admin that the gateway's `scripts/setup.sh` created. The password is printed once: export it in your shell, it is never read from a file. |
-| `A2A_GATEWAY_URL` | The HTTPS ingress as the agents reach it, e.g. `https://local-aigw.apis.coach:38443`. `SAVINGS_AGENT_A2A_URL` becomes this plus `/boa-savings`. |
+| `A2A_GATEWAY_URL` | The HTTPS ingress as the agents reach it, e.g. `https://gateway.example.com:8443`. `SAVINGS_AGENT_A2A_URL` becomes this plus `/boa-savings`. |
 | `SAVINGS_A2A_UPSTREAM` | Where the gateway reaches the agent (default `http://host.docker.internal:8013`) |
 | `A2A_AUTH`, `A2A_TIMEOUT` | See "Agent authentication" below. The proxy's timeout defaults to `90s`, matching the Coordinator's, since the v2 demo mode runs several LLM rounds per request. |
 
 An Agent has no description field, so the installer marks its own with the annotation `bank-of-asgard.gateway-setup/managed-by`, which `teardown.py` checks. The gateway serves the agent's card in passthrough mode: it fetches the card from the agent on each request and rewrites its URLs from the scheme and host the caller used. So the Coordinator, which reads the card from `SAVINGS_AGENT_A2A_URL`, sends its messages through the proxy too. No `config.toml` setting is needed, even when the gateway's host port differs from its container port. The gateway strips only the context, so the binding prefixes (`/`, `/v1`) must be the paths the agent serves; `a2a_server.py` uses exactly those. The gateway speaks A2A 1.0 only and rejects operation requests without an `A2A-Version: 1.0` header; the Coordinator's a2a-sdk client always sends it.
 
-On this laptop, the A2A gateway is a third gateway beside the LLM and MCP ones, with host ports offset by +30000: HTTPS ingress 38443, HTTP 38080, controller 39090. Its listener uses the same `*.apis.coach` certificate as the others.
+When the A2A gateway runs on the same machine as your LLM or MCP gateway, publish its container ports on different host ports in its `docker-compose.yaml`, and use those host ports in `A2A_CONTROLLER_URL` and `A2A_GATEWAY_URL`. For example, add a fixed offset so HTTPS 8443 is published as 18443 and the controller's 9090 as 19090. If the agents reach the gateway by host name over HTTPS, give its listener a certificate for that name (`resources/listener-certs/`) instead of the self-signed `localhost` one.
 
 Both proxies also carry `llm-cost` (turn it off with `PROXY_LLM_COST=false`). It prices every call from the gateway's `model_prices.json` and records the cost in the request's analytics metadata as `x-llm-cost` (USD). That's where Moesif, or any other analytics publisher, finds it; it's never sent back in a response header. A provider created by the installer carries `llm-cost` too. A reused provider is never written, so `--check` warns if it lacks one. A cost budget on a proxy needs the proxy's own `llm-cost`: the provider's runs on the request the proxy forwards to it, and its result never reaches the proxy.
 
